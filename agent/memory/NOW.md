@@ -1,8 +1,8 @@
 # AGORA / Checkpoint
 **Data:** 2026-10-22
-**Estado real (verificado):** 1ª sincronização real (2026-10-23 02:16) NÃO importou nada: a conexão tinha companyRef preenchido (14 caracteres, provável CNPJ) e o K3G CRM não informa empresa por cliente → 122 conflitos "ambiguous_company", 0 criados. Causa: texto da tela induziu o preenchimento + motor gerava conflito até para prospects e não encerrava conflitos obsoletos. CORRIGIDO e publicado (prospect só é ignorado; conflitos que deixam de valer viram `obsolete` e perdem o payload; aviso na prévia quando só há conflitos; rótulo do campo). companyRef limpo em prod (ops, auditado). Clientes no banco: 0; 122 conflitos antigos abertos serão encerrados na próxima aplicação. Plano atual: 63 novos + 1 conflito (CNPJ duplicado no CRM) + 58 ignorados (prospects) + 24 inválidos. SANDBOX PASS (79 unit/int + 42 e2e).
+**Estado real (verificado):** E04 (contratos locais + versões/aprovação + calendário de faturamento + feriados) implementado e commitado LOCALMENTE (e376e90), SANDBOX PASS (113 unit/int + 43 e2e); aguarda revisão Codex antes de deploy/push. Decisões de provedores (ADR-014): Cora (credenciais ainda não existem → simulado), NFS-e da Cora (beta), WhatsApp WAHA (risco de bloqueio ciente), e-mail SMTP do domínio. Integração K3G CRM: 63 clientes aguardam nova sincronização (companyRef corrigido).
 
 **Entrega ativa:** E01 (login + shell + dashboard DEMO).
-**Próxima ação:** usuário refaz Integrações → Revisar → Confirmar e aplicar (deve mostrar 63 novos); depois resolver o 1 conflito; E04.0 finance/calc + E04 contratos locais.
+**Próxima ação:** (1) tratar achados do Codex do E04, deploy (migração 0010) + push; (2) E05 prévia+aprovação de lote; (3) E06 templates/fila (simulação); (4) E09 adapters (mocks) + agendador; (5) E10 real por provedor quando houver credenciais/autorização.
 **Bloqueios:** nenhum.
 **Git:** branch main, sem push/tag.
