@@ -10,3 +10,4 @@
 - E03: clientes e fornecedores (CRUD, busca, CNPJ alfanumérico, contatos, histórico, arquivar, importar/exportar CSV). Sandbox `pnpm sandbox`. Seed não altera vínculos existentes.
 - E03b: integração CRM (somente leitura): adaptador canônico + mock + HTTP, sincronização com prévia e confirmação por hash, conflitos, cadastros do CRM somente leitura, tela Integrações. Banco realinhado ao desenho (customers/vendors). Protótipo de design (Lovable) revisado.
 - Dois cenários de clientes por empresa: Local (padrão) ou CRM (somente leitura). Regra no servidor, serializada com travas; troca auditada; CHECK no banco.
+- Fix 1ª sincronização real: prospect não gera conflito de empresa; conflitos que deixam de valer são encerrados (obsolete, sem payload); aviso quando a prévia só tem conflitos; campo "identificação da empresa" explica que deve ficar em branco para o K3G CRM.

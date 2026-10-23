@@ -328,6 +328,24 @@ describe.skipIf(!enabled)("CRM sync: prévia, aplicação idempotente, conflitos
     expect(await listConflicts(db, dirA, A)).toHaveLength(1);
   });
 
+  it("companyRef configurado mas o CRM não informa a empresa: só quem é cliente gera conflito (prospect é ignorado); corrigir a configuração fecha os conflitos antigos", async () => {
+    await saveConnection(db, dirA, A, { enabled: true, companyRef: "CNPJ-ERRADO" }); // o K3G CRM não manda companyRef
+    const m = new MockCrmAdapter([
+      item(), item({ externalId: "c2", legalName: "Cliente Dois", document: CNPJ2, status: "cancelado" }),
+      item({ externalId: "p1", legalName: "Prospect Um", document: CPF1, active: false }),   // prospect
+    ]);
+    expect(await applyNow(db, m, dirA, A, ON)).toMatchObject({ create: 0, conflict: 2, skipped: 1 }); // 2 clientes ambíguos; o prospect NÃO vira conflito
+    expect((await listConflicts(db, dirA, A)).map((c) => c.reason)).toEqual(["ambiguous_company", "ambiguous_company"]);
+    expect(await total()).toBe(0);
+
+    await saveConnection(db, dirA, A, { enabled: true }); // configuração corrigida: sem companyRef
+    expect(await applyNow(db, m, dirA, A, ON)).toMatchObject({ create: 2, conflict: 0 });
+    expect(await total()).toBe(2);
+    expect(await listConflicts(db, dirA, A)).toHaveLength(0); // os antigos foram encerrados
+    const rows = await db.select().from(schema.integrationConflicts);
+    expect(rows.every((r) => r.status === "obsolete" && JSON.stringify(r.payload) === "{}")).toBe(true); // sem nome/documento retidos
+  });
+
   it("auditoria e execuções guardam só contagens (sem PII)", async () => {
     await applyNow(db, new MockCrmAdapter([item({ legalName: "Segredo Silva", contacts: [{ name: "Maria", email: "maria@x.com" }] })]), dirA, A, ON);
     const logs = JSON.stringify(await db.select().from(schema.auditLog).where(sql`action = 'crm.sync.applied'`));

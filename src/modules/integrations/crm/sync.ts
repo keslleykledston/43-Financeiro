@@ -91,6 +91,7 @@ export function buildPlan(rows: Row[], ignored: Set<string>, raw: unknown[], com
     seenExt.add(c.externalId);
     const doc = parseDocument(c.document);
     if (!doc) { plan.stats.invalid++; continue; }
+    if (!c.active && !byExt.has(c.externalId)) { plan.stats.skipped++; continue; } // não é cliente (ex.: prospect) e nunca foi importado: nada a decidir
     if (companyRef) {
       if (c.companyRef === undefined) { conflict(c, "ambiguous_company", doc.digits); continue; }
       if (c.companyRef !== companyRef) { plan.stats.skipped++; continue; } // pertence a outra empresa
@@ -212,6 +213,12 @@ export async function applySync(db: DB, adapter: CrmAdapter, actorId: string, co
       await t.update(customers).set({ archivedAt: now, externalSyncedAt: now, updatedAt: now })
         .where(and(eq(customers.companyId, companyId), inArray(customers.id, plan.archive.map((a) => a.localId))));
     }
+    // conflitos abertos que o plano atual não gera mais (ex.: configuração corrigida) são encerrados e perdem o payload (nome/documento)
+    const stillOpen = new Set(plan.conflicts.map((c) => `${c.externalId}|${c.reason}`));
+    const open = await t.select().from(integrationConflicts).where(and(eq(integrationConflicts.companyId, companyId), eq(integrationConflicts.status, "open")));
+    const stale = open.filter((c) => !stillOpen.has(`${c.externalId}|${c.reason}`)).map((c) => c.id);
+    if (stale.length) await t.update(integrationConflicts).set({ status: "obsolete", payload: {}, resolvedAt: now, updatedAt: now })
+      .where(and(eq(integrationConflicts.companyId, companyId), inArray(integrationConflicts.id, stale)));
     const [run] = await t.insert(integrationSyncRuns).values({ companyId, kind: "crm", status: "applied", stats: plan.stats, confirmedBy: actorId, finishedAt: now }).returning({ id: integrationSyncRuns.id });
     for (const c of plan.conflicts) {
       await t.insert(integrationConflicts).values({ companyId, runId: run.id, entity: "customer", externalId: c.externalId, reason: c.reason, localId: c.localId, payload: { legalName: c.legalName, document: c.document } }).onConflictDoNothing();

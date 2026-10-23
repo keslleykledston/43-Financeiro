@@ -20,6 +20,9 @@ export function SyncPanel() {
           <p role="status" className="text-sm">
             <strong>{st.create}</strong> novos · <strong>{st.update}</strong> alterados · <strong>{st.archive}</strong> a arquivar · <strong>{st.restore}</strong> a restaurar · <strong>{st.conflict}</strong> conflitos · {st.unchanged} sem mudança · {st.invalid} inválidos · {st.skipped} ignorados
           </p>
+          {st.create === 0 && st.update === 0 && st.conflict > 0 && (
+            <div role="note" className="rounded-md bg-warning-soft p-3 text-sm text-warning-foreground">Só há conflitos e nenhum cliente novo. Antes de confirmar, confira a configuração da conexão (por exemplo, a "identificação desta empresa no CRM", que deve ficar em branco para o K3G CRM).</div>
+          )}
           <ul className="max-h-72 space-y-1 overflow-auto text-sm">
             {pv.sample!.create.map((x, i) => <li key={`c${i}`}>＋ {x.legalName} <span className="text-muted-foreground">{x.document}</span>{x.status !== "ativo" && <span className="ml-1 text-warning-foreground">({x.status})</span>}</li>)}
             {pv.sample!.update.map((x, i) => <li key={`u${i}`}>✎ {x.legalName}{x.status !== "ativo" && <span className="ml-1 text-warning-foreground">({x.status})</span>}</li>)}

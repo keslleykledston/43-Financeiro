@@ -18,7 +18,8 @@ loadEnvConfig(process.cwd());
 
   const before = { mode: await readCustomerMode(db, c.id), enabled: (await getConnection(db, c.id))?.enabled ?? false };
   await setCustomerMode(db, u.id, c.id, "crm");        // exige integrations.manage + crm.write (diretoria): a regra de permissão vale também aqui
-  await saveConnection(db, u.id, c.id, { enabled: true });
+  const ref = process.env.OPS_COMPANY_REF; // definido (mesmo vazio) = substitui a identificação; ausente = limpa também (padrão do K3G CRM)
+  await saveConnection(db, u.id, c.id, { enabled: true, companyRef: ref || undefined });
   await db.insert(auditLog).values({ companyId: c.id, actorId: u.id, action: "ops.crm_enabled_by_assistant", detail: { from: before, via: "assistente (Claude Code), a pedido do usuário" } });
   const after = { mode: await readCustomerMode(db, c.id), enabled: (await getConnection(db, c.id))?.enabled ?? false };
   console.log(`${company}: antes=${JSON.stringify(before)} depois=${JSON.stringify(after)}`);
