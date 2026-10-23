@@ -1,8 +1,8 @@
 # AGORA / Checkpoint
-**Data:** 2026-10-22
-**Estado real (verificado):** E04 (contratos locais + versões/aprovação + calendário de faturamento + feriados) implementado e commitado LOCALMENTE (e376e90), SANDBOX PASS (113 unit/int + 43 e2e); aguarda revisão Codex antes de deploy/push. Decisões de provedores (ADR-014): Cora (credenciais ainda não existem → simulado), NFS-e da Cora (beta), WhatsApp WAHA (risco de bloqueio ciente), e-mail SMTP do domínio. Integração K3G CRM: 63 clientes aguardam nova sincronização (companyRef corrigido).
-
-**Entrega ativa:** E01 (login + shell + dashboard DEMO).
-**Próxima ação:** (1) tratar achados do Codex do E04, deploy (migração 0010) + push; (2) E05 prévia+aprovação de lote; (3) E06 templates/fila (simulação); (4) E09 adapters (mocks) + agendador; (5) E10 real por provedor quando houver credenciais/autorização.
+**Data:** 2026-10-23
+**Estado real (verificado):** E04 (contratos + calendário + feriados) revisado pelo Codex (sem P0; P1 precisão monetária e 2 P2 corrigidos, ver agent/reviews/2026-10-23-codex-e04-contratos-calendario.md) + "Minha conta" (troca de senha, pedido do usuário antes do E05). SANDBOX PASS 117 unit/int + 44 e2e. Migrações 0010 e 0011. Decisões de provedores em ADR-014 (Cora simulada até haver credenciais; NFS-e Cora beta; WAHA; SMTP).
+**Operação:** senha do admin redefinida em 2026-10-23 (arquivo privado fora do Git, auditada); usuário deve trocá-la em /conta e apagar o arquivo.
+**Pendente do usuário:** refazer a sincronização do CRM em Integrações (esperado: 63 novos + 1 conflito de CNPJ duplicado).
+**Próxima ação:** (1) E05 prévia + aprovação de lote; (2) E06 templates/fila (simulação); (3) E09 adapters (mocks) + agendador; (4) E10 real por provedor só com credenciais + autorização; depois E07, E08, E11, E12.
 **Bloqueios:** nenhum.
-**Git:** branch main, sem push/tag.
+**Git:** branch main; sem tag/force.

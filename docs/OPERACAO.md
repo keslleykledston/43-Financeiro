@@ -18,3 +18,13 @@
 3. Preservar logs e auditoria; nunca limpar registros de movimento financeiro.
 4. Restaurar serviço de forma reprodutível; aplicar correção revisada.
 5. Registrar postmortem/ADR para evitar recorrência.
+
+## Rollback de migrações (Drizzle não gera "down")
+Regra: antes de `pnpm db:migrate` em produção, `scripts/backup.sh`. A reversão é **restaurar o backup** (`docs/DEPLOY.md`, `scripts/restore-test.sh` valida o formato) ou aplicar o SQL inverso abaixo se nada foi gravado nas estruturas novas. Primeiro subir de volta a imagem anterior do `web` (compatível com o esquema antigo), depois reverter o banco.
+
+| Migração | O que faz | Reversão manual (só se as tabelas/colunas novas estiverem vazias ou descartáveis) |
+|---|---|---|
+| 0010 | cria `contracts`, `contract_versions`, `holidays` | `DROP TABLE contract_versions; DROP TABLE contracts; DROP TABLE holidays;` (nessa ordem; perde contratos/feriados cadastrados) |
+| 0011 | CHECK de valor máximo em `contracts`; estado `substituida` em `contract_versions` | `ALTER TABLE contracts DROP CONSTRAINT contracts_amount_chk; ALTER TABLE contracts ADD CONSTRAINT contracts_amount_chk CHECK (monthly_amount > 0);` e, se não houver versão `substituida`, recriar `contract_versions_state_chk` com 3 estados. Com versões `substituida` existentes, restaurar o backup. |
+
+Cada nova migração deve acrescentar sua linha nesta tabela no mesmo commit.

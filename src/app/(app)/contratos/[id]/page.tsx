@@ -13,7 +13,7 @@ import { ContractForm } from "../contract-form";
 import { decideAction, proposeAction, statusAction } from "../actions";
 
 const TONE: Record<ContractStatus, StatusTone> = { rascunho: "info", ativo: "positive", suspenso: "warning", encerrado: "neutral" };
-const VTONE = { pendente: "info", aprovada: "positive", rejeitada: "negative" } as const;
+const VTONE = { pendente: "info", aprovada: "positive", rejeitada: "negative", substituida: "neutral" } as const;
 const brMoney = (c: number) => (c / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); // 250000 → "2.500,00" (aceito pelo parser estrito)
 
 export default async function Detalhe({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ erro?: string; proposta?: string }> }) {

@@ -4,6 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
 import { auditLog, invitations, memberships, users } from "@/lib/db/schema";
 import { can, canGrant, type Permission, type Role } from "./permissions";
+import { clear, hit } from "@/lib/security/rate-limit";
 
 export class Forbidden extends Error { constructor(m = "Acesso negado") { super(m); } }
 export class Invalid extends Error {}
@@ -88,4 +89,25 @@ export async function removeMember(db: DB, actorId: string, companyId: string, m
     await tx.update(memberships).set({ status: "removed", updatedAt: new Date() }).where(eq(memberships.id, m.id));
     await tx.insert(auditLog).values({ companyId, actorId, action: "member.removed", detail: { userId: m.userId } });
   });
+}
+
+export const MIN_PASSWORD = 12;
+/** Troca de senha pelo próprio usuário: exige a senha atual (sessão sozinha não basta), limita tentativas e audita (sem valores). */
+export async function changePassword(db: DB, userId: string, current: string, next: string) {
+  if (next.length < MIN_PASSWORD) throw new Invalid(`A nova senha deve ter ao menos ${MIN_PASSWORD} caracteres`);
+  if (next.length > 256) throw new Invalid("Senha longa demais");
+  if (next === current) throw new Invalid("A nova senha deve ser diferente da atual");
+  if (await hit(db, `pwchange:${userId}`, 5, 15 * 60_000)) throw new Invalid("Muitas tentativas. Aguarde 15 minutos.");
+  const [u] = await db.select().from(users).where(eq(users.id, userId));
+  if (!u || u.disabledAt) throw new Forbidden();
+  if (!(await argon2.verify(u.passwordHash, current).catch(() => false))) {
+    await db.insert(auditLog).values({ actorId: userId, action: "auth.password_change.failed" });
+    throw new Invalid("Senha atual incorreta");
+  }
+  const passwordHash = await argon2.hash(next, { type: argon2.argon2id });
+  await db.transaction(async (tx) => {
+    await tx.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, userId));
+    await tx.insert(auditLog).values({ actorId: userId, action: "auth.password_changed" });
+  });
+  await clear(db, `pwchange:${userId}`);
 }

@@ -27,7 +27,7 @@ export function parseTerms(input: unknown): Terms {
   const p = termsSchema.safeParse(input);
   if (!p.success) throw new Invalid(p.error.issues[0]?.message ?? "Dados inválidos");
   const cents = parseMoneyToCents(p.data.monthlyAmount);
-  if (cents === null || cents <= 0) throw new Invalid("Valor mensal inválido (use o formato 2.500,00)");
+  if (cents === null || cents <= 0) throw new Invalid("Valor mensal inválido (use o formato 2.500,00; máximo 99.999.999.999,99)");
   if (p.data.endAt && p.data.endAt < p.data.startAt) throw new Invalid("O fim da vigência não pode ser anterior ao início");
   if (p.data.issueDayOverride && p.data.issueDayOverride > p.data.dueDay) throw new Invalid("O dia de emissão não pode ser posterior ao dia de vencimento");
   return { description: p.data.description, monthlyAmountCents: cents, startAt: p.data.startAt, endAt: p.data.endAt, dueDay: p.data.dueDay, invoiceJointRequired: p.data.invoiceJointRequired, issueDayOverride: p.data.issueDayOverride };
@@ -78,11 +78,13 @@ export async function proposeChange(db: DB, actorId: string, companyId: string, 
     const vs = await x.select().from(contractVersions).where(and(eq(contractVersions.contractId, contractId), eq(contractVersions.companyId, companyId))).orderBy(desc(contractVersions.version));
     const pending = vs.find((v) => v.state === "pendente");
     if (c.status === "rascunho") {
-      if (pending) { // ainda não aprovado: corrige a própria versão pendente
-        await x.update(contractVersions).set({ terms: t, requestedBy: actorId, reason: reason ?? pending.reason, updatedAt: new Date() }).where(eq(contractVersions.id, pending.id));
+      if (pending) { // ainda não aprovado: a versão anterior fica no histórico (imutável) como "substituida"
+        await x.update(contractVersions).set({ state: "substituida", decidedBy: actorId, decidedAt: new Date(), decisionNote: "Substituída por nova edição do rascunho", updatedAt: new Date() }).where(eq(contractVersions.id, pending.id));
+        const version = (vs[0]?.version ?? 0) + 1;
+        await x.insert(contractVersions).values({ companyId, contractId, version, state: "pendente", terms: t, reason: reason ?? pending.reason, requestedBy: actorId });
         await x.update(contracts).set({ ...columns(t), updatedAt: new Date() }).where(eq(contracts.id, c.id));
-        await audit(x, companyId, actorId, "contract.draft_updated", { contractId });
-        return pending.version;
+        await audit(x, companyId, actorId, "contract.draft_updated", { contractId, version, replaced: pending.version });
+        return version;
       }
     } else {
       if (pending) throw new Invalid("Já existe uma alteração pendente de aprovação para este contrato");

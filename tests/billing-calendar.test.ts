@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../fixtures/billing_calendar_cases.json";
 import { addMonths, billingSchedule, daysInMonth, nationalHolidays } from "@/modules/billing/calendar";
-import { centsFromNumeric, numericFromCents, parseMoneyToCents } from "@/lib/money";
+import { MAX_CENTS, centsFromNumeric, numericFromCents, parseMoneyToCents } from "@/lib/money";
 
 type Case = { competenceMonth: string; dueDate?: string; dueDay?: number; dueMonth?: string; jointInvoice: boolean; issueDate?: string; review: boolean; reason?: string };
 
@@ -77,6 +77,19 @@ describe("calendário — regras e bordas (E04: dias 1, 5, 12, 13, 16, 17, 22, 2
 });
 
 describe("dinheiro em centavos", () => {
+  it("P1 Codex: dinheiro fora do teto seguro é recusado na entrada e falha alto na leitura/escrita", () => {
+    expect(parseMoneyToCents("99.999.999.999,99")).toBe(MAX_CENTS);
+    expect(parseMoneyToCents("100.000.000.000,00")).toBeNull();
+    expect(parseMoneyToCents("99999999999999999999")).toBeNull();
+    expect(centsFromNumeric("99999999999.99")).toBe(MAX_CENTS);
+    expect(() => centsFromNumeric("9999999999999999.99")).toThrow(RangeError); // numeric(18,2) aceitaria; Number perderia precisão
+    expect(() => centsFromNumeric("abc")).toThrow(RangeError);
+    expect(() => numericFromCents(MAX_CENTS + 1)).toThrow(RangeError);
+    expect(() => numericFromCents(1.5)).toThrow(RangeError);
+    expect(() => numericFromCents(-1)).toThrow(RangeError);
+    expect(numericFromCents(MAX_CENTS)).toBe("99999999999.99");
+  });
+
   it("entrada pt-BR estrita", () => {
     expect(parseMoneyToCents("2.500,00")).toBe(250000); expect(parseMoneyToCents("R$ 1.234,56")).toBe(123456); expect(parseMoneyToCents("2500")).toBe(250000);
     expect(parseMoneyToCents("0,5")).toBe(50); expect(parseMoneyToCents("2.500")).toBe(250000);

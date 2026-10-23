@@ -8,7 +8,7 @@ import * as schema from "@/lib/db/schema";
 import type { DB } from "@/lib/db";
 import { hit, loginBlocked } from "@/lib/security/rate-limit";
 import argon2 from "argon2";
-import { acceptInvite, activeRole, isUserActive, Forbidden, Invalid, inviteMember, listMembers, removeMember, INVITE_TTL_MS } from "@/modules/identity/service";
+import { acceptInvite, activeRole, changePassword, isUserActive, Forbidden, Invalid, inviteMember, listMembers, removeMember, INVITE_TTL_MS } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
 
 const enabled = !!process.env.POSTGRES_USER;
@@ -86,6 +86,28 @@ describe.skipIf(!enabled)("identidade: isolamento multiempresa e RBAC (DB de tes
     expect(await activeRole(db, dirB, A)).toBe("gerente");
     const [u] = await db.select().from(schema.users).where(sql`id = ${dirB}`);
     expect(await argon2.verify(u.passwordHash, real)).toBe(true); // senha não foi trocada pelo link
+  });
+
+  it("troca de senha: exige a atual, mínimo 12, diferente da atual, audita sem valores e limita tentativas", async () => {
+    const atual = "senha-atual-do-usuario-1", nova = "senha-nova-do-usuario-22";
+    await db.update(schema.users).set({ passwordHash: await argon2.hash(atual) }).where(sql`id = ${asstA}`);
+    await expect(changePassword(db, asstA, "errada-errada-errada", nova)).rejects.toThrow(/atual incorreta/);
+    await expect(changePassword(db, asstA, atual, "curta")).rejects.toThrow(/12 caracteres/);
+    await expect(changePassword(db, asstA, atual, atual)).rejects.toThrow(/diferente/);
+    const [u0] = await db.select().from(schema.users).where(sql`id = ${asstA}`);
+    expect(await argon2.verify(u0.passwordHash, atual)).toBe(true); // nada mudou nas recusas
+    await changePassword(db, asstA, atual, nova);
+    const [u1] = await db.select().from(schema.users).where(sql`id = ${asstA}`);
+    expect(await argon2.verify(u1.passwordHash, nova)).toBe(true); expect(await argon2.verify(u1.passwordHash, atual)).toBe(false);
+    const audits = await db.select().from(schema.auditLog).where(sql`actor_id = ${asstA} and action like 'auth.password%'`);
+    expect(audits.map((a) => a.action).sort()).toEqual(["auth.password_change.failed", "auth.password_changed"]);
+    expect(JSON.stringify(audits)).not.toContain(nova); expect(JSON.stringify(audits)).not.toContain(atual);
+    // força bruta com a sessão roubada: 5 tentativas erradas e bloqueia, mesmo com a senha certa
+    for (let i = 0; i < 5; i++) await changePassword(db, asstA, "errada-errada-errada", "outra-senha-nova-33").catch(() => {});
+    await expect(changePassword(db, asstA, nova, "outra-senha-nova-33")).rejects.toThrow(/Muitas tentativas/);
+    // outro usuário não é afetado pelo bloqueio
+    await db.update(schema.users).set({ passwordHash: await argon2.hash(atual) }).where(sql`id = ${dirA}`);
+    await changePassword(db, dirA, atual, nova);
   });
 
   it("P1: conta desabilitada deixa de ser ativa", async () => {

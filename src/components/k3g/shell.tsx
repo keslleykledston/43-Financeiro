@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
-import { FlaskConical, LogOut } from "lucide-react";
+import { FlaskConical, KeyRound, LogOut } from "lucide-react";
 import { buttonClass } from "./button";
+import { AppLink } from "./app-link";
 
 export function DemoBanner() {
   return (
@@ -30,7 +31,8 @@ export function UserMenu({ name, email, role, logout }: { name: string; email: s
       </summary>
       <div className="absolute right-0 z-50 mt-2 w-60 rounded-lg border bg-popover p-2 text-popover-foreground shadow-md">
         <div className="px-2 py-1.5"><p className="text-sm font-medium">{name}</p><p className="truncate text-xs text-muted-foreground">{email}</p><p className="mt-1 text-xs text-muted-foreground">Papel: {role}</p></div>
-        <form action={logout} className="mt-1 border-t pt-1">
+        <div className="mt-1 border-t pt-1"><AppLink href="/conta" className={buttonClass("ghost", "md", "w-full justify-start")}><KeyRound className="size-4" aria-hidden /> Minha conta</AppLink></div>
+        <form action={logout}>
           <button className={buttonClass("ghost", "md", "w-full justify-start")}><LogOut className="size-4" aria-hidden /> Sair</button>
         </form>
       </div>

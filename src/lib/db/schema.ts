@@ -186,7 +186,7 @@ export const contracts = pgTable("contracts", {
   check("contracts_status_chk", sql`${t.status} in ('rascunho', 'ativo', 'suspenso', 'encerrado')`),
   check("contracts_due_day_chk", sql`${t.dueDay} between 1 and 31`),
   check("contracts_issue_day_chk", sql`${t.issueDayOverride} is null or ${t.issueDayOverride} between 1 and 28`),
-  check("contracts_amount_chk", sql`${t.monthlyAmount} > 0`),
+  check("contracts_amount_chk", sql`${t.monthlyAmount} > 0 and ${t.monthlyAmount} <= 99999999999.99`),
   check("contracts_dates_chk", sql`${t.endAt} is null or ${t.endAt} >= ${t.startAt}`),
   check("contracts_fiscal_chk", sql`${t.fiscalPolicyStatus} in ('pendente', 'definida')`),
 ]);
@@ -196,7 +196,7 @@ export const contractVersions = pgTable("contract_versions", {
   companyId: uuid("company_id").notNull().references(() => companies.id),
   contractId: uuid("contract_id").notNull(),
   version: integer("version").notNull(),
-  state: text("state").notNull().default("pendente"), // pendente | aprovada | rejeitada
+  state: text("state").notNull().default("pendente"), // pendente | aprovada | rejeitada | substituida (rascunho reenviado)
   terms: jsonb("terms").notNull(), // {description, monthlyAmountCents, startAt, endAt, dueDay, invoiceJointRequired, issueDayOverride}
   reason: text("reason"),
   requestedBy: uuid("requested_by").notNull().references(() => users.id),
@@ -207,7 +207,7 @@ export const contractVersions = pgTable("contract_versions", {
   foreignKey({ columns: [t.companyId, t.contractId], foreignColumns: [contracts.companyId, contracts.id] }),
   unique("contract_versions_uq").on(t.contractId, t.version),
   uniqueIndex("contract_versions_one_pending_uq").on(t.contractId).where(sql`${t.state} = 'pendente'`), // no máximo uma alteração pendente por contrato
-  check("contract_versions_state_chk", sql`${t.state} in ('pendente', 'aprovada', 'rejeitada')`),
+  check("contract_versions_state_chk", sql`${t.state} in ('pendente', 'aprovada', 'rejeitada', 'substituida')`),
 ]);
 
 // Feriados municipais/estaduais por empresa (os nacionais vêm do código). Política de feriado: revisão humana (PRD §4).

@@ -103,6 +103,33 @@ describe.skipIf(!enabled)("Contratos e calendário de faturamento (DB de teste)"
     expect(c).toMatchObject({ amountCents: 300000, dueDay: 10 }); expect(c.versions).toHaveLength(3);
   });
 
+  it("P2 Codex: reenvio de rascunho preserva a versão anterior como \"substituida\" (histórico imutável, 1 pendente)", async () => {
+    const c = await createContract(db, asstA, A, cliA, terms({ monthlyAmount: "1.000,00" }));
+    expect(await proposeChange(db, asstA, A, c.id, terms({ monthlyAmount: "1.200,00" }))).toBe(2);
+    expect(await proposeChange(db, gerA, A, c.id, terms({ monthlyAmount: "1.300,00" }))).toBe(3);
+    const full = (await getContract(db, dirA, A, c.id))!;
+    const byV = Object.fromEntries(full.versions.map((v) => [v.version, v]));
+    expect(full.versions).toHaveLength(3);
+    expect([byV[1].state, byV[2].state, byV[3].state]).toEqual(["substituida", "substituida", "pendente"]);
+    expect(byV[1].terms.monthlyAmountCents).toBe(100000); expect(byV[2].terms.monthlyAmountCents).toBe(120000); // termos antigos preservados
+    expect(byV[1].requestedBy).toBe(asstA); expect(byV[3].requestedBy).toBe(gerA);
+    expect(byV[1].decidedBy).toBe(asstA); // quem substituiu fica registrado
+    const [a] = await db.select().from(schema.auditLog).where(sql`action = 'contract.draft_updated' and detail->>'version' = '3'`);
+    expect(a.detail).toMatchObject({ replaced: 2 });
+    // aprovar a v3 ativa o contrato com os termos da v3; versões substituídas não podem ser decididas
+    await expect(decideVersion(db, dirA, A, byV[2].id, "aprovar")).rejects.toThrow(/já decidida/);
+    await decideVersion(db, dirA, A, byV[3].id, "aprovar");
+    expect(await getContract(db, dirA, A, c.id)).toMatchObject({ status: "ativo", amountCents: 130000 });
+  });
+
+  it("P1 Codex: valor acima do teto é recusado pela aplicação e pelo banco (CHECK); leitura nunca arredonda", async () => {
+    await expect(createContract(db, asstA, A, cliA, terms({ monthlyAmount: "100.000.000.000,00" }))).rejects.toBeInstanceOf(Invalid);
+    await expect(db.execute(sql`insert into contracts (company_id, customer_id, description, monthly_amount, start_at, due_day) values (${A}, ${cliA}, 'x', 99999999999.99, '2026-01-01', 5)`)).resolves.toBeDefined();
+    await expect(db.execute(sql`insert into contracts (company_id, customer_id, description, monthly_amount, start_at, due_day) values (${A}, ${cliA}, 'x', 100000000000.00, '2026-01-01', 5)`)).rejects.toThrow();
+    const top = (await listContracts(db, dirA, A, {})).items.find((i) => i.monthlyAmount === "99999999999.99")!;
+    expect(top.amountCents).toBe(9_999_999_999_999);
+  });
+
   it("situação: suspender/encerrar é livre para quem grava; voltar a ativo exige aprovação; encerrado é definitivo", async () => {
     const id = await active();
     await setStatus(db, asstA, A, id, "suspenso");
