@@ -10,7 +10,7 @@ export const NAV: NavItem[] = [
   { label: "Faturamento", href: "/faturamento", icon: Receipt },
   { label: "Mensagens", href: "/mensagens", icon: MessageSquare },
   { label: "A receber", href: "/contas-a-receber", icon: Wallet },
-  { label: "Conciliação", href: "/conciliacao", icon: Landmark, soon: true },
+  { label: "Conciliação", href: "/conciliacao", icon: Landmark },
   { label: "Integrações", href: "/integracoes", icon: Plug, mobile: true },
   { label: "Ajustes", href: "/configuracao", icon: Settings, mobile: true },
 ];

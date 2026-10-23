@@ -40,7 +40,8 @@ Aceite: preview correto, sanitização HTML/injeção, sem e-mail externo real, 
 Saída: listagem por competência/vencimento/status, pagamento parcial manual autorizado, anexos privados, inadimplência, cálculo não destrutivo.
 Aceite: não marcar quitado antes de soma de alocações/liquidação, exportar CSV, histórico de eventos, relatórios por CNPJ.
 
-## E08 — Conciliação [ ]
+## E08 — Conciliação [~]
+**E08a [x]** contas, importação OFX/CSV genérico com prévia e dedup, saldo pelo extrato, sugestão segura (documento + valor), vínculo parcial/múltiplo, desfazer, classificação, triggers de imutabilidade. **E08b [ ]** pareamento de transferências entre CNPJs, layout validado do CSV da Cora com arquivo real, regras de auto-vínculo (se autorizadas).
 Saída: importação CSV e OFX **quando formato validado**, prévia de importação, dedup, matching seguro, pendências, vínculo parcial, estorno, transferência entre CNPJs.
 Aceite: extrato repetido não duplica; dois PIX iguais não autoassociam sem identificador; saldo segue movimentos; histórico e rollback controlado.
 

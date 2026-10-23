@@ -128,22 +128,7 @@ export async function registerPayment(db: DB, actorId: string, companyId: string
   try {
     return await db.transaction(async (tx) => {
       const x = tx as unknown as DB;
-      const [c] = await x.select({ c: charges, bs: billingBatches.status }).from(charges).innerJoin(billingBatches, and(eq(billingBatches.id, charges.batchId), eq(billingBatches.companyId, charges.companyId)))
-        .where(and(eq(charges.id, chargeId), eq(charges.companyId, companyId))).for("update", { of: charges });
-      if (!c || c.c.status !== "aprovada" || c.bs !== "aprovado") throw new Invalid("Cobrança não encontrada");
-      if (key) { // reenvio do mesmo formulário (duplo clique, recarga): devolve o que já foi gravado
-        const [dup] = await x.select().from(payments).where(and(eq(payments.companyId, companyId), eq(payments.requestKey, key)));
-        if (dup) { if (dup.chargeId !== chargeId) throw new Invalid("Chave de envio já usada"); return { paymentId: dup.id, duplicate: true, settled: false }; }
-      }
-      if (input.paidAt < c.c.issueDate) throw new Invalid("A data do pagamento não pode ser anterior à emissão");
-      const [{ paid }] = await x.select({ paid: sql<string>`coalesce(sum(${payments.amount}), 0)::text` }).from(payments).where(and(eq(payments.companyId, companyId), eq(payments.chargeId, chargeId), eq(payments.status, "ativo")));
-      const open = centsFromNumeric(c.c.amount) - centsFromNumeric(paid);
-      if (cents > open) throw new Invalid(`O valor passa do saldo em aberto (${formatBRL(open)})`);
-      const [p] = await x.insert(payments).values({ companyId, chargeId, amount: numericFromCents(cents), paidAt: input.paidAt, method: input.method, note: note || null, requestKey: key, registeredBy: actorId }).returning();
-      const settled = cents === open;
-      const stopped = settled ? await cancelQueueForCharges(x, companyId, [chargeId]) : 0; // quitou: as mensagens da régua param
-      await audit(x, companyId, actorId, "receivable.payment_registered", { chargeId, paymentId: p.id, method: input.method, settled, messagesStopped: stopped });
-      return { paymentId: p.id, duplicate: false, settled };
+      return recordPaymentTx(x, companyId, actorId, chargeId, { cents, paidAt: input.paidAt, method: input.method, note, key });
     });
   } catch (e) {
     const cause = (e as { cause?: { code?: string; constraint_name?: string; message?: string } }).cause;
@@ -159,6 +144,28 @@ export async function registerPayment(db: DB, actorId: string, companyId: string
   }
 }
 
+type PaymentCore = { cents: number; paidAt: string; method: string; note: string; key: string | null };
+/** Núcleo da baixa, DENTRO de uma transação do chamador (registro manual e conciliação bancária). Trava a cobrança; o trigger do banco é a 2ª barreira. */
+export async function recordPaymentTx(x: DB, companyId: string, actorId: string, chargeId: string, p0: PaymentCore, auditExtra: Record<string, unknown> = {}) {
+  const { cents, key, note } = p0; const input = { paidAt: p0.paidAt, method: p0.method };
+      const [c] = await x.select({ c: charges, bs: billingBatches.status }).from(charges).innerJoin(billingBatches, and(eq(billingBatches.id, charges.batchId), eq(billingBatches.companyId, charges.companyId)))
+        .where(and(eq(charges.id, chargeId), eq(charges.companyId, companyId))).for("update", { of: charges });
+      if (!c || c.c.status !== "aprovada" || c.bs !== "aprovado") throw new Invalid("Cobrança não encontrada");
+      if (key) { // reenvio do mesmo formulário (duplo clique, recarga): devolve o que já foi gravado
+        const [dup] = await x.select().from(payments).where(and(eq(payments.companyId, companyId), eq(payments.requestKey, key)));
+        if (dup) { if (dup.chargeId !== chargeId) throw new Invalid("Chave de envio já usada"); return { paymentId: dup.id, duplicate: true, settled: false }; }
+      }
+      if (input.paidAt < c.c.issueDate) throw new Invalid("A data do pagamento não pode ser anterior à emissão");
+      const [{ paid }] = await x.select({ paid: sql<string>`coalesce(sum(${payments.amount}), 0)::text` }).from(payments).where(and(eq(payments.companyId, companyId), eq(payments.chargeId, chargeId), eq(payments.status, "ativo")));
+      const open = centsFromNumeric(c.c.amount) - centsFromNumeric(paid);
+      if (cents > open) throw new Invalid(`O valor passa do saldo em aberto (${formatBRL(open)})`);
+      const [p] = await x.insert(payments).values({ companyId, chargeId, amount: numericFromCents(cents), paidAt: input.paidAt, method: input.method, note: note || null, requestKey: key, registeredBy: actorId }).returning();
+      const settled = cents === open;
+      const stopped = settled ? await cancelQueueForCharges(x, companyId, [chargeId]) : 0; // quitou: as mensagens da régua param
+      await audit(x, companyId, actorId, "receivable.payment_registered", { chargeId, paymentId: p.id, method: input.method, settled, messagesStopped: stopped, ...auditExtra });
+      return { paymentId: p.id, duplicate: false, settled };
+}
+
 /** Estorno: o pagamento fica no histórico como estornado (com motivo) e o saldo volta. Nunca apaga. */
 export async function reversePayment(db: DB, actorId: string, companyId: string, paymentId: string, reason: string) {
   await requirePerm(db, actorId, companyId, "receivables.reverse");
@@ -167,16 +174,23 @@ export async function reversePayment(db: DB, actorId: string, companyId: string,
   if (!uuidOk(paymentId)) throw new Invalid("Pagamento não encontrado");
   return db.transaction(async (tx) => {
     const x = tx as unknown as DB;
-    const [p0] = await x.select({ chargeId: payments.chargeId }).from(payments).where(and(eq(payments.id, paymentId), eq(payments.companyId, companyId)));
-    if (!p0) throw new Invalid("Pagamento não encontrado");
-    await x.select({ id: charges.id }).from(charges).where(and(eq(charges.id, p0.chargeId), eq(charges.companyId, companyId))).for("update"); // mesma ordem de lock do registro
-    const [p] = await x.select().from(payments).where(and(eq(payments.id, paymentId), eq(payments.companyId, companyId))).for("update");
-    if (!p || p.status !== "ativo") throw new Invalid("Este pagamento já foi estornado");
-    const now = new Date();
-    await x.update(payments).set({ status: "estornado", reversedBy: actorId, reversedAt: now, reverseReason: why, updatedAt: now }).where(eq(payments.id, p.id));
-    await audit(x, companyId, actorId, "receivable.payment_reversed", { chargeId: p.chargeId, paymentId: p.id });
-    return { chargeId: p.chargeId };
+    const [linked] = await x.execute(sql`select 1 from bank_allocations where company_id = ${companyId} and payment_id = ${paymentId} and status = 'ativa'`) as unknown as Row[];
+    if (linked) throw new Invalid("Este pagamento veio da conciliação bancária: desfaça o vínculo em Conciliação");
+    return reversePaymentTx(x, companyId, actorId, paymentId, why);
   });
+}
+
+/** Núcleo do estorno dentro de uma transação do chamador (também usado ao desfazer um vínculo bancário). */
+export async function reversePaymentTx(x: DB, companyId: string, actorId: string, paymentId: string, why: string, auditExtra: Record<string, unknown> = {}) {
+  const [p0] = await x.select({ chargeId: payments.chargeId }).from(payments).where(and(eq(payments.id, paymentId), eq(payments.companyId, companyId)));
+  if (!p0) throw new Invalid("Pagamento não encontrado");
+  await x.select({ id: charges.id }).from(charges).where(and(eq(charges.id, p0.chargeId), eq(charges.companyId, companyId))).for("update"); // mesma ordem de lock do registro
+  const [p] = await x.select().from(payments).where(and(eq(payments.id, paymentId), eq(payments.companyId, companyId))).for("update");
+  if (!p || p.status !== "ativo") throw new Invalid("Este pagamento já foi estornado");
+  const now = new Date();
+  await x.update(payments).set({ status: "estornado", reversedBy: actorId, reversedAt: now, reverseReason: why, updatedAt: now }).where(eq(payments.id, p.id));
+  await audit(x, companyId, actorId, "receivable.payment_reversed", { chargeId: p.chargeId, paymentId: p.id, ...auditExtra });
+  return { chargeId: p.chargeId };
 }
 
 export async function exportReceivables(db: DB, actorId: string, companyId: string, f: ListFilters = {}, today = todayManaus()) {

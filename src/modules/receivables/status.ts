@@ -19,9 +19,10 @@ export const AGING = [
 ] as const;
 export const agingBucket = (days: number) => AGING.find((b) => days >= b.min && days <= b.max)?.key ?? null;
 
-export const METHODS = ["pix", "boleto", "transferencia", "dinheiro", "outro"] as const;
-export type Method = (typeof METHODS)[number];
-export const METHOD_LABEL: Record<Method, string> = { pix: "Pix", boleto: "Boleto", transferencia: "Transferência", dinheiro: "Dinheiro", outro: "Outro" };
+export const METHODS = ["pix", "boleto", "transferencia", "dinheiro", "outro"] as const; // formas escolhidas na baixa manual
+export const ALL_METHODS = [...METHODS, "extrato"] as const;
+export type Method = (typeof ALL_METHODS)[number];
+export const METHOD_LABEL: Record<Method, string> = { pix: "Pix", boleto: "Boleto", transferencia: "Transferência", dinheiro: "Dinheiro", outro: "Outro", extrato: "Extrato bancário" };
 
 export const FILTERS = ["abertas", "a_vencer", "vencidas", "parciais", "quitadas", "todas"] as const;
 export type Filter = (typeof FILTERS)[number];

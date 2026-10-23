@@ -374,8 +374,138 @@ export const payments = pgTable("payments", {
   uniqueIndex("payments_request_key_uq").on(t.companyId, t.requestKey).where(sql`${t.requestKey} is not null`),
   index("payments_charge_idx").on(t.companyId, t.chargeId),
   check("payments_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),
-  check("payments_method_chk", sql`${t.method} in ('pix', 'boleto', 'transferencia', 'dinheiro', 'outro')`),
+  check("payments_method_chk", sql`${t.method} in ('pix', 'boleto', 'transferencia', 'dinheiro', 'outro', 'extrato')`),
   check("payments_status_chk", sql`${t.status} in ('ativo', 'estornado')`),
   check("payments_reversal_chk", sql`(${t.status} = 'estornado' and ${t.reversedBy} is not null and ${t.reversedAt} is not null and ${t.reverseReason} is not null) or (${t.status} = 'ativo' and ${t.reversedBy} is null and ${t.reversedAt} is null and ${t.reverseReason} is null)`),
   check("payments_note_chk", sql`${t.note} is null or char_length(${t.note}) <= 200`),
+]);
+
+// E08 — conciliação bancária. O extrato é a VERDADE do banco: transações importadas são imutáveis (só podem ser desfeitas com a importação).
+// Nunca guardamos número completo de conta (só rótulo e final de 4 dígitos). Vincular crédito a cobrança cria um pagamento (E07) e é desfazível.
+const moneySigned = (name: string) => numeric(name, { precision: 18, scale: 2 });
+
+export const bankAccounts = pgTable("bank_accounts", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  name: text("name").notNull(),
+  bank: text("bank").notNull(), // rótulo livre: Cora, Caixa, Santander…
+  last4: text("last4"), // final da conta, só para conferir que o arquivo é da conta certa
+  openingBalance: moneySigned("opening_balance").notNull().default("0"),
+  openingDate: date("opening_date", { mode: "string" }).notNull(),
+  active: boolean("active").notNull().default(true),
+  createdBy: uuid("created_by").references(() => users.id),
+}, (t) => [
+  unique("bank_accounts_company_id_uq").on(t.companyId, t.id),
+  unique("bank_accounts_company_name_uq").on(t.companyId, t.name),
+  check("bank_accounts_last4_chk", sql`${t.last4} is null or ${t.last4} ~ '^[0-9]{4}$'`),
+  check("bank_accounts_opening_chk", sql`abs(${t.openingBalance}) <= 99999999999.99`),
+]);
+
+export const bankImportBatches = pgTable("bank_import_batches", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  accountId: uuid("account_id").notNull(),
+  format: text("format").notNull(), // ofx | csv
+  fileName: text("file_name").notNull(),
+  checksum: text("checksum").notNull(), // sha256 do arquivo: o mesmo arquivo não entra duas vezes
+  status: text("status").notNull().default("previa"), // previa | aplicado | desfeito | cancelado
+  rowCount: integer("row_count").notNull().default(0),
+  newCount: integer("new_count").notNull().default(0),
+  dupCount: integer("dup_count").notNull().default(0),
+  periodStart: date("period_start", { mode: "string" }),
+  periodEnd: date("period_end", { mode: "string" }),
+  ledgerBalance: moneySigned("ledger_balance"), // saldo informado pelo banco no arquivo (OFX), para conferência
+  ledgerDate: date("ledger_date", { mode: "string" }),
+  importedBy: uuid("imported_by").notNull().references(() => users.id),
+  appliedBy: uuid("applied_by").references(() => users.id),
+  appliedAt: timestamp("applied_at", { withTimezone: true }),
+  undoneBy: uuid("undone_by").references(() => users.id),
+  undoneAt: timestamp("undone_at", { withTimezone: true }),
+  undoReason: text("undo_reason"),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.accountId], foreignColumns: [bankAccounts.companyId, bankAccounts.id] }),
+  unique("bank_import_batches_company_id_uq").on(t.companyId, t.id),
+  uniqueIndex("bank_import_batches_checksum_uq").on(t.companyId, t.accountId, t.checksum).where(sql`${t.status} in ('previa', 'aplicado')`),
+  check("bank_import_batches_status_chk", sql`${t.status} in ('previa', 'aplicado', 'desfeito', 'cancelado')`),
+  check("bank_import_batches_format_chk", sql`${t.format} in ('ofx', 'csv')`),
+]);
+
+// Linhas da PRÉVIA (antes de confirmar). Não contam em saldo nem em dedup.
+export const bankImportRows = pgTable("bank_import_rows", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  batchId: uuid("batch_id").notNull(),
+  lineNo: integer("line_no").notNull(),
+  postedAt: date("posted_at", { mode: "string" }).notNull(),
+  amount: moneySigned("amount").notNull(),
+  description: text("description").notNull(),
+  externalRef: text("external_ref"),
+  refKey: text("ref_key").notNull(),
+  duplicate: boolean("duplicate").notNull().default(false),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.batchId], foreignColumns: [bankImportBatches.companyId, bankImportBatches.id] }).onDelete("cascade"),
+  unique("bank_import_rows_batch_key_uq").on(t.batchId, t.refKey),
+]);
+
+export const bankTransactions = pgTable("bank_transactions", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  accountId: uuid("account_id").notNull(),
+  batchId: uuid("batch_id").notNull(),
+  postedAt: date("posted_at", { mode: "string" }).notNull(),
+  amount: moneySigned("amount").notNull(), // crédito positivo, débito negativo
+  description: text("description").notNull(),
+  externalRef: text("external_ref"),
+  refKey: text("ref_key").notNull(), // identificador do FITID ou hash+ocorrência: base do dedup
+  status: text("status").notNull().default("ativa"), // ativa | desfeita
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.accountId], foreignColumns: [bankAccounts.companyId, bankAccounts.id] }),
+  foreignKey({ columns: [t.companyId, t.batchId], foreignColumns: [bankImportBatches.companyId, bankImportBatches.id] }),
+  unique("bank_transactions_company_id_uq").on(t.companyId, t.id),
+  uniqueIndex("bank_transactions_ref_uq").on(t.companyId, t.accountId, t.refKey).where(sql`${t.status} = 'ativa'`),
+  index("bank_transactions_account_idx").on(t.companyId, t.accountId, t.postedAt),
+  check("bank_transactions_amount_chk", sql`${t.amount} <> 0 and abs(${t.amount}) <= 99999999999.99`),
+  check("bank_transactions_status_chk", sql`${t.status} in ('ativa', 'desfeita')`),
+]);
+
+// Vínculo crédito ↔ cobrança (um crédito pode quitar várias cobranças e uma cobrança pode receber vários créditos).
+export const bankAllocations = pgTable("bank_allocations", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  transactionId: uuid("transaction_id").notNull(),
+  chargeId: uuid("charge_id").notNull(),
+  paymentId: uuid("payment_id").notNull(), // o pagamento (E07) criado por este vínculo
+  amount: moneySigned("amount").notNull(),
+  requestKey: text("request_key"),
+  status: text("status").notNull().default("ativa"), // ativa | desfeita
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+  undoneBy: uuid("undone_by").references(() => users.id),
+  undoneAt: timestamp("undone_at", { withTimezone: true }),
+  undoReason: text("undo_reason"),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.transactionId], foreignColumns: [bankTransactions.companyId, bankTransactions.id] }),
+  foreignKey({ columns: [t.companyId, t.chargeId], foreignColumns: [charges.companyId, charges.id] }),
+  foreignKey({ columns: [t.companyId, t.paymentId], foreignColumns: [payments.companyId, payments.id] }),
+  unique("bank_allocations_company_id_uq").on(t.companyId, t.id),
+  unique("bank_allocations_payment_uq").on(t.paymentId),
+  uniqueIndex("bank_allocations_request_key_uq").on(t.companyId, t.requestKey).where(sql`${t.requestKey} is not null`),
+  index("bank_allocations_tx_idx").on(t.companyId, t.transactionId),
+  check("bank_allocations_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),
+  check("bank_allocations_status_chk", sql`${t.status} in ('ativa', 'desfeita')`),
+  check("bank_allocations_undo_chk", sql`(${t.status} = 'desfeita' and ${t.undoneBy} is not null and ${t.undoneAt} is not null and ${t.undoReason} is not null) or (${t.status} = 'ativa' and ${t.undoneBy} is null and ${t.undoneAt} is null and ${t.undoReason} is null)`),
+]);
+
+// Classificação sem cobrança: tarifa, transferência entre contas do grupo, outro. Impede vincular a cobrança enquanto existir.
+export const bankTransactionMarks = pgTable("bank_transaction_marks", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  transactionId: uuid("transaction_id").notNull(),
+  kind: text("kind").notNull(), // tarifa | transferencia_grupo | outro
+  note: text("note"),
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.transactionId], foreignColumns: [bankTransactions.companyId, bankTransactions.id] }),
+  unique("bank_transaction_marks_tx_uq").on(t.transactionId),
+  check("bank_transaction_marks_kind_chk", sql`${t.kind} in ('tarifa', 'transferencia_grupo', 'outro')`),
+  check("bank_transaction_marks_note_chk", sql`${t.note} is null or char_length(${t.note}) <= 200`),
 ]);
