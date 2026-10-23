@@ -29,3 +29,8 @@ Papéis: admin_tecnico sem acesso a CRM (dado financeiro); contabilidade lê+exp
 
 ## ADR-005 Versionamento: commit + push ao fim de cada fase (2026-10-23, ordem do usuário)
 Remoto: `ssh://git@ssh.github.com:443/keslleykledston/43-Financeiro.git` (porta 22 redirecionada por config local; chave `~/.ssh/id_ed25519_github` via `core.sshCommand` só neste repo). Push de `main` autorizado ao fim de cada fase/entrega, após SANDBOX PASS. **Continuam proibidos sem ordem explícita:** `git tag`, push --force, reescrever histórico. Rollback = `git revert`/checkout de commit anterior + restore de backup do DB quando houver migração.
+
+## ADR-006 Lovable desenha, Claude Code porta (2026-10-23, decisão do usuário)
+Papel: Lovable = agente de UI/UX em projeto de PROTÓTIPO separado (só dados fictícios, sem backend/Supabase/auth/env). Claude Code revisa o diff, porta para Next.js (server components/actions), liga ao backend real e roda `pnpm sandbox`. Segurança, isolamento por empresa e cálculo ficam no nosso código. Nada de segredo/dados reais/ai-memory enviado ao Lovable. Cada mensagem gasta créditos: agrupar telas em lotes.
+Visual: tema **claro padrão + escuro opcional**; acento teal (tokens do Ledger Lens), Space Grotesk + IBM Plex Sans, `.num` tabular; raio 12px; mobile em cards.
+Projeto Lovable de protótipo: id e352b98c-1cf4-4af5-a90a-f957ea39a0f9 (workspace do dono). Referência analisada: Ledger Lens Gre (39d6711e-…) — ver docs/DESIGN_REFERENCIA_LEDGER_LENS.md.
