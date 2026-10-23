@@ -11,6 +11,7 @@ import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass, inputClass } from "@/components/k3g/button";
 import { formatDateTime } from "@/lib/format";
 import { approveAction, cancelAction, refreshAction, reopenAction } from "../actions";
+import { requestBatchIssuanceAction } from "../../emissoes/actions";
 import { STATUS_LABEL, STATUS_TONE } from "../status";
 
 const br = (d: string) => d.split("-").reverse().join("/");
@@ -90,6 +91,18 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
             </form>
           )}
         </div>
+        {b.status === "aprovado" && can(role, "issuance.request") && (
+          <div className="mt-4 border-t border-border pt-4">
+            <p className="mb-2 text-sm font-medium">Emissão (simulada)</p>
+            <div className="flex flex-wrap gap-2">
+              {(["boleto", "nfse"] as const).map((k) => (
+                <form key={k} action={requestBatchIssuanceAction}><input type="hidden" name="batchId" value={b.id} /><input type="hidden" name="kind" value={k} /><button className={buttonClass("outline")}>{k === "boleto" ? "Solicitar boletos" : "Solicitar NFS-e"}</button></form>
+              ))}
+              <AppLink href="/faturamento/emissoes" className={buttonClass("ghost")}>Ver emissões</AppLink>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">Apenas enfileira a solicitação no motor <strong>simulado</strong>. Nenhum boleto ou nota real é emitido.</p>
+          </div>
+        )}
         {b.status === "rascunho" && !approve && <p className="mt-2 text-sm text-muted-foreground">Gerente ou diretoria aprovam o lote.</p>}
         {b.status === "rascunho" && approve && <p className="mt-2 text-xs text-muted-foreground">Quem gerou a prévia não a aprova (exige outro gerente ou a diretoria). Você aprova exatamente o conteúdo exibido acima.</p>}
       </SectionCard>

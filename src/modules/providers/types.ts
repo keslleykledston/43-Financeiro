@@ -19,6 +19,8 @@ export type BoletoResult = { providerRef: string; status: "emitido" | "pago" | "
 export interface BoletoProvider { // Cora (boletos v2)
   readonly mode: "mock" | "live";
   issue(i: BoletoInput): Promise<BoletoResult>;
+  /** Reconsulta por chave de idempotência: já existe? (usada quando a resposta da emissão se perdeu). null = não existe. */
+  find(idempotencyKey: string): Promise<BoletoResult | null>;
   status(ref: string): Promise<BoletoResult["status"]>;
   cancel(ref: string): Promise<void>;
 }
@@ -33,6 +35,7 @@ export type NfseInput = { idempotencyKey: string; amountCents: number; competenc
 export interface NfseProvider { // NFS-e da Cora (beta)
   readonly mode: "mock" | "live";
   issue(i: NfseInput): Promise<{ providerRef: string; status: "processando" | "emitida" | "rejeitada" }>;
+  find(idempotencyKey: string): Promise<{ providerRef: string; status: "processando" | "emitida" | "rejeitada" } | null>;
   status(ref: string): Promise<"processando" | "emitida" | "rejeitada">;
 }
 

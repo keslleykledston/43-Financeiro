@@ -176,6 +176,9 @@ export async function reopenBatch(db: DB, actorId: string, companyId: string, ba
     await x.select({ id: charges.id }).from(charges).where(and(eq(charges.companyId, companyId), eq(charges.batchId, b.id))).for("update"); // mesma ordem de lock da baixa: espera uma baixa em curso e enxerga o resultado
     const [paid] = await x.execute(sql`select count(*)::int n from payments p join charges c on c.company_id = p.company_id and c.id = p.charge_id where c.company_id = ${companyId} and c.batch_id = ${b.id}`) as unknown as { n: number }[];
     if (paid.n > 0) throw new Invalid("Este lote tem pagamentos (ou estornos) registrados em Contas a receber e não pode ser reaberto");
+    const [iss] = await x.execute(sql`select count(*)::int n from issuance_requests r join charges c on c.company_id = r.company_id and c.id = r.charge_id where c.company_id = ${companyId} and c.batch_id = ${b.id} and r.status in ('enviando', 'processando', 'emitido', 'desconhecido')`) as unknown as { n: number }[];
+    if (iss.n > 0) throw new Invalid("Este lote tem emissões em andamento ou concluídas (boleto/NFS-e) e não pode ser reaberto");
+    await x.execute(sql`update issuance_requests r set status = 'cancelado', updated_at = now() from charges c where c.company_id = r.company_id and c.id = r.charge_id and c.company_id = ${companyId} and c.batch_id = ${b.id} and r.status in ('pendente', 'falhou')`); // solicitações ainda não enviadas deixam de valer
     const now = new Date();
     await x.update(billingBatches).set({ status: "rascunho", approvedBy: null, approvedAt: null, reopenReason: why, generatedBy: actorId, updatedAt: now }).where(and(eq(billingBatches.id, b.id), eq(billingBatches.companyId, companyId)));
     const ids = (await x.update(charges).set({ status: "previa", updatedAt: now }).where(and(eq(charges.companyId, companyId), eq(charges.batchId, b.id))).returning({ id: charges.id })).map((r) => r.id);

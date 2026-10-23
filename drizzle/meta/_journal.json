@@ -120,6 +120,13 @@
       "when": 1792790954163,
       "tag": "0016_overconfident_steel_serpent",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792792724906,
+      "tag": "0017_cynical_killraven",
+      "breakpoints": true
     }
   ]
 }

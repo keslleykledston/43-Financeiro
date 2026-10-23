@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 test("375px: navegação inferior visível e sem rolagem horizontal", async ({ page }) => {
-  for (const r of ["/", "/clientes", "/clientes/novo", "/clientes/importar", "/contratos", "/contratos/novo", "/faturamento", "/faturamento/lotes", "/mensagens", "/mensagens/modelos", "/mensagens/configuracao", "/conta", "/contas-a-receber", "/conciliacao", "/integracoes", "/design-system", "/configuracao"]) {
+  for (const r of ["/", "/clientes", "/clientes/novo", "/clientes/importar", "/contratos", "/contratos/novo", "/faturamento", "/faturamento/lotes", "/faturamento/emissoes", "/mensagens", "/mensagens/modelos", "/mensagens/configuracao", "/conta", "/contas-a-receber", "/conciliacao", "/integracoes", "/design-system", "/configuracao"]) {
     await page.goto(r);
     await expect(page.getByRole("navigation", { name: "Principal" }).last()).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

@@ -9,6 +9,7 @@ import { ModeForm } from "./mode-form";
 import { SyncPanel } from "./sync-panel";
 import { resolveAction } from "./actions";
 import { PROVIDER_CATALOG, liveFlagsOn } from "@/modules/providers/registry";
+import { readiness } from "@/modules/providers/readiness";
 
 const REASON: Record<string, string> = { duplicate_document: "Já existe um cadastro local com este documento", document_collision: "O documento colide com outro cadastro ativo", ambiguous_company: "Não foi possível saber a qual empresa pertence" };
 const fmt = (d: Date) => d.toLocaleString("pt-BR", { timeZone: "America/Manaus" });
@@ -84,6 +85,18 @@ export default async function Integracoes() {
             <li key={p.key} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
               <div><p className="font-medium">{p.label}</p><p className="text-xs text-muted-foreground">{p.note}</p></div>
               <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium">Simulado · chave {process.env[p.flag] === "true" ? "LIGADA" : "desligada"}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+      <section className="rounded-lg border bg-card p-5">
+        <h2 className="mb-1 font-semibold">Portão da emissão real (checklist)</h2>
+        <p className="mb-3 text-sm text-muted-foreground">Enquanto algum item estiver pendente, a emissão e o envio reais permanecem <strong>bloqueados</strong>. O sistema só confere se os arquivos de segredo existem; nunca lê o conteúdo. Detalhes em <code>docs/E10_GOLIVE.md</code>.</p>
+        <ul className="divide-y divide-border text-sm">
+          {readiness().map((r) => (
+            <li key={r.key} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+              <div><p className="font-medium">{r.label}</p><p className="text-xs text-muted-foreground">{r.detail}</p></div>
+              <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${r.state === "ok" ? "bg-positive-soft text-positive-foreground" : r.state === "alerta" ? "bg-negative-soft text-negative-foreground" : "bg-muted"}`}>{r.state === "ok" ? "OK" : r.state === "alerta" ? "Atenção" : "Pendente"}</span>
             </li>
           ))}
         </ul>

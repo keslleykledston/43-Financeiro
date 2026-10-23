@@ -1,0 +1,37 @@
+# E10 — Portão da emissão e do envio REAIS (go-live)
+
+**Estado hoje:** o motor de emissão existe e funciona só com provedores **simulados**. O banco recusa (`CHECK mode = 'simulado'`), o registro de provedores falha fechado se alguma chave `*_LIVE_ENABLED` for ligada e não existe adaptador real. Nada sai do sistema. **Nunca habilitar por conveniência.**
+
+## O que o sistema já tem (E10a, simulado)
+- Motor reservar → chamar o provedor fora de transação → registrar (`src/modules/issuance`).
+- Chave de idempotência fixa por (empresa, cobrança, tipo): a mesma cobrança nunca é emitida duas vezes no provedor.
+- Resposta perdida/erro inesperado/processo que caiu = `desconhecido`: a próxima rodada **reconsulta** (`find`) antes de qualquer nova emissão; sem resposta conclusiva após 5 tentativas, vai para revisão humana.
+- NFS-e assíncrona (beta): `processando` → consulta de status → `emitida`.
+- Começa **pausado**, limite diário, kill switch, auditoria só com ids/contagens, lote com emissão não pode ser reaberto.
+
+## O que o USUÁRIO precisa providenciar (nada disso está no Git nem no chat)
+1. **Cora:** client-id, certificado e chave mTLS por CNPJ, habilitação de boletos v2/extrato/webhooks e da NFS-e (beta). Confirmar limites e idempotência na homologação.
+2. **NFS-e:** confirmar cobertura do município e CNAEs dos dois CNPJs; calendário fiscal aprovado por quem responde pela contabilidade.
+3. **E-mail:** credenciais SMTP, SPF/DKIM/DMARC do domínio, remetente por empresa, tratamento de devolução.
+4. **WhatsApp (WAHA):** chave, número dedicado, lista de **opt-in** revisada, janelas e limites aprovados.
+5. **Autorização escrita da diretoria**, por provedor e por empresa, com limites de envio.
+
+## Como os segredos entram (sem passar por chat, Git ou Lovable)
+Arquivos de 1 linha em um diretório **fora do repositório**, permissão 600, montados **somente-leitura** em `/run/secrets` (Compose `secrets:`):
+`cora_client_id`, `cora_cert.pem`, `cora_key.pem`, `smtp_user`, `smtp_password`, `waha_api_key`.
+O checklist em *Integrações → Portão da emissão real* só confere se os arquivos existem; nunca lê o conteúdo.
+
+## Ordem de habilitação (um provedor por vez, cada passo com sandbox + revisão do Codex)
+1. **Canário interno de e-mail:** só para endereços internos, limite pequeno, kill switch testado.
+2. **Cora homologação** (boleto/extrato) com a conta de teste; reconsulta, cancelamento e conciliação conferidos.
+3. **NFS-e** em homologação; só depois produção limitada.
+4. **WhatsApp** por último, só com opt-in.
+5. Produção **limitada** (poucos clientes, limite diário baixo) com acompanhamento; estado declarado como `LIMITED_INTERNAL_PRODUCTION_CANDIDATE` só após gate formal. Nunca "pronto para produção".
+
+## Requisitos de CÓDIGO que a migração do modo real precisa cumprir (pendências aceitas na simulação)
+- `message_queue.charge_id` e `issuance_requests.charge_id` → FK **RESTRICT**; `cancelBatch`/`generateBatch` passam a marcar cobranças como `cancelada` em vez de apagar (preserva histórico de envios e emissões). *(Codex E06 P2)*
+- Mensagens (`runQueue`) adotam reservar → enviar → registrar (hoje a chamada ao provedor simulado roda dentro da transação).
+- Adaptadores reais mapeiam: rede/timeout → `IssuanceTimeout`; recusa antes de processar → `IssuanceRetryable`; validação → `RangeError`. Qualquer outro erro é tratado como `desconhecido` (seguro).
+- `env_file` mínimo para o `scheduler` (sem credenciais que ele não usa). *(Codex E09)*
+- Teste de contrato contra o ambiente de homologação de cada provedor; teste de timeout após emissão; evento duplicado; pagamento parcial.
+- CHECK `mode` ampliado **somente** nessa migração, com backup e rollback documentados em `docs/OPERACAO.md`.

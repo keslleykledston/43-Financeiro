@@ -509,3 +509,45 @@ export const bankTransactionMarks = pgTable("bank_transaction_marks", {
   check("bank_transaction_marks_kind_chk", sql`${t.kind} in ('tarifa', 'transferencia_grupo', 'outro')`),
   check("bank_transaction_marks_note_chk", sql`${t.note} is null or char_length(${t.note}) <= 200`),
 ]);
+
+// E10 (motor, SIMULADO) — solicitações de emissão de boleto/NFS-e. O banco só aceita modo "simulado": habilitar emissão real exige uma MIGRAÇÃO
+// própria (que também troca a FK message_queue→charges para RESTRICT e adota claim→enviar→registrar nas mensagens), depois de homologação,
+// credenciais e autorização explícita. Ver docs/E10_GOLIVE.md.
+export const issuanceSettings = pgTable("issuance_settings", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  paused: boolean("paused").notNull().default(true), // nasce PAUSADO (kill switch)
+  dailyLimit: integer("daily_limit").notNull().default(20),
+  updatedBy: uuid("updated_by").references(() => users.id),
+}, (t) => [
+  unique("issuance_settings_company_uq").on(t.companyId),
+  check("issuance_settings_limit_chk", sql`${t.dailyLimit} between 1 and 500`),
+]);
+
+export const issuanceRequests = pgTable("issuance_requests", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  chargeId: uuid("charge_id").notNull(),
+  kind: text("kind").notNull(), // boleto | nfse
+  mode: text("mode").notNull().default("simulado"), // única opção aceita pelo banco nesta fase
+  idempotencyKey: text("idempotency_key").notNull(), // fixa por (empresa, cobrança, tipo): reenviar nunca emite 2 vezes no provedor
+  status: text("status").notNull().default("pendente"), // pendente | enviando | processando | emitido | desconhecido | falhou | cancelado
+  attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+  claimedAt: timestamp("claimed_at", { withTimezone: true }),
+  externalRef: text("external_ref"),
+  externalStatus: text("external_status"),
+  lastError: text("last_error"), // código genérico, sem dados do cliente
+  requestedBy: uuid("requested_by").notNull().references(() => users.id),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.chargeId], foreignColumns: [charges.companyId, charges.id] }).onDelete("cascade"), // só na simulação; no modo real vira RESTRICT (gate)
+  unique("issuance_requests_company_id_uq").on(t.companyId, t.id),
+  uniqueIndex("issuance_requests_one_uq").on(t.companyId, t.chargeId, t.kind).where(sql`${t.status} <> 'cancelado'`),
+  uniqueIndex("issuance_requests_idem_uq").on(t.companyId, t.idempotencyKey).where(sql`${t.status} <> 'cancelado'`),
+  index("issuance_requests_due_idx").on(t.companyId, t.status, t.nextAttemptAt),
+  check("issuance_requests_mode_chk", sql`${t.mode} = 'simulado'`),
+  check("issuance_requests_kind_chk", sql`${t.kind} in ('boleto', 'nfse')`),
+  check("issuance_requests_status_chk", sql`${t.status} in ('pendente', 'enviando', 'processando', 'emitido', 'desconhecido', 'falhou', 'cancelado')`),
+  check("issuance_requests_attempts_chk", sql`${t.attempts} between 0 and 20`),
+  check("issuance_requests_done_chk", sql`${t.status} not in ('emitido', 'processando') or ${t.externalRef} is not null`),
+]);
