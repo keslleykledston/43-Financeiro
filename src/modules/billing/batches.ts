@@ -15,10 +15,10 @@ export type BatchStatus = "rascunho" | "aprovado" | "cancelado";
 type Row = typeof charges.$inferSelect;
 
 const isoDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
-const sigOf = (v: { dueDate: string; issueDate: string; cents: number; description: string; joint: boolean }) => `${v.dueDate}|${v.issueDate}|${v.cents}|${v.description}|${v.joint ? 1 : 0}`;
+const sigOf = (v: { dueDate: string; issueDate: string; cents: number; description: string; joint: boolean; warnings: readonly string[] }) => `${v.dueDate}|${v.issueDate}|${v.cents}|${v.description}|${v.joint ? 1 : 0}|${[...v.warnings].sort().join(",")}`;
 const keyOf = (contractId: string, competenceMonth: string) => `${contractId}|${competenceMonth.slice(0, 7)}`;
-const rowSig = (r: Row) => sigOf({ dueDate: r.dueDate, issueDate: r.issueDate, cents: centsFromNumeric(r.amount), description: r.description, joint: r.jointInvoice });
-const itemSig = (i: CalendarItem) => sigOf({ dueDate: i.dueDate!, issueDate: i.issueDate!, cents: i.amountCents, description: i.description, joint: i.jointInvoice });
+const rowSig = (r: Row) => sigOf({ dueDate: r.dueDate, issueDate: r.issueDate, cents: centsFromNumeric(r.amount), description: r.description, joint: r.jointInvoice, warnings: r.warnings as string[] });
+const itemSig = (i: CalendarItem) => sigOf({ dueDate: i.dueDate!, issueDate: i.issueDate!, cents: i.amountCents, description: i.description, joint: i.jointInvoice, warnings: i.warnings });
 
 /** Hash do conteúdo do lote: o aprovador aprova exatamente o que viu. */
 export const hashCharges = (rows: Row[]) => createHash("sha256").update(rows.map((r) => `${keyOf(r.contractId, r.competenceMonth)}|${rowSig(r)}`).sort().join("\n")).digest("hex");
@@ -44,6 +44,16 @@ function diff(rows: Row[], items: CalendarItem[]) {
   return { added, removed, changed, any: added + removed + changed > 0 };
 }
 
+/**
+ * Aprovação atômica com a origem: enquanto o lote é recalculado e aprovado, contratos, clientes e feriados da empresa
+ * não podem mudar (as escritas concorrentes esperam o commit). Sem isso, uma alteração entre o recálculo e o commit
+ * aprovaria uma prévia já desatualizada.
+ */
+async function lockSources(x: DB, companyId: string) {
+  await x.execute(sql`select 1 from contracts where company_id = ${companyId} for share`);
+  await x.execute(sql`select 1 from customers where company_id = ${companyId} for share`);
+  await x.execute(sql`lock table holidays in share mode`);
+}
 const lockCompany = (x: DB, companyId: string) => x.execute(sql`select pg_advisory_xact_lock(hashtext(${"billing-batch:" + companyId}))`);
 const audit = (x: DB, companyId: string, actorId: string, action: string, detail: Record<string, unknown>) => x.insert(auditLog).values({ companyId, actorId, action, detail });
 
@@ -141,6 +151,7 @@ export async function approveBatch(db: DB, actorId: string, companyId: string, b
     if (cs.length === 0) throw new Invalid("Lote sem cobranças");
     if (b.generatedBy === actorId && role !== "diretoria") throw new Forbidden("Quem gerou a prévia não pode aprová-la (exige outro gerente ou a diretoria)");
     if (hashCharges(cs) !== expectedHash) throw new Invalid("A prévia mudou desde que você a abriu. Revise de novo.");
+    await lockSources(x, companyId);
     const live = await eligible(x, companyId, b.issueDate);
     if (diff(cs, live.items).any) throw new Invalid("Os contratos mudaram desde a prévia. Atualize a prévia antes de aprovar.");
     const now = new Date();

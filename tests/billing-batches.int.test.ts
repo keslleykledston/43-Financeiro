@@ -169,6 +169,51 @@ describe.skipIf(!enabled)("E05 lotes de cobrança: prévia idempotente, aprovaç
     expect(await chargeCount()).toBe(1);
   });
 
+  it("P2 Codex: avisos fazem parte do conteúdo aprovado (feriado no vencimento invalida hash e atualidade)", async () => {
+    await active(cli1);
+    const { batchId } = await generateBatch(db, asstA, A, D);
+    const before = (await getBatch(db, asstA, A, batchId))!;
+    await addHoliday(db, gerA, A, { day: "2026-10-14", name: "Feriado no vencimento" }); // quarta; só aviso, a emissão (01/10) segue válida
+    const mid = (await getBatch(db, asstA, A, batchId))!;
+    expect(mid.stale).toMatchObject({ changed: 1, any: true });
+    await expect(approveBatch(db, ger2A, A, batchId, before.hash)).rejects.toThrow(/contratos mudaram/);
+    await generateBatch(db, asstA, A, D);
+    const after = (await getBatch(db, asstA, A, batchId))!;
+    expect(after.stale.any).toBe(false); expect(after.hash).not.toBe(before.hash);
+    expect(after.charges[0].warnings).toContain("vencimento_feriado");
+  });
+
+  it("P1 Codex: mudança concorrente de contrato ou feriado NÃO passa despercebida pela aprovação (esperam o commit)", async () => {
+    const c1 = await active(cli1);
+    const { batchId } = await generateBatch(db, asstA, A, D);
+    const hash = (await getBatch(db, asstA, A, batchId))!.hash;
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    let release!: () => void; const hold = new Promise<void>((r) => { release = r; });
+    // transação concorrente altera o valor do contrato e só confirma depois
+    const writer = conn.begin(async (q) => { await q`update contracts set monthly_amount = 9999.00 where id = ${c1}`; await hold; });
+    await sleep(150);
+    let settled = false;
+    const p = approveBatch(db, ger2A, A, batchId, hash); p.then(() => { settled = true; }, () => { settled = true; });
+    await sleep(500);
+    expect(settled).toBe(false);          // a aprovação espera a alteração concorrente terminar
+    release(); await writer;
+    await expect(p).rejects.toThrow(/contratos mudaram/);
+    expect((await getBatch(db, dirA, A, batchId))!.batch.status).toBe("rascunho");
+    // idem para feriado inserido concorrentemente na data de emissão
+    await generateBatch(db, asstA, A, D);
+    const h2 = (await getBatch(db, asstA, A, batchId))!.hash;
+    let release2!: () => void; const hold2 = new Promise<void>((r) => { release2 = r; });
+    const writer2 = conn.begin(async (q) => { await q`insert into holidays (company_id, day, name) values (${A}, ${D}, 'Concorrente')`; await hold2; });
+    await sleep(150);
+    let settled2 = false;
+    const p2 = approveBatch(db, ger2A, A, batchId, h2); p2.then(() => { settled2 = true; }, () => { settled2 = true; });
+    await sleep(500);
+    expect(settled2).toBe(false);
+    release2(); await writer2;
+    await expect(p2).rejects.toThrow(/contratos mudaram/);
+    expect((await getBatch(db, dirA, A, batchId))!.batch.status).toBe("rascunho");
+  });
+
   it("cancelar: só prévia; libera a data para nova prévia", async () => {
     await active(cli1);
     const { batchId } = await generateBatch(db, asstA, A, D);

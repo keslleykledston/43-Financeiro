@@ -27,7 +27,7 @@ Aceite: reimportar não duplica; conflito com cadastro manual vai para revisão;
 Saída: CRUD de contratos, valor, empresa, cliente, vigência, due_day, flag NF conjunta, competência anterior, agenda com lotes 25/1/8/15, alerta dia 31 e meses curtos.
 Aceite: testes tabelados para dias 1, 5, 12, 13, 16, 17, 22, 23, 30, 31, mês/ano novo, fev; competência M e vencimento M+1; ajustes não fazem alterações silenciosas.
 
-## E05 — Prévia + aprovação de lote [x] (aguarda revisão Codex antes do deploy)
+## E05 — Prévia + aprovação de lote [x] (revisado pelo Codex, P1+P2 corrigidos)
 Saída: serviço idempotente de gerar prévias, lista por empresa, filtros por lote, resumo total, sinalização de exceções, aprovação humana auditável e sem operações externas.
 Aceite: reexecutar lote não duplica cobrança; status aprovado só por papel autorizado; alterações pós-aprovação exigem nova validação; help.
 
