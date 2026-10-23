@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createMockProviders } from "@/modules/providers/mock";
-import { LIVE_FLAGS, LiveNotAvailable, getProviders, liveFlagsOn } from "@/modules/providers/registry";
+import { LIVE_FLAGS, LiveNotAvailable, assertSimulated, getProviders, liveFlagsOn } from "@/modules/providers/registry";
 
 describe("E09 provedores simulados (contrato)", () => {
   it("e-mail/WhatsApp: idempotente por chave, erros simulados e validação", async () => {
@@ -47,6 +47,12 @@ describe("E09 provedores simulados (contrato)", () => {
       expect(() => getProviders({ [f]: "true" })).toThrow(LiveNotAvailable);
       expect(() => getProviders({ [f]: "false" })).not.toThrow();
     }
+  });
+  it("assertSimulated recusa provedor injetado não simulado e chaves reais", () => {
+    const m = createMockProviders();
+    expect(assertSimulated(m, {})).toBe(m);
+    expect(() => assertSimulated({ ...m, whatsapp: { mode: "live", send: async () => ({ ok: true, providerRef: "x" }) } }, {})).toThrow(/whatsapp/);
+    expect(() => assertSimulated(m, { WHATSAPP_LIVE_ENABLED: "true" })).toThrow(LiveNotAvailable);
   });
   it("nenhum arquivo dos provedores faz chamada de rede nesta fase", () => {
     const dir = join(process.cwd(), "src/modules/providers");

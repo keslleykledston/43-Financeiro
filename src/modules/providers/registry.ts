@@ -5,8 +5,8 @@ import type { Providers } from "./types";
 export const LIVE_FLAGS = ["BILLING_LIVE_ENABLED", "EMAIL_EXTERNAL_ENABLED", "CORA_LIVE_ENABLED", "FISCAL_LIVE_ENABLED", "WHATSAPP_LIVE_ENABLED"] as const;
 
 export class LiveNotAvailable extends Error {
-  constructor(flags: string[]) {
-    super(`Chave(s) ${flags.join(", ")} ligada(s), mas não há adaptador real homologado (E10). Desligue-as: nada será enviado.`);
+  constructor(flags: string[], message?: string) {
+    super(message ?? `Chave(s) ${flags.join(", ")} ligada(s), mas não há adaptador real homologado (E10). Desligue-as: nada será enviado.`);
     this.name = "LiveNotAvailable";
   }
 }
@@ -18,6 +18,15 @@ export function getProviders(env: Record<string, string | undefined> = process.e
   const on = liveFlagsOn(env);
   if (on.length > 0) throw new LiveNotAvailable([...on]);
   return createMockProviders();
+}
+
+/** Vale também para provedores INJETADOS (testes ou chamadores futuros): chave real ligada ou adaptador não simulado → recusa. */
+export function assertSimulated(p: Providers, env: Record<string, string | undefined> = process.env): Providers {
+  const on = liveFlagsOn(env);
+  if (on.length > 0) throw new LiveNotAvailable([...on]);
+  const real = Object.entries(p).filter(([, v]) => v.mode !== "mock").map(([k]) => k);
+  if (real.length > 0) throw new LiveNotAvailable(real, `Provedor(es) ${real.join(", ")} não simulado(s): adaptador real só entra na fase E10, com homologação e autorização.`);
+  return p;
 }
 
 export const PROVIDER_CATALOG = [
