@@ -1,7 +1,7 @@
 # AGORA / Checkpoint
 **Data:** 2026-10-22
-**Estado real (verificado):** PUBLICADO em https://financeiro.devops.k3gsolutions.com.br (Nginx vhost novo + Let's Encrypt, proxy 127.0.0.1:3150). Anônimo -> /login, health OK, headers OK. Login com senha real: pendente de validação do usuário. DEMO_MODE ativo, sem dados reais.
+**Estado real (verificado):** Publicado em https://financeiro.devops.k3gsolutions.com.br. E02 implementado: papéis por empresa, convites (72h, hash, uso único), remoção, auditoria, tela Ajustes. 7 testes passam no container (5 integração em DB de teste: isolamento A/B, RBAC, convite, remoção). Backup diário 03:30 (cron) + restore testado. NÃO testado: UI de Ajustes no browser, Playwright, HSTS/CSP. Revisão Codex: em andamento.
 **Entrega ativa:** E01 (login + shell + dashboard DEMO).
-**Próxima ação:** usuário valida login no domínio; Playwright smoke (375px); E02 RBAC/convites/isolamento multiempresa com testes; avaliar HSTS/CSP; backup pg_dump agendado.
+**Próxima ação:** corrigir P0/P1 do Codex; usuário valida Ajustes no browser; Playwright smoke; E03 clientes.
 **Bloqueios:** nenhum.
 **Git:** branch main, sem push/tag.

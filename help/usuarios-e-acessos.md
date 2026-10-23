@@ -1,0 +1,10 @@
+# Usuários e acessos
+
+**Onde:** menu *Ajustes*.
+
+- Cada pessoa tem um papel **por empresa**. Quem não é membro de uma empresa não vê nada dela.
+- **Papéis:** Diretoria (gere acessos e vê financeiro), Gerente e Assistente e Contabilidade (veem financeiro), Admin técnico (gere acessos, não vê dados financeiros).
+- **Convidar:** informe e-mail e papel. O sistema mostra um link **uma única vez**; envie ao convidado. Vale 72 h e só funciona uma vez.
+- Diretoria não pode criar Admin técnico. Ninguém remove o próprio acesso.
+- **Remover:** o usuário perde o acesso à empresa imediatamente. O histórico fica na auditoria.
+- Para trocar de empresa, use o seletor no topo.

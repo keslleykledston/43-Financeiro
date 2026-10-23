@@ -39,3 +39,14 @@ export const auditLog = pgTable("audit_log", {
   action: text("action").notNull(),
   detail: jsonb("detail"),
 }, (t) => [index("audit_company_idx").on(t.companyId, t.createdAt)]);
+
+export const invitations = pgTable("invitations", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  email: text("email").notNull(),
+  role: roleEnum("role").notNull(),
+  tokenHash: text("token_hash").notNull(), // só o hash; token cru nunca é gravado
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  invitedBy: uuid("invited_by").notNull().references(() => users.id),
+}, (t) => [uniqueIndex("invitations_token_uq").on(t.tokenHash), index("invitations_company_idx").on(t.companyId)]);

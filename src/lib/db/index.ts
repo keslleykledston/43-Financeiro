@@ -3,7 +3,7 @@ import postgres from "postgres";
 import { databaseUrl } from "./url";
 import * as schema from "./schema";
 
-type DB = PostgresJsDatabase<typeof schema>;
+export type DB = PostgresJsDatabase<typeof schema>;
 const g = globalThis as unknown as { _db?: DB };
 
 // Conexão preguiçosa: o build do Next importa módulos sem credenciais.
