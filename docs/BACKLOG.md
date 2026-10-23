@@ -60,7 +60,8 @@ Pré-requisito (Codex E06, P2): antes de qualquer envio real, a FK `message_queu
 Saída: fornecedores, vencimentos, anexos, aprovações, exportação e controle da execução manual no Cora.
 Aceite: sem executar pagamento pela app; logs, permissão de alçada, duplicidade, vencimento.
 
-## E12 — Inteligência financeira MVP [ ]
+## E12 — Inteligência financeira MVP [x]
+(Entregue sem contas a pagar: o fluxo projetado é só de ENTRADAS e diz isso na tela. Saídas entram quando o E11 existir. PDF/CSV do painel: não necessários agora.)
 Saída: dashboard empresa/grupo, faturado vs recebido, a receber/a pagar, fluxo projetado 13 semanas (com indicação de qualidade), gráficos explicativos, sem IA generativa necessária.
 Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausentes, PDF/CSV só se necessários, ajuda.
 

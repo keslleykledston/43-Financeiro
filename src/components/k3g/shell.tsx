@@ -7,7 +7,7 @@ export function DemoBanner() {
   return (
     <div role="status" className="sticky top-0 z-50 flex h-9 items-center justify-center gap-2 bg-demo px-3 text-center text-xs font-medium text-demo-foreground">
       <FlaskConical className="size-3.5 shrink-0" aria-hidden />
-      <span><strong>DEMONSTRAÇÃO</strong> — dados fictícios. Nenhum boleto, nota ou e-mail real é emitido.</span>
+      <span><strong>VALIDAÇÃO</strong> — nenhum boleto, nota, e-mail ou WhatsApp real é emitido ou enviado.</span>
     </div>
   );
 }

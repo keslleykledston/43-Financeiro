@@ -18,12 +18,14 @@ test.describe("login em 375px", () => {
   });
 });
 
-test("375px: valores dos cartões do início não são cortados", async ({ page }) => {
+test("375px: valores dos indicadores do início não são cortados e não há rolagem horizontal", async ({ page }) => {
   await page.goto("/");
-  for (const v of ["R$ 184.320,00", "R$ 131.870,00", "R$ 52.450,00", "R$ 9.210,00"]) {
-    const el = page.getByText(v, { exact: true });
+  const valores = page.locator('section[aria-label="Indicadores"] .num');
+  await expect(valores).toHaveCount(6);
+  for (let i = 0; i < 6; i++) {
+    const el = valores.nth(i);
     await expect(el).toBeVisible();
-    const clipped = await el.evaluate((n) => n.scrollWidth > n.clientWidth + 1);
-    expect(clipped, `${v} cortado`).toBe(false);
+    expect(await el.evaluate((n) => n.scrollWidth > n.clientWidth + 1), `indicador ${i} cortado`).toBe(false);
   }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
 });

@@ -30,11 +30,11 @@ test.describe("E01 — acesso anônimo", () => {
 });
 
 test.describe("E01 — shell autenticado", () => {
-  test("dashboard marcado como demonstração", async ({ page }) => {
+  test("dashboard com números reais e ambiente marcado como validação", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Visão executiva" })).toBeVisible();
-    await expect(page.getByRole("status").first()).toContainText("DEMONSTRAÇÃO");
-    await expect(page.getByText("Dados fictícios").first()).toBeVisible();
+    await expect(page.getByRole("status").first()).toContainText("VALIDAÇÃO");
+    await expect(page.getByText("números reais").first()).toBeVisible();
   });
 
   for (const r of ROTAS) {

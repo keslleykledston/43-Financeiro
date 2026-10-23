@@ -2,9 +2,9 @@ import { test, expect } from "@playwright/test";
 
 test("375px: menu 'Mais' abre o menu completo, navega e fecha; design-system sem rolagem horizontal", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Mais" }).click();
   const menu = page.getByRole("dialog", { name: "Menu completo" });
-  await expect(menu).toBeVisible();
+  // a página pode hidratar depois do primeiro clique: repete até o menu abrir
+  await expect(async () => { await page.getByRole("button", { name: "Mais" }).click(); await expect(menu).toBeVisible({ timeout: 1500 }); }).toPass({ timeout: 15_000 });
   await expect(menu.getByRole("link", { name: /Conciliação/ })).toBeVisible();
   await menu.getByRole("link", { name: /Conciliação/ }).click();
   await expect(page).toHaveURL(/\/conciliacao/);
