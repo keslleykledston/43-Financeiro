@@ -1,4 +1,15 @@
-# Dev/prod local: DB privado (sem ports). Web em 127.0.0.1:3150 quando containerizado.
+# Tudo isolado em Docker. DB sem ports; web publicado só em loopback (Nginx do host faz o TLS).
+x-app-env: &app-env
+  NODE_ENV: production
+  TZ: America/Manaus
+  POSTGRES_HOST: db
+  POSTGRES_PORT: "5432"
+  DEMO_MODE: "true"
+  BILLING_LIVE_ENABLED: "false"
+  EMAIL_EXTERNAL_ENABLED: "false"
+  CORA_LIVE_ENABLED: "false"
+  FISCAL_LIVE_ENABLED: "false"
+
 services:
   db:
     image: postgres:16-alpine
@@ -16,6 +27,29 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  web:
+    build: { context: ., target: runner }
+    restart: unless-stopped
+    env_file: .env
+    environment: *app-env
+    ports:
+      - "127.0.0.1:3150:3150"
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [k3g_finance]
+    mem_limit: 768m
+
+  # docker compose --profile tools run --rm tools pnpm db:migrate | seed | test
+  tools:
+    profiles: [tools]
+    build: { context: ., target: tools }
+    env_file: .env
+    environment: *app-env
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [k3g_finance]
+
 volumes:
   k3g_finance_pgdata:
 networks:

@@ -16,3 +16,6 @@ Pendências: dia 31, meses curtos, feriados, alçadas, regras fiscais, API e-NF,
 
 ## ADR-001 Stack base (2026-10-22)
 Next.js 15 + React 19 + TypeScript 5.9 (TS 7 incompatível com Next 15), Drizzle ORM + postgres.js, Auth.js (next-auth v5 beta) + argon2, Zod, Tailwind 3, Vitest + Playwright, pnpm. Porta web 3150. Reversível; auth ainda não implementada.
+
+## ADR-002 Tudo em Docker (2026-10-22, pedido do usuário)
+Isolamento: db (sem ports), web (127.0.0.1:3150), tools (profile, migrate/seed/test). pnpm fixado 10.29.3 (corepack latest viola política de release age). Sem Node/DB rodando direto no host.
