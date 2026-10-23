@@ -1,10 +1,10 @@
 export type Role = "admin_tecnico" | "diretoria" | "gerente" | "assistente" | "contabilidade";
-export type Permission = "members.read" | "members.invite" | "members.remove" | "finance.read" | "audit.read" | "crm.read" | "crm.write" | "crm.export";
+export type Permission = "members.read" | "members.invite" | "members.remove" | "finance.read" | "audit.read" | "crm.read" | "crm.write" | "crm.export" | "integrations.manage";
 
 // Admin técnico gere acessos mas NÃO lê dados financeiros por padrão.
 const MAP: Record<Role, Permission[]> = {
-  admin_tecnico: ["members.read", "members.invite", "members.remove", "audit.read"],
-  diretoria: ["members.read", "members.invite", "members.remove", "finance.read", "audit.read", "crm.read", "crm.write", "crm.export"],
+  admin_tecnico: ["members.read", "members.invite", "members.remove", "audit.read", "integrations.manage"],
+  diretoria: ["members.read", "members.invite", "members.remove", "finance.read", "audit.read", "crm.read", "crm.write", "crm.export", "integrations.manage"],
   gerente: ["members.read", "finance.read", "crm.read", "crm.write", "crm.export"],
   assistente: ["finance.read", "crm.read", "crm.write"],
   contabilidade: ["finance.read", "crm.read", "crm.export"],

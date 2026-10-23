@@ -97,6 +97,7 @@ const contactColumns = () => ({
   email: text("email"),
   phone: text("phone"),
   isFinancial: boolean("is_financial").notNull().default(false),
+  source: text("source").notNull().default("manual"), // manual | csv | crm
 });
 
 export const customerContacts = pgTable("customer_contacts", { ...contactColumns(), partyId: uuid("customer_id").notNull() }, (t) => [
@@ -108,4 +109,44 @@ export const customerContacts = pgTable("customer_contacts", { ...contactColumns
 export const vendorContacts = pgTable("vendor_contacts", { ...contactColumns(), partyId: uuid("vendor_id").notNull() }, (t) => [
   index("vendor_contacts_vendor_idx").on(t.companyId, t.partyId),
   foreignKey({ columns: [t.companyId, t.partyId], foreignColumns: [vendors.companyId, vendors.id] }),
+]);
+
+// ---------- Integrações (docs/API_E_INTEGRACOES.md): CRM é a fonte de verdade de clientes e contratos ----------
+export const integrationConnections = pgTable("integration_connections", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  kind: text("kind").notNull(), // "crm"
+  enabled: boolean("enabled").notNull().default(false),
+  // sem segredos aqui: só referência de empresa/conta no CRM. Credenciais ficam em env/secret store.
+  settings: jsonb("settings").notNull().default(sql`'{}'::jsonb`),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+}, (t) => [uniqueIndex("integration_connections_company_kind_uq").on(t.companyId, t.kind)]);
+
+export const integrationSyncRuns = pgTable("integration_sync_runs", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  kind: text("kind").notNull(),
+  status: text("status").notNull(), // preview | applied | failed
+  stats: jsonb("stats").notNull().default(sql`'{}'::jsonb`), // só contagens (sem PII)
+  error: text("error"),
+  confirmedBy: uuid("confirmed_by").references(() => users.id),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+}, (t) => [index("integration_sync_runs_company_idx").on(t.companyId, t.createdAt)]);
+
+export const integrationConflicts = pgTable("integration_conflicts", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  runId: uuid("run_id").references(() => integrationSyncRuns.id),
+  entity: text("entity").notNull(), // customer
+  externalId: text("external_id").notNull(),
+  reason: text("reason").notNull(), // duplicate_document | document_collision | ambiguous_company
+  localId: uuid("local_id"), // cadastro local em conflito
+  // payload mínimo para decidir (documento e nome); sem contatos
+  payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
+  status: text("status").notNull().default("open"), // open | linked | ignored
+  resolvedBy: uuid("resolved_by").references(() => users.id),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+}, (t) => [
+  index("integration_conflicts_company_idx").on(t.companyId, t.status),
+  uniqueIndex("integration_conflicts_open_uq").on(t.companyId, t.entity, t.externalId).where(sql`${t.status} = 'open'`),
 ]);

@@ -31,7 +31,8 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
         <p className="text-sm text-slate-600">{p.kind === "cliente" ? "Cliente" : "Fornecedor"} · {p.docType.toUpperCase()} {p.documentFormatted}{p.archivedAt && <span className="ml-2 rounded-full bg-slate-200 px-2 py-0.5 text-xs">Arquivado</span>}</p>
       </div>
       {sp.salvo && <p role="status" className="rounded-xl bg-green-50 p-3 text-sm text-green-900">Alterações salvas.</p>}
-      {write && !p.archivedAt && (
+      {p.source === "crm" && <p role="note" className="rounded-xl bg-blue-50 p-3 text-sm text-blue-900">Cadastro sincronizado do CRM (somente leitura). Para alterar dados ou arquivar, edite no CRM. Contatos adicionais locais são permitidos.</p>}
+      {write && !p.archivedAt && p.source !== "crm" && (
         <section className="rounded-2xl bg-white p-5 shadow-sm"><h2 className="mb-3 font-semibold">Dados</h2>
           <PartyForm action={updateAction.bind(null, id)} defaults={{ kind: p.kind, legalName: p.legalName, tradeName: p.tradeName, document: p.documentFormatted }} submit="Salvar" lockKind /></section>
       )}
@@ -41,8 +42,8 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
         <ul className="divide-y divide-slate-100">
           {p.contacts.map((c) => (
             <li key={c.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
-              <div className="min-w-0"><p className="truncate font-medium">{c.name}{c.isFinancial && <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">Financeiro</span>}</p><p className="truncate text-slate-500">{[c.email, c.phone].filter(Boolean).join(" · ") || "sem e-mail/telefone"}</p></div>
-              {write && <form action={removeContactAction}><input type="hidden" name="contactId" value={c.id} /><input type="hidden" name="partyId" value={id} /><button className="rounded-lg px-3 py-1.5 text-red-700 ring-1 ring-red-200">Remover</button></form>}
+              <div className="min-w-0"><p className="truncate font-medium">{c.name}{c.isFinancial && <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">Financeiro</span>}{c.source === "crm" && <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">CRM</span>}</p><p className="truncate text-slate-500">{[c.email, c.phone].filter(Boolean).join(" · ") || "sem e-mail/telefone"}</p></div>
+              {write && c.source !== "crm" && <form action={removeContactAction}><input type="hidden" name="contactId" value={c.id} /><input type="hidden" name="partyId" value={id} /><button className="rounded-lg px-3 py-1.5 text-red-700 ring-1 ring-red-200">Remover</button></form>}
             </li>
           ))}
         </ul>
@@ -54,7 +55,7 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
           {log.map((h, i) => <li key={i}>{h.at.toLocaleString("pt-BR", { timeZone: "America/Manaus" })} — {LABEL[h.action] ?? h.action}</li>)}
         </ul>
       </section>
-      {write && (
+      {write && p.source !== "crm" && (
         <form action={archiveAction}>
           <input type="hidden" name="id" value={id} /><input type="hidden" name="archived" value={p.archivedAt ? "0" : "1"} />
           <button className="rounded-xl px-4 py-2.5 text-sm text-red-700 ring-1 ring-red-200">{p.archivedAt ? "Restaurar cadastro" : "Arquivar cadastro"}</button>

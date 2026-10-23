@@ -59,6 +59,12 @@ async function kindOf(db: DB, companyId: string, id: string): Promise<Kind | nul
   return null;
 }
 
+/** Cadastro sincronizado do CRM é somente leitura aqui: o CRM é a fonte de verdade (um arquivamento local seria desfeito na próxima sincronização). */
+async function assertNotCrmOwned(db: DB, main: typeof customers, companyId: string, id: string) {
+  const [r] = await db.select({ source: main.source }).from(main).where(and(eq(main.id, id), eq(main.companyId, companyId)));
+  if (r?.source === "crm") throw new Invalid("Este cadastro é sincronizado do CRM e não pode ser alterado aqui. Edite no CRM.");
+}
+
 export async function createParty(db: DB, actorId: string, companyId: string, input: unknown) {
   await requirePerm(db, actorId, companyId, "crm.write");
   const v = normalize(input);
@@ -89,6 +95,7 @@ export async function updateParty(db: DB, actorId: string, companyId: string, id
   if (!kind) throw new Invalid("Cadastro não encontrado");
   const v = normalize({ ...(input as object), kind }); // o tipo não muda na edição
   const { main } = tables(kind);
+  await assertNotCrmOwned(db, main, companyId, id);
   try {
     return await db.transaction(async (tx) => {
       const [p] = await tx.update(main)
@@ -106,6 +113,7 @@ export async function setArchived(db: DB, actorId: string, companyId: string, id
   const kind = await kindOf(db, companyId, id);
   if (!kind) throw new Invalid("Cadastro não encontrado");
   const { main } = tables(kind);
+  await assertNotCrmOwned(db, main, companyId, id);
   try {
     await db.transaction(async (tx) => {
       await tx.update(main).set({ archivedAt: archived ? new Date() : null, updatedAt: new Date() })
@@ -129,8 +137,12 @@ export async function removeContact(db: DB, actorId: string, companyId: string, 
   await requirePerm(db, actorId, companyId, "crm.write");
   for (const k of ["cliente", "fornecedor"] as const) {
     const { contacts } = tables(k);
-    const [c] = await db.delete(contacts).where(and(eq(contacts.id, contactId), eq(contacts.companyId, companyId))).returning();
-    if (c) { await audit(db, companyId, actorId, "party.contact_removed", { partyId: c.partyId }); return; }
+    const [c] = await db.select().from(contacts).where(and(eq(contacts.id, contactId), eq(contacts.companyId, companyId)));
+    if (!c) continue;
+    if (c.source === "crm") throw new Invalid("Contato sincronizado do CRM: remova no CRM.");
+    await db.delete(contacts).where(eq(contacts.id, contactId));
+    await audit(db, companyId, actorId, "party.contact_removed", { partyId: c.partyId });
+    return;
   }
   throw new Invalid("Contato não encontrado");
 }

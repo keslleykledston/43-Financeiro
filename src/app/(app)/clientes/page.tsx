@@ -52,7 +52,7 @@ export default async function Clientes({ searchParams }: { searchParams: Promise
           {r.items.map((p) => (
             <li key={p.id}><Link href={`/clientes/${p.id}`} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50">
               <div className="min-w-0"><p className="truncate font-medium">{p.legalName}</p><p className="truncate text-sm text-slate-500">{p.docType.toUpperCase()} {p.documentFormatted}</p></div>
-              <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs">{p.kind === "cliente" ? "Cliente" : "Fornecedor"}</span>
+              <span className="flex shrink-0 gap-1.5"><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs">{p.kind === "cliente" ? "Cliente" : "Fornecedor"}</span>{p.source === "crm" && <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs text-blue-800">CRM</span>}</span>
             </Link></li>
           ))}
         </ul>

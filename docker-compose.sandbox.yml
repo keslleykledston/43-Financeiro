@@ -21,6 +21,10 @@ x-env: &env
   SEED_ADMIN_EMAIL: admin@sandbox.test
   SEED_ADMIN_PASSWORD: Sandbox-Admin-Pass-123
   SEED_ADMIN_ROLE: diretoria
+  CRM_SYNC_ENABLED: "true"
+  CRM_BASE_URL: http://sandbox-crm:4000
+  CRM_API_TOKEN: sandbox-crm-token
+  CRM_ALLOW_INSECURE_HTTP: "true"
 
 services:
   sandbox-db:
@@ -34,10 +38,16 @@ services:
     environment: *env
     depends_on: { sandbox-db: { condition: service_healthy } }
 
+  sandbox-crm:
+    image: node:22-slim
+    command: ["node", "/srv/fake-crm.mjs"]
+    volumes: ["./scripts/fake-crm.mjs:/srv/fake-crm.mjs:ro"]
+    healthcheck: { test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"], interval: 3s, timeout: 3s, retries: 20 }
+
   sandbox-web:
     build: { context: ., target: runner }
     environment: *env
-    depends_on: { sandbox-db: { condition: service_healthy } }
+    depends_on: { sandbox-db: { condition: service_healthy }, sandbox-crm: { condition: service_healthy } }
 
   sandbox-e2e:
     image: mcr.microsoft.com/playwright:v1.64.1-noble
@@ -48,6 +58,7 @@ services:
       BASE_URL: http://sandbox-web:3150
       SANDBOX_ADMIN_EMAIL: admin@sandbox.test
       SANDBOX_ADMIN_PASSWORD: Sandbox-Admin-Pass-123
+      FAKE_CRM_URL: http://sandbox-crm:4000
       CI: "1"
     depends_on: { sandbox-web: { condition: service_healthy } }
     command: ["sh", "-c", "npx playwright test; rc=$$?; chown -R 1000:1000 e2e-results 2>/dev/null; exit $$rc"]

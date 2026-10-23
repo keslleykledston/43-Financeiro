@@ -43,6 +43,13 @@
       "when": 1792730908350,
       "tag": "0005_careless_glorian",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792731329685,
+      "tag": "0006_nosy_reptil",
+      "breakpoints": true
     }
   ]
 }
