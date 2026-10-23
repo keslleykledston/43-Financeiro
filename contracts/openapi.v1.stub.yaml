@@ -1,0 +1,162 @@
+openapi: 3.1.0
+info:
+  title: K3G Finance API
+  version: 0.1.0
+  description: >
+    Contrato inicial para implementação. Ainda não existe servidor/API funcional.
+    Todos os endpoints exigem autenticação e autorização por empresa salvo health liveness.
+servers:
+  - url: https://financeiro.devops.k3gsolutions.com.br/api/v1
+    description: Endpoint desejado, ainda não verificado
+security:
+  - sessionAuth: []
+paths:
+  /me:
+    get:
+      summary: Usuário e acessos
+      operationId: getMe
+      responses:
+        '200':
+          description: Usuário autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUser'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /companies:
+    get:
+      summary: Empresas autorizadas
+      operationId: listCompanies
+      responses:
+        '200':
+          description: Lista de empresas acessíveis
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Company' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /customers:
+    get:
+      summary: Clientes da empresa autorizada
+      operationId: listCustomers
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 30 }
+      responses:
+        '200':
+          description: Página de clientes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Customer' }
+                  nextCursor: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      summary: Criar cliente com auditoria
+      operationId: createCustomer
+      parameters: [ { $ref: '#/components/parameters/CompanyId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 2 }
+                document: { type: string, description: Documento armazenado/protegido conforme LGPD }
+                billingEmail: { type: string, format: email }
+      responses:
+        '201': { description: Criado }
+        '400': { description: Inválido }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /contracts:
+    get:
+      summary: Contratos por empresa
+      operationId: listContracts
+      parameters: [ { $ref: '#/components/parameters/CompanyId' } ]
+      responses:
+        '200': { description: Lista autorizada }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /billing/batches:
+    get:
+      summary: Prévias de lotes por empresa
+      operationId: listBillingBatches
+      parameters: [ { $ref: '#/components/parameters/CompanyId' } ]
+      responses:
+        '200': { description: Lista de lotes }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /email/templates:
+    get:
+      summary: Templates de comunicação
+      operationId: listEmailTemplates
+      parameters: [ { $ref: '#/components/parameters/CompanyId' } ]
+      responses:
+        '200': { description: Lista de templates }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /health:
+    get:
+      summary: Liveness público mínimo
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: Serviço funcionando, sem detalhes internos
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [ok] }
+components:
+  securitySchemes:
+    sessionAuth:
+      type: apiKey
+      in: cookie
+      name: session
+      description: Nome real do cookie definido pela biblioteca de autenticação escolhida
+  parameters:
+    CompanyId:
+      name: companyId
+      in: query
+      required: true
+      schema: { type: string, format: uuid }
+      description: Identificador sempre validado no servidor contra membership/permissões
+  responses:
+    Unauthorized:
+      description: Sessão ausente ou expirada
+    Forbidden:
+      description: Usuário sem acesso à empresa/operação
+  schemas:
+    Company:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+    CurrentUser:
+      type: object
+      required: [id, companies]
+      properties:
+        id: { type: string, format: uuid }
+        companies:
+          type: array
+          items: { $ref: '#/components/schemas/Company' }
+    Customer:
+      type: object
+      required: [id, companyId, name]
+      properties:
+        id: { type: string, format: uuid }
+        companyId: { type: string, format: uuid }
+        name: { type: string }

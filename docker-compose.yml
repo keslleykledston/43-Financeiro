@@ -1,0 +1,22 @@
+# Dev/prod local: DB privado (sem ports). Web em 127.0.0.1:3150 quando containerizado.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?defina no .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina no .env}
+      POSTGRES_DB: k3gfinance
+      TZ: UTC
+    volumes:
+      - k3g_finance_pgdata:/var/lib/postgresql/data
+    networks: [k3g_finance]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d k3gfinance"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+volumes:
+  k3g_finance_pgdata:
+networks:
+  k3g_finance:
