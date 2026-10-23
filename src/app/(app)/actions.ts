@@ -9,7 +9,7 @@ export async function switchCompany(formData: FormData) {
   const id = String(formData.get("company") ?? "");
   // valida no servidor: só empresas com membership ativo
   if (ctx.companies.some((c) => c.id === id)) {
-    (await cookies()).set(COMPANY_COOKIE, id, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/" });
+    (await cookies()).set(COMPANY_COOKIE, id, { httpOnly: true, sameSite: "lax", secure: (process.env.AUTH_URL ?? "").startsWith("https"), path: "/" });
   }
   redirect("/");
 }

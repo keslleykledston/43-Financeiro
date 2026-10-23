@@ -35,3 +35,10 @@
 
 ## Gates
 E01: lint/typecheck/build/e2e login UI. E02+: integração PostgreSQL e tenant tests. E05+: idempotência, concorrência. E09+: schemas API/webhook. E10+: homologação externa e autorização operacional explícita.
+
+## Sandbox de validação (gate oficial) — `pnpm sandbox`
+Stack **descartável e isolada** (projeto Compose `k3g-sandbox`, DB em tmpfs, sem ports, credenciais fictícias; não toca produção). Executa: build → migrate → typecheck → unit+integração (Vitest) → seed → web → e2e Playwright (desktop + 375px). Sai com código ≠ 0 se qualquer etapa falhar; relatório HTML em `e2e-results/report/`.
+- **Toda entrega nova** adiciona specs em `e2e/eNN-*.spec.ts` (sufixo `.mobile.spec.ts` roda em 375px) e só é "pronta" com `SANDBOX PASS`.
+- Sessão do admin vem de `e2e/auth.setup.ts` (1 login). Specs anônimas usam `storageState` vazio. Use `locator("p[role=alert]")` (o Next injeta um `role=alert` vazio).
+- Cobre hoje: E01 (acesso anônimo, shell, rotas, empresas, 375px) e E02 (convite ponta a ponta, papéis, isolamento, remoção).
+- **Não cobre:** Nginx/TLS reais, abas obsoletas após deploy, e e-mail/Cora/NF reais (desligados). Esses ficam no smoke de deploy.

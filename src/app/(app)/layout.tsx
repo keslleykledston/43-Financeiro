@@ -4,6 +4,17 @@ import { switchCompany, logout } from "./actions";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const ctx = await requireContext();
+  if (!ctx.current) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
+        <div role="alert" className="w-full max-w-sm rounded-3xl bg-white p-7 text-center shadow-sm">
+          <h1 className="text-xl font-semibold">Sem acesso</h1>
+          <p className="mt-2 text-sm text-slate-600">Sua conta não está vinculada a nenhuma empresa ativa. Peça um convite à diretoria.</p>
+          <form action={logout} className="mt-5"><button className="rounded-xl px-4 py-2.5 text-sm ring-1 ring-slate-300">Sair</button></form>
+        </div>
+      </main>
+    );
+  }
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <div role="status" className="bg-amber-100 px-4 py-1.5 text-center text-xs font-medium text-amber-900">

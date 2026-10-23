@@ -19,3 +19,6 @@ test-results/
 **/private-data/
 **/backups/
 *.sqlite
+e2e-results
+test-results
+playwright-report
