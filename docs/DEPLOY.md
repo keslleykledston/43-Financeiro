@@ -26,3 +26,10 @@ Backup diário pg_dump + cópia criptografada fora do host de app quando possív
 
 ## Diagnóstico de bloqueios
 Sem sudo/DNS/certificado → app em localhost com autenticação, documentação do comando exato/necessidade sem expor segredos; solicitar somente a ação essencial ao operador do host. Sem Docker → avaliação de instalação ou alternativa segura sem substituir serviços existentes. Sem Lovable MCP → frontend local não bloqueia.
+
+## Resultado verificado (2026-10-22)
+- Vhost novo `/etc/nginx/conf.d/financeiro.conf` (cópia em `infra/nginx/financeiro.applied.conf`; backup `.bak.http-only` no host). Nenhum vhost existente foi alterado; só `reload`, nunca restart.
+- Cert Let's Encrypt via certbot webroot (`/var/www/html`), renovação automática do certbot; emitido sem e-mail de contato. Expira 2027-01-21.
+- Proxy -> 127.0.0.1:3150 (container web). HTTP->HTTPS 301 OK; anônimo -> /login OK; headers nosniff/referrer/X-Frame OK.
+- HSTS e CSP ainda NÃO ativados (avaliar impacto nos demais subdomínios).
+- Rollback: `sudo cp /etc/nginx/conf.d/financeiro.conf.bak.http-only /etc/nginx/conf.d/financeiro.conf && sudo nginx -t && sudo systemctl reload nginx` (ou remover o arquivo).

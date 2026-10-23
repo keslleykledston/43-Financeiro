@@ -6,6 +6,7 @@ x-app-env: &app-env
   POSTGRES_PORT: "5432"
   DEMO_MODE: "true"
   AUTH_TRUST_HOST: "true"
+  AUTH_URL: "https://financeiro.devops.k3gsolutions.com.br"
   BILLING_LIVE_ENABLED: "false"
   EMAIL_EXTERNAL_ENABLED: "false"
   CORA_LIVE_ENABLED: "false"
