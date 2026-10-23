@@ -22,6 +22,20 @@
       "when": 1792728230877,
       "tag": "0002_lush_salo",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792729221701,
+      "tag": "0003_harsh_rick_jones",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792729900992,
+      "tag": "0004_certain_marvel_boy",
+      "breakpoints": true
     }
   ]
 }

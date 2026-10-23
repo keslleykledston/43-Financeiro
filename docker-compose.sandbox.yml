@@ -20,6 +20,7 @@ x-env: &env
   FISCAL_LIVE_ENABLED: "false"
   SEED_ADMIN_EMAIL: admin@sandbox.test
   SEED_ADMIN_PASSWORD: Sandbox-Admin-Pass-123
+  SEED_ADMIN_ROLE: diretoria
 
 services:
   sandbox-db:

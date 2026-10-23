@@ -9,6 +9,7 @@ Leia no início: `START_HERE.md`, `agent/memory/NOW.md` (se existir), `agent/mem
 DISCOVER (comandos/repo) → PLAN (uma fatia) → IMPLEMENT → TEST (unit/integration/e2e) → INDEPENDENT REVIEW (Codex quando disponível, sempre em autenticação, pagamentos, NF, permissão, migrations e deploy) → FIX → DOCUMENT (`help/` quando impactar UX) → DEPLOY SAFE → VERIFY → GIT COMMIT → MEMORY CHECKPOINT → NEXT.
 
 ## Regras obrigatórias
+- Versionamento (ordem do usuário, ADR-005): ao fim de cada fase → `pnpm sandbox` PASS → commit → `git push origin main`. Nunca tag, --force ou reescrever histórico sem ordem explícita.
 - Validação: `pnpm sandbox` (stack isolada: unit+integração+e2e) deve dar PASS antes de deploy. Cada entrega adiciona specs em `e2e/`. Ver `docs/TESTES.md`.
 - Tudo roda em Docker; nunca Node/DB direto no host. Não ler `.env*` (deny em `.claude/settings.json`).
 - A primeira entrega deve ser VISUAL e verificável no navegador. As próximas devem mostrar valor ao usuário.

@@ -22,3 +22,10 @@ Isolamento: db (sem ports), web (127.0.0.1:3150), tools (profile, migrate/seed/t
 
 ## ADR-003 Convites sem verificação de e-mail (2026-10-23)
 Sem provedor de e-mail real (EMAIL_EXTERNAL_ENABLED=false), a posse do e-mail de um usuário NOVO não é verificada: o link (256 bits, 72h, uso único, hash no DB) enviado fora de banda pelo convidante é a prova. Mitigações: e-mail digitado deve bater; conta existente exige senha atual; rate limit. Reavaliar quando houver e-mail real (E06/E09): exigir verificação antes de ativar. Aceito para fase DEMO/sem dados reais; **bloqueia entrada de dados financeiros reais?** Não, mas convidar só pessoas conhecidas e enviar o link por canal confiável.
+
+## ADR-004 Clientes e fornecedores em tabela única (2026-10-23)
+`parties` com `kind` (cliente|fornecedor) + `party_contacts`, sempre com `company_id`. Documento normalizado (CPF 11 dígitos; CNPJ 14 posições, **aceita alfanumérico** — regra RFB: valor = ASCII−48). Unicidade parcial `(company_id, kind, document)` apenas para não arquivados (arquivar libera; restaurar pode conflitar → erro claro). Exclusão sempre lógica. Paginação por página/offset (UI); cursor fica para a API v1 (E09). Histórico lido de `audit_log.detail->>'partyId'`.
+Papéis: admin_tecnico sem acesso a CRM (dado financeiro); contabilidade lê+exporta; assistente lê+grava; diretoria/gerente tudo.
+
+## ADR-005 Versionamento: commit + push ao fim de cada fase (2026-10-23, ordem do usuário)
+Remoto: `ssh://git@ssh.github.com:443/keslleykledston/43-Financeiro.git` (porta 22 redirecionada por config local; chave `~/.ssh/id_ed25519_github` via `core.sshCommand` só neste repo). Push de `main` autorizado ao fim de cada fase/entrega, após SANDBOX PASS. **Continuam proibidos sem ordem explícita:** `git tag`, push --force, reescrever histórico. Rollback = `git revert`/checkout de commit anterior + restore de backup do DB quando houver migração.

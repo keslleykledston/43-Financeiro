@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb, pgEnum, integer } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb, pgEnum, integer, boolean, unique, foreignKey } from "drizzle-orm/pg-core";
 
 export const roleEnum = pgEnum("role", ["admin_tecnico", "diretoria", "gerente", "assistente", "contabilidade"]);
 export const statusEnum = pgEnum("member_status", ["active", "invited", "removed"]);
@@ -56,3 +56,37 @@ export const rateLimits = pgTable("rate_limits", {
   count: integer("count").notNull(),
   resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
 });
+
+export const partyKindEnum = pgEnum("party_kind", ["cliente", "fornecedor"]);
+export const docTypeEnum = pgEnum("doc_type", ["cpf", "cnpj"]);
+
+// Clientes e fornecedores (ADR-004: tabela única com `kind`). Sempre escopada por company_id.
+export const parties = pgTable("parties", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  kind: partyKindEnum("kind").notNull(),
+  legalName: text("legal_name").notNull(),
+  tradeName: text("trade_name"),
+  docType: docTypeEnum("doc_type").notNull(),
+  document: text("document").notNull(), // normalizado, sem pontuação
+  archivedAt: timestamp("archived_at", { withTimezone: true }), // exclusão lógica
+  createdBy: uuid("created_by").references(() => users.id),
+}, (t) => [
+  uniqueIndex("parties_company_kind_doc_uq").on(t.companyId, t.kind, t.document).where(sql`${t.archivedAt} is null`),
+  index("parties_company_name_idx").on(t.companyId, t.legalName),
+  unique("parties_company_id_uq").on(t.companyId, t.id), // alvo da FK composta dos contatos
+]);
+
+export const partyContacts = pgTable("party_contacts", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  partyId: uuid("party_id").notNull(),
+  name: text("name").notNull(),
+  email: text("email"),
+  phone: text("phone"),
+  isFinancial: boolean("is_financial").notNull().default(false),
+}, (t) => [
+  index("party_contacts_party_idx").on(t.companyId, t.partyId),
+  // o banco garante que contato e cadastro pertencem à MESMA empresa
+  foreignKey({ columns: [t.companyId, t.partyId], foreignColumns: [parties.companyId, parties.id] }),
+]);
