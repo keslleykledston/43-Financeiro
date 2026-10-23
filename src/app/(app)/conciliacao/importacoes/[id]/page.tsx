@@ -43,7 +43,9 @@ export default async function Importacao({ params, searchParams }: { params: Pro
         <SectionCard title="Prévia — nada foi gravado ainda">
           {imp && (
             <div className="mb-4 flex flex-wrap gap-2">
-              <form action={confirmImportAction}><input type="hidden" name="id" value={b.id} /><button className={buttonClass("primary")} disabled={b.newCount === 0}>Confirmar importação ({b.newCount} nova(s))</button></form>
+              <form action={confirmImportAction} className="space-y-2"><input type="hidden" name="id" value={b.id} />
+                {r.ambiguous > 0 && <label className="flex items-start gap-2 text-sm"><input type="checkbox" name="ackAmbiguous" className="mt-0.5 size-4 accent-primary" /><span>Conferi os lançamentos marcados como <strong>ambíguos</strong> e entendo que o sistema não distingue novo de repetido neles.</span></label>}
+                <button className={buttonClass("primary")} disabled={b.newCount === 0}>Confirmar importação ({b.newCount} nova(s))</button></form>
               <form action={cancelImportAction}><input type="hidden" name="id" value={b.id} /><input type="hidden" name="accountId" value={b.accountId} /><button className={buttonClass("outline")}>Cancelar</button></form>
             </div>
           )}
@@ -51,7 +53,7 @@ export default async function Importacao({ params, searchParams }: { params: Pro
             {r.rows.map((x) => (
               <li key={x.lineNo} className="flex flex-wrap items-center justify-between gap-2 py-2">
                 <span className="min-w-0"><span className="text-xs text-muted-foreground">{br(x.postedAt)} · </span>{x.description}</span>
-                <span className="flex items-center gap-2"><Money cents={x.amountCents} />{x.duplicate ? <StatusPill tone="neutral">Já importada</StatusPill> : <StatusPill tone="positive">Nova</StatusPill>}</span>
+                <span className="flex items-center gap-2"><Money cents={x.amountCents} />{x.ambiguous && <StatusPill tone="warning">Ambígua</StatusPill>}{x.duplicate ? <StatusPill tone="neutral">Já importada</StatusPill> : <StatusPill tone="positive">Nova</StatusPill>}</span>
               </li>
             ))}
           </ul>

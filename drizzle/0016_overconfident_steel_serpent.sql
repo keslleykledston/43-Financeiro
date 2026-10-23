@@ -170,6 +170,8 @@ BEGIN
        OR NEW.payment_id <> OLD.payment_id OR NEW.amount <> OLD.amount OR NEW.created_by <> OLD.created_by OR NEW.request_key IS DISTINCT FROM OLD.request_key THEN
       RAISE EXCEPTION 'bank_alloc_immutable';
     END IF;
+    -- desfazer o vínculo exige o pagamento correspondente já estornado (consistência dos dois lados)
+    IF NOT EXISTS (SELECT 1 FROM payments WHERE company_id = OLD.company_id AND id = OLD.payment_id AND status = 'estornado') THEN RAISE EXCEPTION 'bank_alloc_payment_still_active'; END IF;
     RETURN NEW;
   END IF;
   IF NEW.status <> 'ativa' THEN RAISE EXCEPTION 'bank_alloc_insert_not_active'; END IF;
@@ -193,3 +195,29 @@ BEGIN
 END $$ LANGUAGE plpgsql;
 --> statement-breakpoint
 CREATE TRIGGER bank_marks_guard_trg BEFORE INSERT ON bank_transaction_marks FOR EACH ROW EXECUTE FUNCTION bank_marks_guard();
+--> statement-breakpoint
+-- Pagamento ligado a um vínculo bancário ATIVO só pode ser estornado dentro do desfazer-vínculo (k3g.bank_undo, local à transação).
+CREATE OR REPLACE FUNCTION payments_guard() RETURNS trigger AS $$
+DECLARE amt numeric; st text; tot numeric;
+BEGIN
+  IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'payment_undeletable'; END IF;
+  IF TG_OP = 'UPDATE' THEN
+    IF OLD.status = 'estornado' THEN RAISE EXCEPTION 'payment_immutable'; END IF;
+    IF NEW.status <> 'estornado' OR NEW.company_id <> OLD.company_id OR NEW.charge_id <> OLD.charge_id OR NEW.amount <> OLD.amount
+       OR NEW.paid_at <> OLD.paid_at OR NEW.method <> OLD.method OR NEW.registered_by <> OLD.registered_by
+       OR NEW.note IS DISTINCT FROM OLD.note OR NEW.request_key IS DISTINCT FROM OLD.request_key THEN
+      RAISE EXCEPTION 'payment_immutable';
+    END IF;
+    IF COALESCE(current_setting('k3g.bank_undo', true), '') <> 'on'
+       AND EXISTS (SELECT 1 FROM bank_allocations WHERE company_id = OLD.company_id AND payment_id = OLD.id AND status = 'ativa') THEN
+      RAISE EXCEPTION 'payment_bound_to_bank';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF NEW.status <> 'ativo' THEN RAISE EXCEPTION 'payment_insert_not_active'; END IF;
+  SELECT amount, status INTO amt, st FROM charges WHERE company_id = NEW.company_id AND id = NEW.charge_id FOR UPDATE;
+  IF st IS DISTINCT FROM 'aprovada' THEN RAISE EXCEPTION 'payment_charge_not_approved'; END IF;
+  SELECT COALESCE(SUM(amount), 0) INTO tot FROM payments WHERE company_id = NEW.company_id AND charge_id = NEW.charge_id AND status = 'ativo';
+  IF tot + NEW.amount > amt THEN RAISE EXCEPTION 'payment_exceeds_open'; END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;

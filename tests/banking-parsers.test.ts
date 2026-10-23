@@ -29,7 +29,7 @@ describe("E08 leitores de extrato", () => {
   });
   it("datas: dd/mm/aaaa, aaaa-mm-dd, aaaammdd; inexistentes são recusadas", () => {
     expect(parseDate("05/10/2026")).toBe("2026-10-05"); expect(parseDate("2026-10-05")).toBe("2026-10-05"); expect(parseDate("20261005120000[-3:BRT]")).toBe("2026-10-05");
-    expect(parseDate("31/02/2026")).toBeNull(); expect(parseDate("2026-13-01")).toBeNull(); expect(parseDate("lixo")).toBeNull(); expect(parseDate("")).toBeNull();
+    expect(parseDate("31/02/2026")).toBeNull(); expect(parseDate("2026-10-23lixo")).toBeNull(); expect(parseDate("20261023lixo")).toBeNull(); expect(parseDate("20261023120000.000[-3:BRT]")).toBe("2026-10-23"); expect(parseDate("2026-10-23T10:00:00Z")).toBe("2026-10-23"); expect(parseDate("2026-10-23 10:00")).toBe("2026-10-23"); expect(parseDate("2026102")).toBeNull(); expect(parseDate("2026-13-01")).toBeNull(); expect(parseDate("lixo")).toBeNull(); expect(parseDate("")).toBeNull();
   });
   it("OFX 1.x (SGML, sem tags de fechamento): transações, saldo, final da conta", () => {
     const s = parseOfx(OFX_SGML);

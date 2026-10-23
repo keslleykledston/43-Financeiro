@@ -66,7 +66,7 @@ test("E08 — conciliação: importar com prévia, sugestão forte, vincular, de
   await test.step("a lista mostra a sugestão FORTE (documento + valor) e o saldo pelo extrato", async () => {
     await page.goto("/conciliacao");
     await page.getByRole("link", { name: CONTA }).click();
-    await expect(page.getByText(`Sugestão forte: ${NOME}`)).toBeVisible();
+    await expect(page.getByText(new RegExp(`Sugestão forte: ${NOME}`))).toBeVisible();
     await expect(page.getByText(/R\$\s*2\.460,10/).first()).toBeVisible(); // 1.000 + 1.500 − 39,90
   });
 

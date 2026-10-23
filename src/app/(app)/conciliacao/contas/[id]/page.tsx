@@ -17,7 +17,7 @@ const IMP: Record<string, [string, StatusTone]> = { previa: ["Em análise", "inf
 
 function Badge({ s }: { s: Suggestion | null }) {
   if (!s) return null;
-  if (s.level === "forte") return <StatusPill tone="positive">Sugestão forte: {s.customerName}</StatusPill>;
+  if (s.level === "forte") return <StatusPill tone="positive">Sugestão forte: {s.customerName} (doc. …{s.docTail})</StatusPill>;
   if (s.level === "ambigua") return <StatusPill tone="warning">Ambígua — revisar</StatusPill>;
   if (s.level === "cliente") return <StatusPill tone="info">Cliente identificado: {s.customerName}</StatusPill>;
   if (s.level === "valor") return <StatusPill tone="neutral">Mesmo valor, sem identificador ({s.count})</StatusPill>;

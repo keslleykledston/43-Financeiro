@@ -18,13 +18,14 @@ A **prévia** mostra linhas novas × já importadas, o período e **avisos** (po
 
 Proteções:
 - O mesmo arquivo não entra duas vezes. Arquivo que se sobrepõe a outro só importa o que é novo.
+- **Lançamentos idênticos sem identificador** (CSV sem coluna Id): se o arquivo traz uma quantidade diferente da já importada (ex.: 3 Pix iguais quando já havia 2), a prévia marca **Ambígua** e pede que você confirme que conferiu. Prefira **OFX**, que identifica cada lançamento.
 - Duas linhas realmente iguais no mesmo arquivo (dois Pix de mesmo valor e histórico) são **duas** transações.
 - Arquivo de outra conta (final diferente) ou com lançamentos anteriores ao saldo inicial é recusado.
 - Transação importada **não pode ser editada**. Se o arquivo era da conta errada, **Desfazer importação** (com motivo; só se nada estiver vinculado).
 
 ## 3. Conciliar
 Na lista **A conciliar**, cada crédito mostra uma sugestão:
-- **Sugestão forte**: o histórico traz o **documento do cliente** e há **uma** cobrança dele com saldo igual ao valor. Aparece o botão *Conciliar com…*. Confira o histórico antes de clicar.
+- **Sugestão forte**: o histórico traz o **documento do cliente** (inteiro, sem estar colado a outros números; aparece o final dele) e há **uma** cobrança dele com saldo igual ao valor. Aparece o botão *Conciliar com…*. Confira o histórico antes de clicar.
 - **Ambígua / Cliente identificado / Mesmo valor sem identificador**: nada se aplica sozinho. Abra a transação e escolha a cobrança. **Dois Pix iguais sem identificador nunca viram "forte".**
 
 Na transação você pode **vincular parcialmente**: um crédito pode quitar várias cobranças e uma cobrança pode receber vários créditos. O vínculo nunca passa do valor do crédito nem do saldo da cobrança. Ele cria um pagamento "Extrato bancário" em Contas a receber, com a data do crédito.

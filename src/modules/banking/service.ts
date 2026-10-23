@@ -108,6 +108,22 @@ export async function previewImport(db: DB, actorId: string, companyId: string, 
   });
 }
 
+/**
+ * Linhas SEM identificador do banco são identificadas por hash + ocorrência. Se o arquivo traz uma quantidade diferente de lançamentos idênticos
+ * da já importada (ex.: 1 ou 3 Pix iguais, quando já havia 2), o sistema não consegue distinguir "novo" de "repetido": exige conferência.
+ * Devolve os hashes ambíguos.
+ */
+async function ambiguousGroups(x: DB, companyId: string, accountId: string, refKeys: string[]) {
+  const mine = new Map<string, number>();
+  for (const k of refKeys) if (k.startsWith("fp:")) { const h = k.split(":")[1]; mine.set(h, (mine.get(h) ?? 0) + 1); }
+  if (mine.size === 0) return new Set<string>();
+  const hashExpr = sql`split_part(${bankTransactions.refKey}, ':', 2)`;
+  const rows = await x.select({ h: sql<string>`${hashExpr}`, n: sql<number>`count(*)::int` }).from(bankTransactions)
+    .where(and(eq(bankTransactions.companyId, companyId), eq(bankTransactions.accountId, accountId), eq(bankTransactions.status, "ativa"), sql`${bankTransactions.refKey} like 'fp:%'`, inArray(hashExpr, [...mine.keys()])))
+    .groupBy(hashExpr);
+  return new Set(rows.filter((r) => r.n > 0 && r.n !== mine.get(r.h)).map((r) => r.h));
+}
+
 export async function getImport(db: DB, actorId: string, companyId: string, batchId: string) {
   await requirePerm(db, actorId, companyId, "bank.read");
   if (!uuidOk(batchId)) return null;
@@ -126,13 +142,19 @@ export async function getImport(db: DB, actorId: string, companyId: string, batc
     if (proj !== file) warnings.push(`O saldo informado no arquivo (${formatBRL(file)} em ${br(b.ledgerDate)}) difere do saldo calculado após importar (${formatBRL(proj)}). Confira o saldo inicial da conta e se faltam períodos.`);
   }
   if (b.status === "previa" && b.newCount === 0) warnings.push("Nenhuma transação nova: tudo neste arquivo já foi importado.");
+  let amb = new Set<string>();
+  if (b.status === "previa") {
+    const all = await db.select({ k: bankImportRows.refKey }).from(bankImportRows).where(and(eq(bankImportRows.companyId, companyId), eq(bankImportRows.batchId, b.id)));
+    amb = await ambiguousGroups(db, companyId, b.accountId, all.map((r) => r.k));
+    if (amb.size > 0) warnings.push(`${amb.size} grupo(s) de lançamentos idênticos sem identificador do banco têm quantidade diferente da já importada (por exemplo, dois Pix iguais). O sistema não consegue dizer se são novos ou repetidos: confira antes de confirmar.`);
+  }
   return {
-    batch: b, account: { id: acc.id, name: acc.name }, warnings,
-    rows: sample.map((r) => ({ lineNo: r.lineNo, postedAt: r.postedAt, amountCents: centsFromSigned(r.amount), description: r.description, duplicate: r.duplicate })),
+    batch: b, account: { id: acc.id, name: acc.name }, warnings, ambiguous: amb.size,
+    rows: sample.map((r) => ({ lineNo: r.lineNo, postedAt: r.postedAt, amountCents: centsFromSigned(r.amount), description: r.description, duplicate: r.duplicate, ambiguous: r.refKey.startsWith("fp:") && amb.has(r.refKey.split(":")[1]) })),
   };
 }
 
-export async function confirmImport(db: DB, actorId: string, companyId: string, batchId: string) {
+export async function confirmImport(db: DB, actorId: string, companyId: string, batchId: string, ackAmbiguous = false) {
   await requirePerm(db, actorId, companyId, "bank.import");
   if (!uuidOk(batchId)) throw new Invalid("Importação não encontrada");
   return db.transaction(async (tx) => {
@@ -147,13 +169,15 @@ export async function confirmImport(db: DB, actorId: string, companyId: string, 
       .where(and(eq(bankTransactions.companyId, companyId), eq(bankTransactions.accountId, b.accountId), eq(bankTransactions.status, "ativa"), inArray(bankTransactions.refKey, rows.map((r) => r.refKey))))).map((r) => r.k));
     const fresh = rows.filter((r) => !known.has(r.refKey));
     if (fresh.length === 0) throw new Invalid("Nenhuma transação nova para importar");
+    const amb = await ambiguousGroups(x, companyId, b.accountId, rows.map((r) => r.refKey));
+    if (amb.size > 0 && !ackAmbiguous) throw new Invalid("Há lançamentos idênticos sem identificador cuja quantidade difere da já importada. Confira a prévia e marque a confirmação para prosseguir");
     for (let i = 0; i < fresh.length; i += 500) {
       await x.insert(bankTransactions).values(fresh.slice(i, i + 500).map((r) => ({ companyId, accountId: b.accountId, batchId: b.id, postedAt: r.postedAt, amount: r.amount, description: r.description, externalRef: r.externalRef, refKey: r.refKey })));
     }
     const now = new Date();
     await x.update(bankImportBatches).set({ status: "aplicado", newCount: fresh.length, dupCount: rows.length - fresh.length, appliedBy: actorId, appliedAt: now, updatedAt: now }).where(eq(bankImportBatches.id, b.id));
     await x.delete(bankImportRows).where(and(eq(bankImportRows.companyId, companyId), eq(bankImportRows.batchId, b.id)));
-    await audit(x, companyId, actorId, "bank.import.applied", { batchId: b.id, accountId: b.accountId, imported: fresh.length, duplicates: rows.length - fresh.length });
+    await audit(x, companyId, actorId, "bank.import.applied", { batchId: b.id, accountId: b.accountId, imported: fresh.length, duplicates: rows.length - fresh.length, ambiguousAcknowledged: amb.size > 0 });
     return { imported: fresh.length, duplicates: rows.length - fresh.length };
   });
 }
@@ -206,7 +230,7 @@ export async function listImports(db: DB, actorId: string, companyId: string, ac
 
 // ---------- Transações, sugestões e vínculo ----------
 export type Suggestion =
-  | { level: "forte"; chargeId: string; customerName: string }
+  | { level: "forte"; chargeId: string; customerName: string; docTail: string }
   | { level: "ambigua"; customerName: string; count: number }
   | { level: "cliente"; customerName: string }
   | { level: "valor"; count: number }
@@ -226,16 +250,22 @@ async function openCharges(x: DB, companyId: string): Promise<OpenCharge[]> {
   return rows.map((r) => ({ id: String(r.id), customerId: String(r.customer_id), customerName: String(r.legal_name), doc: alnum(String(r.document ?? "")), description: String(r.description), dueDate: String(r.due_date), openCents: centsFromNumeric(String(r.open)), competence: String(r.competence_month).slice(0, 7) }));
 }
 
-/** Sugestão SEGURA: só é "forte" com documento do cliente no histórico E exatamente uma cobrança dele com saldo igual ao valor. Valor igual sozinho nunca é forte. */
+/** O documento só vale se não estiver colado a outros dígitos (um CPF dentro de um CNPJ, ou parte de um número maior, não conta). */
+export function docInText(text: string, doc: string): boolean {
+  if (doc.length < 11) return false;
+  const t = text.toUpperCase().replace(/[.\-/]/g, "").replace(/[^A-Z0-9]+/g, " ");
+  return new RegExp(`(?<![0-9])${doc}(?![0-9])`).test(t);
+}
+
+/** Sugestão SEGURA: só é "forte" com documento do cliente no histórico (com fronteira) E exatamente uma cobrança dele com saldo igual ao valor. Valor igual sozinho nunca é forte. */
 export function suggest(description: string, remainingCents: number, charges: OpenCharge[]): Suggestion {
-  const d = alnum(description);
   const matched = new Map<string, OpenCharge[]>();
-  for (const c of charges) if (c.doc.length >= 11 && d.includes(c.doc)) matched.set(c.customerId, [...(matched.get(c.customerId) ?? []), c]);
+  for (const c of charges) if (docInText(description, c.doc)) matched.set(c.customerId, [...(matched.get(c.customerId) ?? []), c]);
   if (matched.size > 1) return { level: "ambigua", customerName: "mais de um cliente identificado", count: matched.size };
   if (matched.size === 1) {
     const mine = [...matched.values()][0];
     const eq = mine.filter((c) => c.openCents === remainingCents);
-    if (eq.length === 1) return { level: "forte", chargeId: eq[0].id, customerName: eq[0].customerName };
+    if (eq.length === 1) return { level: "forte", chargeId: eq[0].id, customerName: eq[0].customerName, docTail: eq[0].doc.slice(-4) };
     if (eq.length > 1) return { level: "ambigua", customerName: mine[0].customerName, count: eq.length };
     return { level: "cliente", customerName: mine[0].customerName };
   }
@@ -294,8 +324,8 @@ export async function getTransaction(db: DB, actorId: string, companyId: string,
   if (amountCents > 0 && remaining > 0 && !mk && t.status === "ativa") {
     const all = await openCharges(db, companyId);
     suggestion = suggest(t.description, remaining, all);
-    const d = alnum(t.description), text = q.trim().toUpperCase();
-    const ranked = all.map((c) => ({ ...c, rank: c.doc.length >= 11 && d.includes(c.doc) ? "0-documento" : c.openCents === remaining ? "1-valor" : text && c.customerName.toUpperCase().includes(text) ? "2-busca" : "9" }));
+    const text = q.trim().toUpperCase();
+    const ranked = all.map((c) => ({ ...c, rank: docInText(t.description, c.doc) ? "0-documento" : c.openCents === remaining ? "1-valor" : text && c.customerName.toUpperCase().includes(text) ? "2-busca" : "9" }));
     candidates = ranked.filter((c) => c.rank !== "9").sort((a, b) => a.rank.localeCompare(b.rank) || a.dueDate.localeCompare(b.dueDate)).slice(0, 25);
   }
   return {
@@ -355,6 +385,7 @@ export async function undoAllocation(db: DB, actorId: string, companyId: string,
     await x.select({ id: bankTransactions.id }).from(bankTransactions).where(and(eq(bankTransactions.id, a0.txId), eq(bankTransactions.companyId, companyId))).for("update"); // mesma ordem: crédito → cobrança → pagamento
     const [a] = await x.select().from(bankAllocations).where(and(eq(bankAllocations.id, allocationId), eq(bankAllocations.companyId, companyId))).for("update");
     if (!a || a.status !== "ativa") throw new Invalid("Este vínculo já foi desfeito");
+    await x.execute(sql`select set_config('k3g.bank_undo', 'on', true)`); // libera o estorno deste pagamento no trigger (só dentro desta transação)
     await reversePaymentTx(x, companyId, actorId, a.paymentId, `Conciliação desfeita: ${why}`, { source: "bank" });
     const now = new Date();
     await x.update(bankAllocations).set({ status: "desfeita", undoneBy: actorId, undoneAt: now, undoReason: why, updatedAt: now }).where(eq(bankAllocations.id, a.id));

@@ -55,8 +55,8 @@ export function parseDate(raw: string): string | null {
   const s = raw.trim();
   let m: RegExpExecArray | null, iso: string;
   if ((m = /^(\d{2})[/.-](\d{2})[/.-](\d{4})$/.exec(s))) iso = `${m[3]}-${m[2]}-${m[1]}`;
-  else if ((m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s))) iso = `${m[1]}-${m[2]}-${m[3]}`;
-  else if ((m = /^(\d{4})(\d{2})(\d{2})/.exec(s))) iso = `${m[1]}-${m[2]}-${m[3]}`;
+  else if ((m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.exec(s))) iso = `${m[1]}-${m[2]}-${m[3]}`;
+  else if ((m = /^(\d{4})(\d{2})(\d{2})(?:\d{6}(?:\.\d{1,3})?(?:\[[^\]]{0,12}\])?)?$/.exec(s))) iso = `${m[1]}-${m[2]}-${m[3]}`; // OFX: AAAAMMDD[HHMMSS[.XXX][fuso]]
   else return null;
   return isIsoDate(iso) ? iso : null;
 }

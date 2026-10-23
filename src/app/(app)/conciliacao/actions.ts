@@ -34,7 +34,7 @@ export async function previewAction(fd: FormData) {
 
 export async function confirmImportAction(fd: FormData) {
   const id = s(fd, "id"); let err = "", ok = "";
-  try { const c = await ctx(); const r = await confirmImport(db, c.userId, c.companyId, id); ok = `importado:${r.imported}:${r.duplicates}`; } catch (e) { err = known(e); }
+  try { const c = await ctx(); const r = await confirmImport(db, c.userId, c.companyId, id, fd.get("ackAmbiguous") === "on"); ok = `importado:${r.imported}:${r.duplicates}`; } catch (e) { err = known(e); }
   revalidatePath("/conciliacao"); go(`/conciliacao/importacoes/${id}`, err, ok);
 }
 export async function cancelImportAction(fd: FormData) {

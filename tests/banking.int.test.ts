@@ -11,6 +11,7 @@ import { createParty } from "@/modules/crm/service";
 import { createContract, decideVersion, getContract } from "@/modules/contracts/service";
 import { approveBatch, generateBatch, getBatch } from "@/modules/billing/batches";
 import { getReceivable, registerPayment, reversePayment } from "@/modules/receivables/service";
+import { docInText } from "@/modules/banking/service";
 import { allocate, cancelImport, confirmImport, createAccount, getImport, getTransaction, listAccounts, listImports, listTransactions, markTransaction, previewImport, undoAllocation, undoImport, unmarkTransaction } from "@/modules/banking/service";
 
 const enabled = !!process.env.POSTGRES_USER;
@@ -73,7 +74,7 @@ describe.skipIf(!enabled)("E08 conciliação bancária: importação, dedup, sug
       rows.map((r, i) => `<STMTTRN><TRNTYPE>X<DTPOSTED>${r.date}<TRNAMT>${r.amt}<FITID>${r.id ?? `F${r.date}${i}${r.amt}`}<MEMO>${r.memo}\n`).join("") + `</BANKTRANLIST>${bal ? `<LEDGERBAL><BALAMT>${bal.amt}<DTASOF>${bal.date}</LEDGERBAL>` : ""}</STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>`);
   const csv = (lines: string[]) => enc("Data;Descrição;Valor\r\n" + lines.join("\r\n") + "\r\n");
   const acct = (o: Partial<{ name: string; last4: string; openingBalance: string; openingDate: string }> = {}) => createAccount(db, gerA, A, { name: "Conta Cora", bank: "Cora", openingBalance: "1.000,00", openingDate: "2026-01-01", last4: "7766", ...o });
-  const imp = async (accountId: string, bytes: Uint8Array, by = gerA, name = "extrato.ofx") => { const { batchId } = await previewImport(db, by, A, accountId, name, bytes); const r = await confirmImport(db, by, A, batchId); return { batchId, ...r }; };
+  const imp = async (accountId: string, bytes: Uint8Array, by = gerA, name = "extrato.ofx", ack = false) => { const { batchId } = await previewImport(db, by, A, accountId, name, bytes); const r = await confirmImport(db, by, A, batchId, ack); return { batchId, ...r }; };
   const chargeOf = async (customer: string) => (await db.select().from(schema.charges).where(eq(schema.charges.customerId, customer)))[0];
   const txs = async (accountId: string, f = "todas") => (await listTransactions(db, contA, A, accountId, f)).items;
   const TODAY = "2026-10-20";
@@ -135,8 +136,42 @@ describe.skipIf(!enabled)("E08 conciliação bancária: importação, dedup, sug
     // terceiro Pix igual em outro arquivo: é novo (ocorrência 3)
     const c3 = csv(["08/10/2026;PIX FULANO;50,00", "08/10/2026;PIX FULANO;50,00", "08/10/2026;PIX FULANO;50,00"]);
     await cancelImport(db, gerA, A, batchId);
-    expect(await imp(id, c3, gerA, "c.csv")).toMatchObject({ imported: 1, duplicates: 2 });
+    // 3 idênticos quando já havia 2: o sistema não sabe se o 3º é novo → exige conferência explícita
+    const amb = await previewImport(db, gerA, A, id, "c.csv", c3);
+    expect((await getImport(db, contA, A, amb.batchId))!).toMatchObject({ ambiguous: 1 });
+    expect((await getImport(db, contA, A, amb.batchId))!.rows.some((r) => r.ambiguous)).toBe(true);
+    await expect(confirmImport(db, gerA, A, amb.batchId)).rejects.toThrow(/marque a confirmação/);
+    expect(await confirmImport(db, gerA, A, amb.batchId, true)).toMatchObject({ imported: 1, duplicates: 2 });
     expect(await n("bank_transactions")).toBe(7);
+    expect(await n("audit_log where action = 'bank.import.applied' and detail->>'ambiguousAcknowledged' = 'true'")).toBe(1);
+  });
+
+  it("dedup sem identificador: quantidade diferente da já importada (menos OU mais) é ambígua; igual não", async () => {
+    const id = await acct();
+    await imp(id, csv(["08/10/2026;PIX IGUAL;50,00", "08/10/2026;PIX IGUAL;50,00", "09/10/2026;OUTRO;10,00"]), gerA, "a.csv");
+    // arquivo parcial: só 1 dos 2 idênticos + 1 novo diferente
+    const parcial = await previewImport(db, gerA, A, id, "b.csv", csv(["08/10/2026;PIX IGUAL;50,00", "10/10/2026;NOVO;20,00"]));
+    expect((await getImport(db, contA, A, parcial.batchId))!.ambiguous).toBe(1);
+    await expect(confirmImport(db, gerA, A, parcial.batchId)).rejects.toThrow(/marque a confirmação/);
+    await cancelImport(db, gerA, A, parcial.batchId);
+    // mesma contagem (2 = 2) e linha única: sem ambiguidade
+    const igual = await previewImport(db, gerA, A, id, "c.csv", csv(["08/10/2026;PIX IGUAL;50,00", "08/10/2026;PIX IGUAL;50,00", "09/10/2026;OUTRO;10,00", "11/10/2026;NOVO2;5,00"]));
+    expect((await getImport(db, contA, A, igual.batchId))!.ambiguous).toBe(0);
+    expect(await confirmImport(db, gerA, A, igual.batchId)).toMatchObject({ imported: 1, duplicates: 3 });
+    // com identificador do banco nunca há ambiguidade
+    const ofx1 = await previewImport(db, gerA, A, id, "d.ofx", ofx([{ id: "Z1", date: "20261012", amt: "9.00", memo: "X" }]));
+    expect((await getImport(db, contA, A, ofx1.batchId))!.ambiguous).toBe(0);
+  });
+
+  it("sugestão: documento só vale com fronteira (CPF dentro de CNPJ, número maior ou de terceiros não contam); documento formatado vale", async () => {
+    expect(docInText(`PIX ${D1}`, D1)).toBe(true);
+    expect(docInText("PIX 11.222.333/0001-81 FULANO", D1)).toBe(true);
+    expect(docInText(`PIX ${D1}JOAO`, D1)).toBe(true); // letras coladas são comuns em histórico
+    expect(docInText(`PIX 9${D1}`, D1)).toBe(false); // dígito colado antes
+    expect(docInText(`PIX ${D1}7`, D1)).toBe(false); // dígito colado depois
+    expect(docInText(`PIX ${D1}`, D1.slice(0, 11))).toBe(false); // CPF "dentro" de um CNPJ
+    expect(docInText(`PIX ${D1}`, "123")).toBe(false); // documento curto demais
+    expect(docInText("PIX SEM DOC", D1)).toBe(false);
   });
 
   it("conferência do saldo do banco (OFX): avisa divergência; sem aviso quando bate", async () => {
@@ -303,6 +338,27 @@ describe.skipIf(!enabled)("E08 conciliação bancária: importação, dedup, sug
     expect((await txs(id, "pendentes")).map((t) => t.description)).toEqual(["TRANSF ENTRE CONTAS"]);
     expect((await listTransactions(db, contA, A, id, "todas", "tarifa")).items).toHaveLength(1);
     expect((await listTransactions(db, contA, A, id, "todas", "%")).items).toHaveLength(0); // curinga escapado
+  });
+
+  it("banco: vínculo e pagamento nunca se separam, nem por SQL direto (os dois lados)", async () => {
+    await approvedBatch();
+    const id = await acct();
+    await imp(id, ofx([{ id: "T1", date: "20261015", amt: "2500.00", memo: "PIX A" }]));
+    const t = (await txs(id))[0], c = await chargeOf(cli1);
+    const { allocationId } = await allocate(db, asstA, A, t.id, c.id, "2.500,00", undefined, TODAY);
+    const payId = (await db.select().from(schema.bankAllocations))[0].paymentId;
+    // pagamento → não pode ser estornado por fora enquanto o vínculo estiver ativo
+    await expect(db.execute(sql`update payments set status = 'estornado', reversed_by = ${gerA}, reversed_at = now(), reverse_reason = 'por fora' where id = ${payId}`)).rejects.toThrow();
+    // vínculo → não pode ser desfeito com o pagamento ainda ativo
+    await expect(db.execute(sql`update bank_allocations set status = 'desfeita', undone_by = ${gerA}, undone_at = now(), undo_reason = 'por fora' where id = ${allocationId}`)).rejects.toThrow();
+    expect((await getReceivable(db, contA, A, c.id, TODAY))!.situation).toBe("quitada");
+    // o caminho do serviço continua funcionando (estorno + desfazer na mesma transação)
+    await undoAllocation(db, gerA, A, allocationId, "desfazendo pelo serviço");
+    expect((await getReceivable(db, contA, A, c.id, TODAY))!.situation).toBe("vencida");
+    // a permissão do estorno vale só dentro da transação: fora dela, outro pagamento conciliado continua protegido
+    await allocate(db, asstA, A, t.id, c.id, "100,00", undefined, TODAY);
+    const p2 = (await db.select().from(schema.bankAllocations).where(eq(schema.bankAllocations.status, "ativa")))[0].paymentId;
+    await expect(db.execute(sql`update payments set status = 'estornado', reversed_by = ${gerA}, reversed_at = now(), reverse_reason = 'de novo por fora' where id = ${p2}`)).rejects.toThrow();
   });
 
   it("banco: triggers barram vínculo acima do crédito, em débito, em transação classificada; vínculo é imutável e não se apaga", async () => {
