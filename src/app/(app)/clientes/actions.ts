@@ -18,6 +18,7 @@ const msg = (e: unknown) => { if (e instanceof Invalid || e instanceof Forbidden
 const partyInput = (fd: FormData) => ({
   kind: String(fd.get("kind") ?? ""), legalName: String(fd.get("legalName") ?? ""),
   tradeName: String(fd.get("tradeName") ?? ""), document: String(fd.get("document") ?? ""),
+  status: String(fd.get("status") ?? "") || undefined,
 });
 const keep = (fd: FormData) => Object.fromEntries([...fd.entries()].filter(([, v]) => typeof v === "string")) as Record<string, string>;
 

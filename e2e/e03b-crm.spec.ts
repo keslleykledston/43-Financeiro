@@ -107,22 +107,31 @@ test("E03b — CRM: ativar, prévia sem gravar, aplicar, idempotência, somente 
     await expect(page.getByRole("link", { name: /Nome do CRM Conflito/ })).toContainText("CRM");
   });
 
-  await test.step("alteração e inativação no CRM: renomeia e arquiva (sem apagar)", async () => {
+  await test.step("cancelado no CRM continua cliente (com situação, sem arquivar); renomear atualiza", async () => {
     await setCrm(page, { items: [
       crmItem("x1", "Rede Alfa Renomeada", A, { email: "ana@alfa.test" }), crmItem("x2", "Rede Beta CRM", B, { crmStatus: "CHURNED" }), crmItem("x3", "Nome do CRM Conflito", C),
     ] });
     await page.goto("/integracoes");
     await page.getByRole("button", { name: "Revisar sincronização" }).click();
     const resumo = page.getByRole("status").filter({ hasText: "novos" });
-    await expect(resumo).toContainText("1 alterados");
-    await expect(resumo).toContainText("1 a arquivar");
+    await expect(resumo).toContainText("2 alterados");   // renomeou + mudou a situação
+    await expect(resumo).toContainText("0 a arquivar");  // cancelado NÃO é arquivado
+    await expect(page.getByText("✎ Rede Beta CRM")).toContainText("(cancelado)");
     await page.getByRole("button", { name: "Confirmar e aplicar" }).click();
-    await expect(page.getByRole("status").filter({ hasText: "Sincronização concluída" })).toContainText("1 arquivados");
+    await expect(page.getByRole("status").filter({ hasText: "Sincronização concluída" })).toContainText("0 arquivados");
     await page.goto("/clientes?q=Rede");
     await expect(page.getByRole("link", { name: /Rede Alfa Renomeada/ })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Rede Beta CRM/ })).toHaveCount(0);
-    await page.goto("/clientes?q=Rede+Beta&arq=1");
+    const beta = page.getByRole("link", { name: /Rede Beta CRM/ });
+    await expect(beta).toBeVisible();                    // continua na lista ativa
+    await expect(beta).toContainText("Cancelado");
+    await page.getByLabel("Situação").selectOption("cancelado");
+    await page.getByRole("button", { name: "Buscar" }).click();
     await expect(page.getByRole("link", { name: /Rede Beta CRM/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Rede Alfa Renomeada/ })).toHaveCount(0);
+    await page.getByRole("link", { name: /Rede Beta CRM/ }).click();
+    await expect(page.getByRole("note").filter({ hasText: "não gera nova cobrança" })).toBeVisible();
+    await page.goto("/clientes?q=Rede+Beta&arq=1");
+    await expect(page.getByRole("link", { name: /Rede Beta CRM/ })).toHaveCount(0); // não está arquivado
   });
 
   await test.step("falha do CRM (503): erro claro, nada muda e o app continua de pé", async () => {

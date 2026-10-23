@@ -23,7 +23,7 @@ Pedido do dono: clientes e contratos vêm do **CRM via API**. Saída: `CrmAdapte
 Aceite: reimportar não duplica; conflito com cadastro manual vai para revisão; cliente inativo no CRM é arquivado (não apagado); falhas (429/timeout/payload inválido) não derrubam o app; sem PII em logs; teste e2e com CRM fake. **Conexão real só com CRM identificado, credencial read-only e autorização explícita.**
 
 ## E04 — Contratos e calendário pós-pago [ ]
-(Contratos **importados do CRM** via E03b; criação manual só como fallback. Mudança de valor/vencimento gera versão e exige aprovação antes de afetar cobrança.)
+(**Contratos são cadastrados e mantidos AQUI** — o K3G CRM não tem contratos (decisão do dono, ADR-012). Ligados a `customers` (de origem CRM ou local); só clientes com situação **ativo** geram cobrança. Mudança de valor/vencimento gera versão (`contract_versions`) e exige aprovação antes de afetar cobrança.)
 Saída: CRUD de contratos, valor, empresa, cliente, vigência, due_day, flag NF conjunta, competência anterior, agenda com lotes 25/1/8/15, alerta dia 31 e meses curtos.
 Aceite: testes tabelados para dias 1, 5, 12, 13, 16, 17, 22, 23, 30, 31, mês/ano novo, fev; competência M e vencimento M+1; ajustes não fazem alterações silenciosas.
 

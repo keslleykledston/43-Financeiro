@@ -7,7 +7,7 @@ import { databaseUrl } from "@/lib/db/url";
 import * as schema from "@/lib/db/schema";
 import type { DB } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
-import { addContact, createParty, getParty, listParties, removeContact, setArchived, setCustomerMode, updateParty } from "@/modules/crm/service";
+import { addContact, createParty, getParty, isBillable, listParties, removeContact, setArchived, setCustomerMode, updateParty } from "@/modules/crm/service";
 import { applySync, listConflicts, listRuns, previewSync, resolveConflict, saveConnection } from "@/modules/integrations/crm/sync";
 import type { CrmAdapter } from "@/modules/integrations/crm/types";
 import { MockCrmAdapter } from "@/modules/integrations/crm/mock";
@@ -264,6 +264,38 @@ describe.skipIf(!enabled)("CRM sync: prévia, aplicação idempotente, conflitos
     await resolveConflict(db, dirA, A, c.id, "ignore");
     const [after] = await db.select().from(schema.integrationConflicts);
     expect(after.payload).toEqual({});
+  });
+
+  it("situação: suspenso e cancelado são IMPORTADOS como clientes (não arquivados); só o ativo é faturável", async () => {
+    const m = new MockCrmAdapter([
+      item(), item({ externalId: "c2", legalName: "Cliente Suspenso", document: CNPJ2, status: "suspenso" }),
+      item({ externalId: "c3", legalName: "Cliente Cancelado", document: CPF1, status: "cancelado" }),
+    ]);
+    expect(await applyNow(db, m, dirA, A, ON)).toMatchObject({ create: 3, archive: 0 });
+    const all = (await listParties(db, dirA, A, {})).items;
+    expect(all).toHaveLength(3); // todos listados, nenhum arquivado
+    const bySt = Object.fromEntries(all.map((c) => [c.legalName, c]));
+    expect(bySt["Cliente Um"].status).toBe("ativo");
+    expect(bySt["Cliente Suspenso"].status).toBe("suspenso");
+    expect(bySt["Cliente Cancelado"].status).toBe("cancelado");
+    expect(all.filter((c) => isBillable(c)).map((c) => c.legalName)).toEqual(["Cliente Um"]); // só o ativo fatura
+    expect((await listParties(db, dirA, A, { status: "cancelado" })).items.map((c) => c.legalName)).toEqual(["Cliente Cancelado"]);
+  });
+
+  it("mudança de situação no CRM atualiza (sem arquivar); prospect (não é cliente) é ignorado e, se já existia, arquiva", async () => {
+    const m = new MockCrmAdapter([item()]);
+    await applyNow(db, m, dirA, A, ON);
+    m.items = [item({ status: "suspenso" })];
+    expect(await applyNow(db, m, dirA, A, ON)).toMatchObject({ update: 1, archive: 0 });
+    expect((await listParties(db, dirA, A, {})).items[0].status).toBe("suspenso");
+    expect(await applyNow(db, m, dirA, A, ON)).toMatchObject({ update: 0, unchanged: 1 }); // idempotente
+    m.items = [item({ status: "ativo" })];
+    await applyNow(db, m, dirA, A, ON);
+    expect((await listParties(db, dirA, A, {})).items[0].status).toBe("ativo");
+    m.items = [item({ externalId: "p1", legalName: "Só Prospect", document: CNPJ2, active: false })];
+    expect(await applyNow(db, m, dirA, A, ON)).toMatchObject({ create: 0, skipped: 1 }); // prospect nunca entra
+    m.items = [item({ active: false })]; // deixou de ser cliente no CRM
+    expect(await applyNow(db, m, dirA, A, ON)).toMatchObject({ archive: 1 });
   });
 
   it("auditoria e execuções guardam só contagens (sem PII)", async () => {

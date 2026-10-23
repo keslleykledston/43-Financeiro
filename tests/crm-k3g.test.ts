@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { K3gCrmAdapter, mapK3gCompany } from "@/modules/integrations/crm/k3g";
+import { DEFAULT_STATUS_MAP, K3gCrmAdapter, mapK3gCompany, parseStatusMap } from "@/modules/integrations/crm/k3g";
 import { buildPlan } from "@/modules/integrations/crm/sync";
 import { getCrmAdapter } from "@/modules/integrations/crm/factory";
 import { CrmError } from "@/modules/integrations/crm/types";
@@ -19,10 +19,17 @@ describe("mapK3gCompany", () => {
       contacts: [{ name: "Cadastro no CRM", email: "contato@alfa.test", phone: "(92) 99999-0000", isFinancial: false }],
     });
   });
-  it("só ACTIVE é cliente; PROSPECT/CHURNED/INACTIVE e isActive=false não são", () => {
-    for (const s of ["PROSPECT", "CHURNED", "INACTIVE", "QUALQUER"]) expect(mapK3gCompany(company({ crmStatus: s })).active).toBe(false);
-    expect(mapK3gCompany(company({ isActive: false })).active).toBe(false);
-    expect(mapK3gCompany(company({ crmStatus: "PROSPECT" }), ["ACTIVE", "PROSPECT"]).active).toBe(true); // configurável
+  it("situação: ACTIVE=ativo, INACTIVE=suspenso, CHURNED=cancelado (continuam clientes); PROSPECT e desconhecidos não são clientes", () => {
+    expect(mapK3gCompany(company({ crmStatus: "ACTIVE" }))).toMatchObject({ active: true, status: "ativo" });
+    expect(mapK3gCompany(company({ crmStatus: "INACTIVE", isActive: false }))).toMatchObject({ active: true, status: "suspenso" });
+    expect(mapK3gCompany(company({ crmStatus: "CHURNED", isActive: false }))).toMatchObject({ active: true, status: "cancelado" });
+    for (const s of ["PROSPECT", "QUALQUER", ""]) expect(mapK3gCompany(company({ crmStatus: s })).active).toBe(false);
+  });
+  it("mapa configurável por CRM_STATUS_MAP; entradas inválidas são ignoradas", () => {
+    expect(parseStatusMap("ACTIVE:ativo,PROSPECT:suspenso,LIXO:xyz,:ativo")).toEqual({ ACTIVE: "ativo", PROSPECT: "suspenso" });
+    expect(parseStatusMap(undefined)).toEqual(DEFAULT_STATUS_MAP);
+    expect(parseStatusMap("só-lixo")).toEqual(DEFAULT_STATUS_MAP);
+    expect(mapK3gCompany(company({ crmStatus: "PROSPECT" }), { PROSPECT: "suspenso" })).toMatchObject({ active: true, status: "suspenso" });
   });
   it("sem razão social usa o nome; sem fantasia diferente não duplica; e-mail inválido é descartado sem invalidar o cliente", () => {
     const m = mapK3gCompany(company({ razaoSocial: "", name: "Só Nome", email: "nao-e-email" }));
@@ -44,7 +51,7 @@ describe("K3gCrmAdapter + motor", () => {
     expect((await a.listCustomers({ cursor: "qualquer" })).items).toEqual([]); // não há segunda página
   });
 
-  it("no plano: 1 ACTIVE vira novo; PROSPECT é ignorado; CHURNED nunca importado é ignorado; sem CNPJ válido é inválido; CNPJ duplicado no CRM vira conflito", () => {
+  it("no plano: ACTIVE, suspenso e cancelado viram clientes (com situação); PROSPECT é ignorado; sem CNPJ válido é inválido; CNPJ duplicado no CRM vira conflito", () => {
     const raw = [
       company({ id: "a", cnpj: "11.222.333/0001-81" }),
       company({ id: "b", cnpj: "12.ABC.345/01DE-35", crmStatus: "PROSPECT" }),
@@ -54,7 +61,8 @@ describe("K3gCrmAdapter + motor", () => {
       company({ id: "f", cnpj: "11.222.333/0001-81" }), // mesmo CNPJ do "a"
     ].map((c) => mapK3gCompany(c));
     const plan = buildPlan([], new Set(), raw);
-    expect(plan.stats).toMatchObject({ fetched: 6, create: 1, conflict: 1, skipped: 2, invalid: 2 });
+    expect(plan.stats).toMatchObject({ fetched: 6, create: 2, conflict: 1, skipped: 1, invalid: 2 }); // a (ativo) + c (cancelado); b é prospect
+    expect(plan.create.map((x) => [x.externalId, x.status]).sort()).toEqual([["a", "ativo"], ["c", "cancelado"]]);
   });
 
   it("403 dá mensagem acionável (token/seções/IP) sem vazar o token", async () => {

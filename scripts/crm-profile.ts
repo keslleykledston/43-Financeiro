@@ -25,6 +25,10 @@ const dist = (vals: unknown[], max = 12) => {
   console.log(`GET /crm/companies → HTTP ${status}; ${list.length} registros`);
   console.log("isActive:", dist(list.map((c) => c.isActive)));
   console.log("crmStatus:", dist(list.map((c) => c.crmStatus)));
+  const cross = new Map<string, number>(); for (const c of list) { const k = `${c.crmStatus}/isActive=${c.isActive}`; cross.set(k, (cross.get(k) ?? 0) + 1); }
+  console.log("crmStatus × isActive:", [...cross].sort().map(([k, n]) => `${k}=${n}`).join(", "));
+  const hasDoc = new Map<string, number>(); for (const c of list) { const k = `${c.crmStatus}:${parseDocument(String(c.cnpj ?? "")) ? "doc-válido" : "sem-doc-válido"}`; hasDoc.set(k, (hasDoc.get(k) ?? 0) + 1); }
+  console.log("crmStatus × documento:", [...hasDoc].sort().map(([k, n]) => `${k}=${n}`).join(", "));
   console.log("UF:", dist(list.map((c) => c.state)));
   console.log("segment:", dist(list.map((c) => c.segment)));
   console.log("companySize:", dist(list.map((c) => c.companySize)));

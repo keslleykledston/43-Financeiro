@@ -42,3 +42,11 @@ Em *Integrações → Origem dos clientes* a diretoria escolhe, **para cada empr
 - As duas empresas podem usar modos diferentes.
 - Contatos adicionais (locais) podem ser criados nos dois modos.
 - A troca fica registrada na auditoria.
+
+---
+## Situação do cliente (ativo, suspenso, cancelado)
+- Só clientes **ativos** são faturáveis. **Suspensos** e **cancelados continuam cadastrados** (podem ter dívidas antigas a receber), mas **não geram nova cobrança**.
+- Na importação do K3G CRM: `ACTIVE` → ativo · `INACTIVE` → suspenso · `CHURNED` → cancelado. Registros `PROSPECT` **não são clientes** e não entram.
+- Na lista de clientes há um filtro por situação e um selo para suspensos e cancelados.
+- No modo **Local** você escolhe a situação no cadastro (e na coluna opcional `situacao` do CSV). No modo **CRM** ela vem do CRM e fica somente leitura.
+- **Contratos** não vêm do CRM: são cadastrados aqui (próxima fase).

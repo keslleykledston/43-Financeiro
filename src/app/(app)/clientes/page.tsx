@@ -3,9 +3,9 @@ import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
-import { getCustomerMode, listParties, type Kind } from "@/modules/crm/service";
+import { getCustomerMode, listParties, STATUS_LABEL, type Kind, type Status } from "@/modules/crm/service";
 
-type SP = { q?: string; tipo?: string; arq?: string; page?: string };
+type SP = { q?: string; tipo?: string; arq?: string; page?: string; situacao?: string };
 
 export default async function Clientes({ searchParams }: { searchParams: Promise<SP> }) {
   const [sp, ctx] = await Promise.all([searchParams, requireContext()]);
@@ -15,9 +15,10 @@ export default async function Clientes({ searchParams }: { searchParams: Promise
   }
   const kind = sp.tipo === "cliente" || sp.tipo === "fornecedor" ? (sp.tipo as Kind) : undefined;
   const archived = sp.arq === "1";
+  const situacao = (["ativo", "suspenso", "cancelado"] as const).find((x) => x === sp.situacao) as Status | undefined;
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
   const mode = await getCustomerMode(db, ctx.user.id, ctx.current.id);
-  const r = await listParties(db, ctx.user.id, ctx.current.id, { q: sp.q, kind, archived, page });
+  const r = await listParties(db, ctx.user.id, ctx.current.id, { q: sp.q, kind, status: situacao, archived, page });
   const qs = (o: Partial<SP>) => { const u = new URLSearchParams(); const m = { ...sp, ...o }; for (const [k, v] of Object.entries(m)) if (v) u.set(k, String(v)); const s = u.toString(); return s ? `?${s}` : ""; };
   const tab = (label: string, v?: string) => (
     <Link key={label} href={`/clientes${qs({ tipo: v, page: undefined })}`} aria-current={(kind ?? "") === (v ?? "") ? "page" : undefined}
@@ -36,6 +37,8 @@ export default async function Clientes({ searchParams }: { searchParams: Promise
       {mode === "crm" && <p role="note" className="rounded-md bg-info-soft p-3 text-sm text-info-foreground">Os <strong>clientes</strong> desta empresa vêm do CRM (somente leitura). Fornecedores continuam locais. <Link href="/integracoes" className="underline">Integrações</Link></p>}
       <form className="flex gap-2" role="search">
         {kind && <input type="hidden" name="tipo" value={kind} />}{archived && <input type="hidden" name="arq" value="1" />}
+        <label htmlFor="situacao" className="sr-only">Situação</label>
+        <select id="situacao" name="situacao" defaultValue={situacao ?? ""} className="h-10 rounded-md border border-input bg-card px-2 text-sm"><option value="">Todas as situações</option><option value="ativo">Ativos</option><option value="suspenso">Suspensos</option><option value="cancelado">Cancelados</option></select>
         <label htmlFor="q" className="sr-only">Buscar</label>
         <input id="q" name="q" defaultValue={sp.q} placeholder="Buscar por nome ou documento" className="flex-1 rounded-md border border-input bg-card px-3 py-2.5" />
         <button className="rounded-md bg-card px-4 py-2.5 ring-1 ring-input">Buscar</button>
@@ -54,7 +57,7 @@ export default async function Clientes({ searchParams }: { searchParams: Promise
           {r.items.map((p) => (
             <li key={p.id}><Link href={`/clientes/${p.id}`} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-accent">
               <div className="min-w-0"><p className="truncate font-medium">{p.legalName}</p><p className="truncate text-sm text-muted-foreground">{p.docType.toUpperCase()} {p.documentFormatted}</p></div>
-              <span className="flex shrink-0 gap-1.5"><span className="rounded-full bg-muted px-2.5 py-1 text-xs">{p.kind === "cliente" ? "Cliente" : "Fornecedor"}</span>{p.source === "crm" && <span className="rounded-full bg-info-soft px-2.5 py-1 text-xs text-info-foreground">CRM</span>}</span>
+              <span className="flex shrink-0 gap-1.5"><span className="rounded-full bg-muted px-2.5 py-1 text-xs">{p.kind === "cliente" ? "Cliente" : "Fornecedor"}</span>{p.kind === "cliente" && p.status !== "ativo" && <span className={`rounded-full px-2.5 py-1 text-xs ${p.status === "cancelado" ? "bg-negative-soft text-negative-foreground" : "bg-warning-soft text-warning-foreground"}`}>{STATUS_LABEL[p.status as Status]}</span>}{p.source === "crm" && <span className="rounded-full bg-info-soft px-2.5 py-1 text-xs text-info-foreground">CRM</span>}</span>
             </Link></li>
           ))}
         </ul>

@@ -5,6 +5,9 @@ x-app-env: &app-env
   POSTGRES_HOST: db
   POSTGRES_PORT: "5432"
   DEMO_MODE: "true"
+  # Chave geral da sincronização com o K3G CRM (ligada por ordem do dono em 2026-10-23). Sozinha NÃO importa nada:
+  # cada empresa precisa estar no modo CRM, com a conexão ativada, e a diretoria confirmar a prévia.
+  CRM_SYNC_ENABLED: "true"
   AUTH_TRUST_HOST: "true"
   AUTH_URL: "https://financeiro.devops.k3gsolutions.com.br"
   BILLING_LIVE_ENABLED: "false"

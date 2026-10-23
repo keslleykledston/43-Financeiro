@@ -74,6 +74,8 @@ const partyColumns = () => ({
   docType: docTypeEnum("doc_type").notNull(),
   document: text("document").notNull(), // normalizado, sem pontuação (CNPJ pode ser alfanumérico)
   archivedAt: timestamp("archived_at", { withTimezone: true }), // exclusão lógica
+  // situação comercial: só "ativo" é faturável; suspenso/cancelado continuam clientes (podem ter dívidas antigas a receber)
+  status: text("status").notNull().default("ativo"),
   createdBy: uuid("created_by").references(() => users.id),
   // origem do cadastro: manual | csv | crm (CRM é a fonte de verdade de clientes e contratos)
   source: text("source").notNull().default("manual"),
@@ -86,6 +88,7 @@ export const customers = pgTable("customers", partyColumns(), (t) => [
   uniqueIndex("customers_company_source_ext_uq").on(t.companyId, t.source, t.externalId).where(sql`${t.externalId} is not null`),
   index("customers_company_name_idx").on(t.companyId, t.legalName),
   unique("customers_company_id_uq").on(t.companyId, t.id), // alvo da FK composta dos contatos
+  check("customers_status_chk", sql`${t.status} in ('ativo', 'suspenso', 'cancelado')`),
 ]);
 
 export const vendors = pgTable("vendors", partyColumns(), (t) => [
@@ -93,6 +96,7 @@ export const vendors = pgTable("vendors", partyColumns(), (t) => [
   uniqueIndex("vendors_company_source_ext_uq").on(t.companyId, t.source, t.externalId).where(sql`${t.externalId} is not null`),
   index("vendors_company_name_idx").on(t.companyId, t.legalName),
   unique("vendors_company_id_uq").on(t.companyId, t.id),
+  check("vendors_status_chk", sql`${t.status} in ('ativo', 'suspenso', 'cancelado')`),
 ]);
 
 const contactColumns = () => ({

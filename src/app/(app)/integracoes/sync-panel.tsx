@@ -21,9 +21,9 @@ export function SyncPanel() {
             <strong>{st.create}</strong> novos · <strong>{st.update}</strong> alterados · <strong>{st.archive}</strong> a arquivar · <strong>{st.restore}</strong> a restaurar · <strong>{st.conflict}</strong> conflitos · {st.unchanged} sem mudança · {st.invalid} inválidos · {st.skipped} ignorados
           </p>
           <ul className="max-h-72 space-y-1 overflow-auto text-sm">
-            {pv.sample!.create.map((x, i) => <li key={`c${i}`}>＋ {x.legalName} <span className="text-muted-foreground">{x.document}</span></li>)}
-            {pv.sample!.update.map((x, i) => <li key={`u${i}`}>✎ {x.legalName}</li>)}
-            {pv.sample!.archive.map((x, i) => <li key={`a${i}`}>⌫ {x.legalName} <span className="text-muted-foreground">(inativo no CRM)</span></li>)}
+            {pv.sample!.create.map((x, i) => <li key={`c${i}`}>＋ {x.legalName} <span className="text-muted-foreground">{x.document}</span>{x.status !== "ativo" && <span className="ml-1 text-warning-foreground">({x.status})</span>}</li>)}
+            {pv.sample!.update.map((x, i) => <li key={`u${i}`}>✎ {x.legalName}{x.status !== "ativo" && <span className="ml-1 text-warning-foreground">({x.status})</span>}</li>)}
+            {pv.sample!.archive.map((x, i) => <li key={`a${i}`}>⌫ {x.legalName} <span className="text-muted-foreground">(deixou de ser cliente no CRM)</span></li>)}
             {pv.sample!.restore.map((x, i) => <li key={`r${i}`}>↺ {x.legalName}</li>)}
             {pv.sample!.conflicts.map((x, i) => <li key={`k${i}`} className="text-warning-foreground">⚠ {x.legalName} — {REASON[x.reason] ?? x.reason}</li>)}
           </ul>

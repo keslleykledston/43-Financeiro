@@ -1,21 +1,29 @@
 "use client";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import type { FormState } from "./actions";
 
-type Defaults = { kind?: string; legalName?: string; tradeName?: string | null; document?: string };
+type Defaults = { kind?: string; legalName?: string; tradeName?: string | null; document?: string; status?: string };
 const input = "w-full rounded-md border border-input px-3 py-3 text-base";
 
 export function PartyForm({ action, defaults, submit, lockKind, onlyVendor }: { action: (s: FormState, fd: FormData) => Promise<FormState>; defaults?: Defaults; submit: string; lockKind?: boolean; onlyVendor?: boolean }) {
   const [state, act, pending] = useActionState(action, undefined);
   const v = state?.values ?? {};
-  const d = { kind: v.kind ?? defaults?.kind ?? (onlyVendor ? "fornecedor" : "cliente"), legalName: v.legalName ?? defaults?.legalName ?? "", tradeName: v.tradeName ?? defaults?.tradeName ?? "", document: v.document ?? defaults?.document ?? "" };
+  const [kindNow, setKindNow] = useState<string | undefined>(undefined);
+  const d = { status: v.status ?? defaults?.status ?? "ativo", kind: v.kind ?? defaults?.kind ?? (onlyVendor ? "fornecedor" : "cliente"), legalName: v.legalName ?? defaults?.legalName ?? "", tradeName: v.tradeName ?? defaults?.tradeName ?? "", document: v.document ?? defaults?.document ?? "" };
   return (
     <form action={act} className="space-y-4" key={state?.error ?? "ok"}>
       <div>
         <label htmlFor="kind" className="mb-1 block text-sm font-medium">Tipo</label>
-        <select id="kind" name="kind" defaultValue={d.kind} disabled={lockKind} className={input}>{!onlyVendor && <option value="cliente">Cliente</option>}<option value="fornecedor">Fornecedor</option></select>
+        <select id="kind" name="kind" defaultValue={d.kind} disabled={lockKind} onChange={(e) => setKindNow(e.target.value)} className={input}>{!onlyVendor && <option value="cliente">Cliente</option>}<option value="fornecedor">Fornecedor</option></select>
         {lockKind && <p className="mt-1 text-xs text-muted-foreground">O tipo não pode ser alterado depois de criado.</p>}
       </div>
+      {(kindNow ?? d.kind) === "cliente" && (
+        <div>
+          <label htmlFor="status" className="mb-1 block text-sm font-medium">Situação</label>
+          <select id="status" name="status" defaultValue={d.status} className={input}><option value="ativo">Ativo (faturável)</option><option value="suspenso">Suspenso</option><option value="cancelado">Cancelado</option></select>
+          <p className="mt-1 text-xs text-muted-foreground">Suspenso e cancelado continuam clientes (podem ter dívidas antigas), mas não geram nova cobrança.</p>
+        </div>
+      )}
       <div><label htmlFor="legalName" className="mb-1 block text-sm font-medium">Razão social / nome</label><input id="legalName" name="legalName" defaultValue={d.legalName} required maxLength={200} className={input} /></div>
       <div><label htmlFor="tradeName" className="mb-1 block text-sm font-medium">Nome fantasia (opcional)</label><input id="tradeName" name="tradeName" defaultValue={d.tradeName} maxLength={200} className={input} /></div>
       <div><label htmlFor="document" className="mb-1 block text-sm font-medium">CPF ou CNPJ</label><input id="document" name="document" defaultValue={d.document} required inputMode="text" autoComplete="off" className={input} /></div>

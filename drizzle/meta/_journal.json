@@ -64,6 +64,13 @@
       "when": 1792732804125,
       "tag": "0008_first_major_mapleleaf",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792735057621,
+      "tag": "0009_smiling_legion",
+      "breakpoints": true
     }
   ]
 }

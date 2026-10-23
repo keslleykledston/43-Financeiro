@@ -13,7 +13,10 @@ export const crmCustomerSchema = z.object({
   legalName: z.string().trim().min(2).max(200),
   tradeName: z.string().trim().max(200).optional(),
   document: z.string().trim().min(1).max(30),
+  /** false = registro que NÃO deve existir como cliente (ex.: prospect): nunca importado; se já existia, é arquivado. */
   active: z.boolean().default(true),
+  /** situação comercial: só "ativo" é faturável; suspenso/cancelado seguem como clientes (dívidas antigas). */
+  status: z.enum(["ativo", "suspenso", "cancelado"]).default("ativo"),
   companyRef: z.string().trim().max(100).optional(), // empresa/CNPJ emissor no CRM (mapeia p/ nossa empresa)
   contacts: z.array(crmContactSchema).max(50).default([]),
   updatedAt: z.string().optional(),

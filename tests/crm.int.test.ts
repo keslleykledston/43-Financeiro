@@ -7,7 +7,7 @@ import { databaseUrl } from "@/lib/db/url";
 import * as schema from "@/lib/db/schema";
 import type { DB } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
-import { addContact, createParty, exportParties, getParty, history, importParties, listParties, previewImport, removeContact, setArchived, updateParty } from "@/modules/crm/service";
+import { addContact, createParty, exportParties, isBillable, getParty, history, importParties, listParties, previewImport, removeContact, setArchived, updateParty } from "@/modules/crm/service";
 
 const enabled = !!process.env.POSTGRES_USER;
 const CPF = "529.982.247-25", CNPJ = "11.222.333/0001-81", CNPJ2 = "12.ABC.345/01DE-35";
@@ -156,5 +156,31 @@ describe.skipIf(!enabled)("CRM: isolamento, duplicidade, permissões, busca, imp
     await setArchived(db, dirA, A, p.id, true);
     expect((await history(db, dirA, A, p.id)).map((h) => h.action).sort()).toEqual(["party.archived", "party.created", "party.updated"]);
     expect(await history(db, dirB, B, p.id)).toEqual([]);
+  });
+
+  it("situação (local): criar/editar com situação, filtrar, só ativo é faturável, CSV com coluna situacao e exportação", async () => {
+    const a = await createParty(db, dirA, A, novo({ legalName: "Ativo SA", document: CNPJ }));
+    const s = await createParty(db, dirA, A, novo({ legalName: "Suspenso SA", document: CNPJ2, status: "suspenso" }));
+    expect([a.status, s.status]).toEqual(["ativo", "suspenso"]);
+    await expect(createParty(db, dirA, A, novo({ document: CPF, status: "inexistente" }))).rejects.toThrow(/Situação inválida/);
+    await updateParty(db, dirA, A, s.id, { legalName: "Suspenso SA", document: CNPJ2, status: "cancelado" });
+    expect((await getParty(db, dirA, A, s.id))!.status).toBe("cancelado");
+    await updateParty(db, dirA, A, s.id, { legalName: "Suspenso SA Renomeado", document: CNPJ2 }); // sem status: mantém
+    expect((await getParty(db, dirA, A, s.id))!.status).toBe("cancelado");
+    expect((await listParties(db, dirA, A, { status: "ativo" })).total).toBe(1);
+    expect((await listParties(db, dirA, A, { status: "cancelado" })).total).toBe(1);
+    const rows = (await listParties(db, dirA, A, {})).items;
+    expect(rows.filter(isBillable).map((r) => r.legalName)).toEqual(["Ativo SA"]);
+
+    const csv = `tipo;razao_social;documento;situacao\ncliente;Via CSV Suspenso;${CPF};suspenso\ncliente;Sem Coluna Valida;52998224726;ativo\ncliente;Situacao Ruim;${"04.252.011/0001-10"};talvez`;
+    const pv = await previewImport(db, dirA, A, csv);
+    expect(pv.rows[0]).toMatchObject({ status: "ok", situacao: "suspenso" });
+    expect(pv.rows[2]).toMatchObject({ status: "erro" });
+    expect(pv.rows[2].message).toMatch(/situacao/);
+    await importParties(db, dirA, A, csv);
+    expect((await listParties(db, dirA, A, { q: "Via CSV" })).items[0].status).toBe("suspenso");
+    const exp = await exportParties(db, dirA, A);
+    expect(exp.split("\r\n")[0]).toContain("situacao");
+    expect(exp).toContain("cancelado");
   });
 });

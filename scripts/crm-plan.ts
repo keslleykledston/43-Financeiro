@@ -17,6 +17,6 @@ import { parseDocument } from "../src/lib/validators/document";
   const mapped = raw as { active?: boolean; document?: string }[];
   const activeItems = mapped.filter((m) => m.active);
   const activeValid = activeItems.filter((m) => m.document && parseDocument(m.document));
-  console.log(`clientes ACTIVE no CRM: ${activeItems.length}; com CNPJ válido (entrariam): ${activeValid.length}; ACTIVE sem CNPJ válido (ficariam de fora): ${activeItems.length - activeValid.length}`);
+  console.log(`clientes no CRM (ativo+suspenso+cancelado): ${activeItems.length}; com CNPJ válido: ${activeValid.length}; sem CNPJ válido (ficariam de fora): ${activeItems.length - activeValid.length}`);
   console.log(`conflitos internos do CRM (mesmo CNPJ em 2 cadastros): ${plan.conflicts.length}`);
 })().catch((e) => { console.error("falha:", (e as Error).name, (e as Error).message?.slice(0, 160)); process.exit(1); });

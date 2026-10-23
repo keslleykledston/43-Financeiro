@@ -4,7 +4,7 @@ import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
-import { getCustomerMode, getParty, history } from "@/modules/crm/service";
+import { getCustomerMode, getParty, history, STATUS_LABEL, type Status } from "@/modules/crm/service";
 import { PartyForm } from "../party-form";
 import { ContactForm } from "../contact-form";
 import { archiveAction, removeContactAction, updateAction } from "../actions";
@@ -30,14 +30,15 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
       <Link href="/clientes" className="text-sm text-primary">← Voltar</Link>
       <div>
         <h1 className="text-2xl font-semibold">{p.legalName}</h1>
-        <p className="text-sm text-muted-foreground">{p.kind === "cliente" ? "Cliente" : "Fornecedor"} · {p.docType.toUpperCase()} {p.documentFormatted}{p.archivedAt && <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs">Arquivado</span>}</p>
+        <p className="text-sm text-muted-foreground">{p.kind === "cliente" ? "Cliente" : "Fornecedor"} · {p.docType.toUpperCase()} {p.documentFormatted}{p.archivedAt && <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs">Arquivado</span>}{p.kind === "cliente" && <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${p.status === "ativo" ? "bg-positive-soft text-positive-foreground" : p.status === "cancelado" ? "bg-negative-soft text-negative-foreground" : "bg-warning-soft text-warning-foreground"}`}>{STATUS_LABEL[p.status as Status]}</span>}</p>
       </div>
+      {p.kind === "cliente" && p.status !== "ativo" && <p role="note" className="rounded-md bg-warning-soft p-3 text-sm text-warning-foreground">Cliente <strong>{p.status}</strong>: continua cadastrado (pode ter dívidas antigas a receber), mas <strong>não gera nova cobrança</strong>.</p>}
       {sp.salvo && <p role="status" className="rounded-md bg-positive-soft p-3 text-sm text-positive-foreground">Alterações salvas.</p>}
       {crmOwned && <p role="note" className="rounded-md bg-info-soft p-3 text-sm text-info-foreground">Cadastro sincronizado do CRM (somente leitura). Para alterar dados ou arquivar, edite no CRM. Contatos adicionais locais são permitidos.</p>}
       {p.source === "crm" && !crmMode && <p role="note" className="rounded-md bg-warning-soft p-3 text-sm text-warning-foreground">Este cadastro veio do CRM, mas a empresa está no modo Local, então ele é editável. Se voltar ao modo CRM, os dados do CRM sobrescrevem suas edições.</p>}
       {write && !p.archivedAt && !crmOwned && (
         <section className="rounded-lg bg-card p-5"><h2 className="mb-3 font-semibold">Dados</h2>
-          <PartyForm action={updateAction.bind(null, id)} defaults={{ kind: p.kind, legalName: p.legalName, tradeName: p.tradeName, document: p.documentFormatted }} submit="Salvar" lockKind /></section>
+          <PartyForm action={updateAction.bind(null, id)} defaults={{ kind: p.kind, status: p.status, legalName: p.legalName, tradeName: p.tradeName, document: p.documentFormatted }} submit="Salvar" lockKind /></section>
       )}
       <section className="rounded-lg bg-card p-5">
         <h2 className="mb-3 font-semibold">Contatos ({p.contacts.length})</h2>

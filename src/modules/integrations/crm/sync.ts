@@ -12,7 +12,7 @@ export const MAX_ITEMS = 5000;
 export const MAX_PAGES = 200;
 
 type Row = typeof customers.$inferSelect;
-export type Planned = { externalId: string; legalName: string; document: string; docType: "cpf" | "cnpj"; tradeName?: string; contacts: CrmCustomer["contacts"] };
+export type Planned = { externalId: string; legalName: string; document: string; docType: "cpf" | "cnpj"; tradeName?: string; status: CrmCustomer["status"]; contacts: CrmCustomer["contacts"] };
 export type Plan = {
   create: Planned[];
   update: (Planned & { localId: string })[];
@@ -95,7 +95,7 @@ export function buildPlan(rows: Row[], ignored: Set<string>, raw: unknown[], com
       if (c.companyRef === undefined) { conflict(c, "ambiguous_company", doc.digits); continue; }
       if (c.companyRef !== companyRef) { plan.stats.skipped++; continue; } // pertence a outra empresa
     }
-    const planned: Planned = { externalId: c.externalId, legalName: c.legalName, tradeName: c.tradeName, document: doc.digits, docType: doc.type, contacts: c.contacts };
+    const planned: Planned = { externalId: c.externalId, legalName: c.legalName, tradeName: c.tradeName, document: doc.digits, docType: doc.type, status: c.status, contacts: c.contacts };
     const existing = byExt.get(c.externalId);
 
     if (existing) {
@@ -105,7 +105,7 @@ export function buildPlan(rows: Row[], ignored: Set<string>, raw: unknown[], com
       if (claimedDocs.has(doc.digits)) { conflict(c, "document_collision", doc.digits); continue; }
       claimedDocs.add(doc.digits);
       if (existing.archivedAt) { plan.restore.push({ ...planned, localId: existing.id }); continue; }
-      const changed = existing.legalName !== c.legalName || (existing.tradeName ?? undefined) !== (c.tradeName || undefined) || existing.document !== doc.digits
+      const changed = existing.legalName !== c.legalName || (existing.tradeName ?? undefined) !== (c.tradeName || undefined) || existing.document !== doc.digits || existing.status !== c.status
         || canonContacts(c.contacts) !== (crmContacts.get(existing.id) ?? "[]"); // mudança só nos contatos também conta
       if (changed) plan.update.push({ ...planned, localId: existing.id }); else plan.stats.unchanged++;
       continue;
@@ -138,7 +138,7 @@ const PREVIEW_ROWS = 200;
 /** Impressão digital do plano. A confirmação só aplica se o plano recalculado for IDÊNTICO ao revisado. */
 export function planHash(plan: Plan): string {
   const by = <T extends { externalId: string }>(a: T[]) => [...a].sort((x, y) => x.externalId.localeCompare(y.externalId));
-  const pl = (x: Planned) => [x.externalId, x.legalName, x.tradeName ?? "", x.document, canonContacts(x.contacts)];
+  const pl = (x: Planned) => [x.externalId, x.legalName, x.tradeName ?? "", x.document, x.status, canonContacts(x.contacts)];
   const canon = {
     c: by(plan.create).map(pl), u: by(plan.update).map((x) => [...pl(x), x.localId]), r: by(plan.restore).map((x) => [...pl(x), x.localId]),
     a: by(plan.archive).map((x) => [x.externalId, x.localId]), k: by(plan.conflicts).map((x) => [x.externalId, x.reason, x.localId ?? ""]),
@@ -159,8 +159,8 @@ export async function previewSync(db: DB, adapter: CrmAdapter, actorId: string, 
     planHash: planHash(plan),
     stats: plan.stats,
     sample: {
-      create: plan.create.slice(0, PREVIEW_ROWS).map((x) => ({ legalName: x.legalName, document: x.document })),
-      update: plan.update.slice(0, PREVIEW_ROWS).map((x) => ({ legalName: x.legalName, document: x.document })),
+      create: plan.create.slice(0, PREVIEW_ROWS).map((x) => ({ legalName: x.legalName, document: x.document, status: x.status })),
+      update: plan.update.slice(0, PREVIEW_ROWS).map((x) => ({ legalName: x.legalName, document: x.document, status: x.status })),
       archive: plan.archive.slice(0, PREVIEW_ROWS).map((x) => ({ legalName: x.legalName })),
       restore: plan.restore.slice(0, PREVIEW_ROWS).map((x) => ({ legalName: x.legalName, document: x.document })),
       conflicts: plan.conflicts.slice(0, PREVIEW_ROWS).map((x) => ({ legalName: x.legalName, document: x.document, reason: x.reason })),
@@ -200,11 +200,11 @@ export async function applySync(db: DB, adapter: CrmAdapter, actorId: string, co
     };
 
     for (const p of plan.create) {
-      const [row] = await t.insert(customers).values({ companyId, createdBy: actorId, legalName: p.legalName, tradeName: p.tradeName, docType: p.docType, document: p.document, source: "crm", externalId: p.externalId, externalSyncedAt: now }).returning({ id: customers.id });
+      const [row] = await t.insert(customers).values({ companyId, createdBy: actorId, legalName: p.legalName, tradeName: p.tradeName, docType: p.docType, document: p.document, status: p.status, source: "crm", externalId: p.externalId, externalSyncedAt: now }).returning({ id: customers.id });
       await syncContacts(row.id, p.contacts);
     }
     for (const p of [...plan.update, ...plan.restore]) {
-      await t.update(customers).set({ legalName: p.legalName, tradeName: p.tradeName ?? null, docType: p.docType, document: p.document, archivedAt: null, externalSyncedAt: now, updatedAt: now })
+      await t.update(customers).set({ legalName: p.legalName, tradeName: p.tradeName ?? null, docType: p.docType, document: p.document, status: p.status, archivedAt: null, externalSyncedAt: now, updatedAt: now })
         .where(and(eq(customers.id, p.localId), eq(customers.companyId, companyId)));
       await syncContacts(p.localId, p.contacts);
     }

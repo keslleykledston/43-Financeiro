@@ -8,6 +8,10 @@ import { formatDocument, parseDocument } from "@/lib/validators/document";
 import { Invalid, requirePerm } from "@/modules/identity/service";
 
 export type Kind = "cliente" | "fornecedor";
+export type Status = "ativo" | "suspenso" | "cancelado";
+export const STATUS_LABEL: Record<Status, string> = { ativo: "Ativo", suspenso: "Suspenso", cancelado: "Cancelado" };
+/** Faturável = situação ativa e não arquivado. Suspensos e cancelados continuam clientes (dívidas antigas a receber), mas NÃO geram nova cobrança. */
+export const isBillable = (c: { status: string; archivedAt: Date | null }) => c.status === "ativo" && !c.archivedAt;
 export const PAGE_SIZE = 20;
 export const IMPORT_MAX_ROWS = 1000;
 export const IMPORT_MAX_BYTES = 500_000;
@@ -25,6 +29,7 @@ export const partySchema = z.object({
   legalName: str(200).min(2, "Informe a razão social ou nome"),
   tradeName: str(200).optional().transform((v) => v || undefined),
   document: str(30).min(1, "Informe o CPF ou CNPJ"),
+  status: z.enum(["ativo", "suspenso", "cancelado"], { message: "Situação inválida" }).optional(),
 });
 export const contactSchema = z.object({
   name: str(120).min(1, "Informe o nome do contato"),
@@ -43,7 +48,7 @@ function normalize(input: unknown) {
   if (!p.success) throw new Invalid(firstIssue(p.error));
   const doc = parseDocument(p.data.document);
   if (!doc) throw new Invalid("CPF ou CNPJ inválido");
-  return { ...p.data, docType: doc.type, document: doc.digits };
+  return { ...p.data, docType: doc.type, document: doc.digits }; // status opcional: só é gravado se informado
 }
 
 const audit = (db: DB, companyId: string, actorId: string, action: string, detail: Record<string, unknown>) =>
@@ -111,7 +116,7 @@ export async function createParty(db: DB, actorId: string, companyId: string, in
     return await db.transaction(async (tx) => {
       await lockModeShared(tx as unknown as DB, companyId);
       if (v.kind === "cliente" && (await readCustomerMode(tx as unknown as DB, companyId)) === "crm") throw new Invalid(CRM_MODE_MSG); // relido DENTRO da transação travada
-      const [p] = await tx.insert(main).values({ companyId, createdBy: actorId, legalName: v.legalName, tradeName: v.tradeName, docType: v.docType, document: v.document }).returning();
+      const [p] = await tx.insert(main).values({ companyId, createdBy: actorId, legalName: v.legalName, tradeName: v.tradeName, docType: v.docType, document: v.document, status: v.status ?? "ativo" }).returning();
       await audit(tx as unknown as DB, companyId, actorId, "party.created", { partyId: p.id, kind: v.kind });
       return { ...p, kind: v.kind };
     });
@@ -140,9 +145,9 @@ export async function updateParty(db: DB, actorId: string, companyId: string, id
       await lockModeShared(tx as unknown as DB, companyId);
       await assertNotCrmOwned(tx as unknown as DB, main, companyId, id);
       const [p] = await tx.update(main)
-        .set({ legalName: v.legalName, tradeName: v.tradeName ?? null, docType: v.docType, document: v.document, updatedAt: new Date() })
+        .set({ legalName: v.legalName, tradeName: v.tradeName ?? null, docType: v.docType, document: v.document, ...(v.status ? { status: v.status } : {}), updatedAt: new Date() })
         .where(and(eq(main.id, id), eq(main.companyId, companyId))).returning();
-      await audit(tx as unknown as DB, companyId, actorId, "party.updated", { partyId: id });
+      await audit(tx as unknown as DB, companyId, actorId, "party.updated", { partyId: id, ...(v.status ? { status: v.status } : {}) });
       return { ...p, kind };
     });
   } catch (e) { if (pgCode(e) === "23505") throw new Invalid(DUP); throw e; }
@@ -200,7 +205,7 @@ export async function history(db: DB, actorId: string, companyId: string, partyI
     .orderBy(desc(auditLog.createdAt)).limit(50);
 }
 
-export type ListQuery = { q?: string; kind?: Kind; archived?: boolean; page?: number };
+export type ListQuery = { q?: string; kind?: Kind; status?: Status; archived?: boolean; page?: number };
 
 export async function listParties(db: DB, actorId: string, companyId: string, query: ListQuery) {
   await requirePerm(db, actorId, companyId, "crm.read");
@@ -211,13 +216,14 @@ export async function listParties(db: DB, actorId: string, companyId: string, qu
   const where = (t: typeof customers) => and(
     eq(t.companyId, companyId),
     query.archived ? isNotNull(t.archivedAt) : isNull(t.archivedAt),
+    query.status ? eq(t.status, query.status) : undefined,
     like ? or(ilike(t.legalName, like), ilike(t.tradeName, like), digits ? ilike(t.document, `%${digits}%`) : undefined) : undefined,
   );
   const sel = (k: Kind) => {
     const { main: t } = tables(k);
     return db.select({
       id: t.id, legalName: t.legalName, tradeName: t.tradeName, docType: t.docType, document: t.document,
-      archivedAt: t.archivedAt, source: t.source, kind: sql<Kind>`${sql.raw(`'${k}'`)}::text`.as("kind"),
+      archivedAt: t.archivedAt, status: t.status, source: t.source, kind: sql<Kind>`${sql.raw(`'${k}'`)}::text`.as("kind"),
     }).from(t).where(where(t));
   };
   const kinds: Kind[] = query.kind ? [query.kind] : ["cliente", "fornecedor"];
@@ -235,10 +241,10 @@ export async function listParties(db: DB, actorId: string, companyId: string, qu
 // ---------- Importação CSV (prévia revisável + confirmação; revalidada no servidor) ----------
 export type ImportRow = {
   line: number; status: "ok" | "erro" | "duplicado";
-  kind?: Kind; legalName?: string; tradeName?: string; document?: string; email?: string; phone?: string; message?: string;
+  kind?: Kind; legalName?: string; tradeName?: string; document?: string; email?: string; phone?: string; situacao?: Status; message?: string;
 };
-const HEADERS = ["tipo", "razao_social", "nome_fantasia", "documento", "email_financeiro", "telefone"] as const;
-export const CSV_TEMPLATE = HEADERS.join(";") + "\ncliente;Empresa Exemplo Ltda;Exemplo;11.222.333/0001-81;financeiro@exemplo.com;(92) 99999-0000\n";
+const HEADERS = ["tipo", "razao_social", "nome_fantasia", "documento", "email_financeiro", "telefone", "situacao"] as const;
+export const CSV_TEMPLATE = HEADERS.join(";") + "\ncliente;Empresa Exemplo Ltda;Exemplo;11.222.333/0001-81;financeiro@exemplo.com;(92) 99999-0000;ativo\n";
 
 export async function previewImport(db: DB, actorId: string, companyId: string, text: string) {
   await requirePerm(db, actorId, companyId, "crm.write");
@@ -263,8 +269,10 @@ export async function previewImport(db: DB, actorId: string, companyId: string, 
     const line = i + 2;
     const kind = col(r, "tipo").toLowerCase();
     const email = col(r, "email_financeiro");
-    const base = { line, legalName: col(r, "razao_social"), tradeName: col(r, "nome_fantasia") || undefined, email: email || undefined, phone: col(r, "telefone") || undefined };
+    const situacao = (col(r, "situacao").toLowerCase() || "ativo") as Status;
+    const base = { line, situacao, legalName: col(r, "razao_social"), tradeName: col(r, "nome_fantasia") || undefined, email: email || undefined, phone: col(r, "telefone") || undefined };
     if (kind !== "cliente" && kind !== "fornecedor") return { ...base, status: "erro", message: "tipo deve ser cliente ou fornecedor" };
+    if (!["ativo", "suspenso", "cancelado"].includes(situacao)) return { ...base, situacao: "ativo", kind: kind as Kind, status: "erro", message: "situacao deve ser ativo, suspenso ou cancelado" };
     if (kind === "cliente" && crmMode) return { ...base, kind, status: "erro", message: "clientes vêm do CRM nesta empresa" };
     const p = partySchema.safeParse({ kind, legalName: base.legalName, tradeName: base.tradeName, document: col(r, "documento") });
     if (!p.success) return { ...base, kind, status: "erro", message: firstIssue(p.error) };
@@ -294,7 +302,7 @@ export async function importParties(db: DB, actorId: string, companyId: string, 
       const { main, contacts } = tables(r.kind!);
       const [p] = await tx.insert(main).values({
         companyId, createdBy: actorId, legalName: r.legalName!, tradeName: r.tradeName,
-        docType: parseDocument(r.document!)!.type, document: r.document!, source: "csv",
+        docType: parseDocument(r.document!)!.type, document: r.document!, status: r.situacao ?? "ativo", source: "csv",
       }).returning({ id: main.id });
       if (r.email || r.phone) await tx.insert(contacts).values({ companyId, partyId: p.id, name: "Financeiro", email: r.email, phone: r.phone, isFinancial: true });
     }
@@ -315,7 +323,7 @@ export async function exportParties(db: DB, actorId: string, companyId: string, 
     const rows = await db.select().from(main).where(and(eq(main.companyId, companyId), isNull(main.archivedAt)));
     const fin = await db.select().from(contacts).where(and(eq(contacts.companyId, companyId), eq(contacts.isFinancial, true)));
     const byParty = new Map(fin.map((c) => [c.partyId, c]));
-    for (const r of rows) out.push([k, r.legalName, r.tradeName ?? "", formatDocument(r.docType, r.document), byParty.get(r.id)?.email ?? "", byParty.get(r.id)?.phone ?? ""]);
+    for (const r of rows) out.push([k, r.legalName, r.tradeName ?? "", formatDocument(r.docType, r.document), byParty.get(r.id)?.email ?? "", byParty.get(r.id)?.phone ?? "", r.status]);
   }
   out.sort((a, b) => a[1].localeCompare(b[1], "pt-BR"));
   await audit(db, companyId, actorId, "party.exported", { count: out.length });

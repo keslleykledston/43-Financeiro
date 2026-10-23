@@ -29,7 +29,7 @@ UI: sessão/cookie seguros + CSRF. Integração server-to-server: chave gerada r
 - `MockAdapter`: dados sintéticos, aceita respostas sucesso, erro, timeout e resultado incerto para simulação.
 
 ## Integração CRM (clientes e contratos) — regras de construção
-O CRM da K3G é a **fonte de verdade** de cadastro de clientes e de contratos; o K3G Finance **importa** e não escreve de volta (v1). Pedido do dono do produto em 2026-10-23.
+O K3G CRM é a **fonte de verdade do cadastro de clientes** (os **contratos** ficam no K3G Finance — o CRM não os tem, ADR-012); o K3G Finance **importa** e não escreve de volta (v1). Pedido do dono do produto em 2026-10-23.
 - **Identidade externa:** `customers`/`contracts` guardam `source` (manual|crm|csv), `external_id` e `external_synced_at`; único `(company_id, source, external_id)`. Reimportar **não duplica** (upsert idempotente).
 - **Prévia antes de aplicar** (mesmo padrão do CSV): sincronização gera diff (novos, alterados, removidos/inativos, conflitos); humano confirma. Execuções ficam em `integration_sync_runs` (contagens, erros, duração, quem confirmou).
 - **Conflitos nunca sobrescrevem em silêncio:** cadastro manual com o mesmo documento, empresa/CNPJ emissor ambíguo, valor ou vencimento de contrato alterado → fila de revisão humana. Alteração de contrato cria `contract_versions` e **não afeta cobrança futura sem aprovação** (dinheiro real).
