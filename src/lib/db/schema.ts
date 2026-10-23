@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb, pgEnum, integer, boolean, unique, foreignKey } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb, pgEnum, integer, boolean, unique, foreignKey, check } from "drizzle-orm/pg-core";
 
 export const roleEnum = pgEnum("role", ["admin_tecnico", "diretoria", "gerente", "assistente", "contabilidade"]);
 export const statusEnum = pgEnum("member_status", ["active", "invited", "removed"]);
@@ -22,7 +22,12 @@ export const companies = pgTable("companies", {
   ...base,
   name: text("name").notNull(),
   cnpj: text("cnpj"), // sem CNPJ real pré-preenchido
-}, (t) => [uniqueIndex("companies_cnpj_uq").on(t.cnpj).where(sql`${t.cnpj} is not null`)]);
+  // de onde vêm os CLIENTES desta empresa: "local" (cadastro/CSV aqui) ou "crm" (importados do CRM, somente leitura)
+  customerMode: text("customer_mode").notNull().default("local"),
+}, (t) => [
+  uniqueIndex("companies_cnpj_uq").on(t.cnpj).where(sql`${t.cnpj} is not null`),
+  check("companies_customer_mode_chk", sql`${t.customerMode} in ('local', 'crm')`),
+]);
 
 export const memberships = pgTable("memberships", {
   ...base,

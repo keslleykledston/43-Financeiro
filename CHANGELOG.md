@@ -9,3 +9,4 @@
 - Segurança (revisão Codex): revalidação de conta por requisição, convite endurecido, rate limit compartilhado. Backup diário + restore testado.
 - E03: clientes e fornecedores (CRUD, busca, CNPJ alfanumérico, contatos, histórico, arquivar, importar/exportar CSV). Sandbox `pnpm sandbox`. Seed não altera vínculos existentes.
 - E03b: integração CRM (somente leitura): adaptador canônico + mock + HTTP, sincronização com prévia e confirmação por hash, conflitos, cadastros do CRM somente leitura, tela Integrações. Banco realinhado ao desenho (customers/vendors). Protótipo de design (Lovable) revisado.
+- Dois cenários de clientes por empresa: Local (padrão) ou CRM (somente leitura). Regra no servidor, serializada com travas; troca auditada; CHECK no banco.

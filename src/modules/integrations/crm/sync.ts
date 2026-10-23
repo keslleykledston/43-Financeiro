@@ -3,9 +3,11 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
 import { auditLog, customerContacts, customers, integrationConflicts, integrationConnections, integrationSyncRuns } from "@/lib/db/schema";
 import { parseDocument } from "@/lib/validators/document";
+import { lockModeShared, readCustomerMode } from "@/modules/crm/service";
 import { Invalid, requirePerm } from "@/modules/identity/service";
 import { crmCustomerSchema, CrmError, MAX_PAGE_ITEMS, type CrmAdapter, type CrmCustomer } from "./types";
 
+const LOCAL_MODE_MSG = "Esta empresa está no modo local. Troque a origem dos clientes para CRM em Integrações.";
 export const MAX_ITEMS = 5000;
 export const MAX_PAGES = 200;
 
@@ -43,6 +45,7 @@ export async function saveConnection(db: DB, actorId: string, companyId: string,
 /** Chave geral (env) + conexão habilitada da empresa. Padrão: desligado. */
 async function assertEnabled(db: DB, companyId: string, env: NodeJS.ProcessEnv = process.env) {
   if (env.CRM_SYNC_ENABLED !== "true") throw new Invalid("Sincronização com o CRM está desativada (chave geral)");
+  if ((await readCustomerMode(db, companyId)) !== "crm") throw new Invalid(LOCAL_MODE_MSG);
   const c = await getConnection(db, companyId);
   if (!c?.enabled) throw new Invalid("A integração com o CRM não está ativada para esta empresa");
   return c;
@@ -184,6 +187,8 @@ export async function applySync(db: DB, adapter: CrmAdapter, actorId: string, co
   return db.transaction(async (tx) => {
     const t = tx as unknown as DB;
     await t.execute(sameCompanyLock(companyId));
+    await lockModeShared(t, companyId); // ordem fixa: crm-sync → cust-mode
+    if ((await readCustomerMode(t, companyId)) !== "crm") throw new Invalid(LOCAL_MODE_MSG); // o modo pode ter mudado durante a chamada ao CRM
     const { rows, ignored, crmContacts } = await loadState(t, companyId); // estado lido DEPOIS da trava
     const plan = buildPlan(rows, ignored, raw, companyRef, crmContacts);
     // só aplica exatamente o que foi revisado: se o CRM ou o banco mudaram desde a prévia, exige nova revisão
@@ -235,6 +240,8 @@ export async function resolveConflict(db: DB, actorId: string, companyId: string
   await db.transaction(async (tx) => {
     const t = tx as unknown as DB;
     await t.execute(sameCompanyLock(companyId));
+    await lockModeShared(t, companyId);
+    if ((await readCustomerMode(t, companyId)) !== "crm") throw new Invalid(LOCAL_MODE_MSG); // vincular ao CRM só no modo CRM
     const [c] = await t.select().from(integrationConflicts).where(and(eq(integrationConflicts.id, conflictId), eq(integrationConflicts.companyId, companyId), eq(integrationConflicts.status, "open")));
     if (!c) throw new Invalid("Conflito não encontrado ou já resolvido");
     if (action === "link") {

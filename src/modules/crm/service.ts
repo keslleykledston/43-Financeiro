@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, ilike, isNotNull, isNull, or, sql } from "dr
 import { unionAll } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import type { DB } from "@/lib/db";
-import { auditLog, customerContacts, customers, vendorContacts, vendors } from "@/lib/db/schema";
+import { auditLog, companies, customerContacts, customers, vendorContacts, vendors } from "@/lib/db/schema";
 import { parseCsv, toCsv } from "@/lib/csv";
 import { formatDocument, parseDocument } from "@/lib/validators/document";
 import { Invalid, requirePerm } from "@/modules/identity/service";
@@ -59,10 +59,48 @@ async function kindOf(db: DB, companyId: string, id: string): Promise<Kind | nul
   return null;
 }
 
-/** Cadastro sincronizado do CRM é somente leitura aqui: o CRM é a fonte de verdade (um arquivamento local seria desfeito na próxima sincronização). */
+// ---------- Modo de origem dos clientes (por empresa) ----------
+export type CustomerMode = "local" | "crm";
+export const CRM_MODE_MSG = "Nesta empresa os clientes vêm do CRM (somente leitura). Cadastre ou altere no CRM.";
+
+const modeLockKey = (companyId: string) => `cust-mode:${companyId}`;
+/** Escritas de cliente tomam a trava COMPARTILHADA; a troca de modo, a EXCLUSIVA. Assim, modo e gravação nunca se cruzam (sem TOCTOU).
+ *  Ordem de travas no sistema: `crm-sync:` → `cust-mode:` (nunca o inverso). */
+export const lockModeShared = (db: DB, companyId: string) => db.execute(sql`select pg_advisory_xact_lock_shared(hashtext(${modeLockKey(companyId)}))`);
+const lockModeExclusive = (db: DB, companyId: string) => db.execute(sql`select pg_advisory_xact_lock(hashtext(${modeLockKey(companyId)}))`);
+
+/** USO INTERNO, sem autorização: quem chama já validou empresa e permissão (ou está dentro de uma transação travada). */
+export async function readCustomerMode(db: DB, companyId: string): Promise<CustomerMode> {
+  const [c] = await db.select({ m: companies.customerMode }).from(companies).where(eq(companies.id, companyId));
+  return c?.m === "crm" ? "crm" : "local";
+}
+
+/** Para páginas e ações: só quem é membro da empresa lê o modo. */
+export async function getCustomerMode(db: DB, actorId: string, companyId: string): Promise<CustomerMode> {
+  await requirePerm(db, actorId, companyId, "crm.read");
+  return readCustomerMode(db, companyId);
+}
+
+/** Trocar o modo muda a governança dos dados: exige gerir integrações E gravar clientes (hoje: diretoria). Auditado e serializado com as escritas. */
+export async function setCustomerMode(db: DB, actorId: string, companyId: string, mode: CustomerMode) {
+  await requirePerm(db, actorId, companyId, "integrations.manage");
+  await requirePerm(db, actorId, companyId, "crm.write");
+  if (mode !== "local" && mode !== "crm") throw new Invalid("Modo inválido");
+  await db.transaction(async (tx) => {
+    const t = tx as unknown as DB;
+    await lockModeExclusive(t, companyId); // espera as escritas em curso; novas escritas esperam esta troca
+    const from = await readCustomerMode(t, companyId);
+    if (from === mode) return;
+    await t.update(companies).set({ customerMode: mode, updatedAt: new Date() }).where(eq(companies.id, companyId));
+    await audit(t, companyId, actorId, "company.customer_mode_changed", { from, to: mode });
+  });
+}
+
+/** No modo CRM, cadastro sincronizado é somente leitura (o CRM é a fonte de verdade; edição local seria desfeita na próxima sincronização).
+ *  No modo local, o mesmo cadastro é editável. Chamar DENTRO da transação, depois de `lockModeShared`. */
 async function assertNotCrmOwned(db: DB, main: typeof customers, companyId: string, id: string) {
   const [r] = await db.select({ source: main.source }).from(main).where(and(eq(main.id, id), eq(main.companyId, companyId)));
-  if (r?.source === "crm") throw new Invalid("Este cadastro é sincronizado do CRM e não pode ser alterado aqui. Edite no CRM.");
+  if (r?.source === "crm" && (await readCustomerMode(db, companyId)) === "crm") throw new Invalid("Este cadastro é sincronizado do CRM e não pode ser alterado aqui. Edite no CRM.");
 }
 
 export async function createParty(db: DB, actorId: string, companyId: string, input: unknown) {
@@ -71,6 +109,8 @@ export async function createParty(db: DB, actorId: string, companyId: string, in
   const { main } = tables(v.kind);
   try {
     return await db.transaction(async (tx) => {
+      await lockModeShared(tx as unknown as DB, companyId);
+      if (v.kind === "cliente" && (await readCustomerMode(tx as unknown as DB, companyId)) === "crm") throw new Invalid(CRM_MODE_MSG); // relido DENTRO da transação travada
       const [p] = await tx.insert(main).values({ companyId, createdBy: actorId, legalName: v.legalName, tradeName: v.tradeName, docType: v.docType, document: v.document }).returning();
       await audit(tx as unknown as DB, companyId, actorId, "party.created", { partyId: p.id, kind: v.kind });
       return { ...p, kind: v.kind };
@@ -95,9 +135,10 @@ export async function updateParty(db: DB, actorId: string, companyId: string, id
   if (!kind) throw new Invalid("Cadastro não encontrado");
   const v = normalize({ ...(input as object), kind }); // o tipo não muda na edição
   const { main } = tables(kind);
-  await assertNotCrmOwned(db, main, companyId, id);
   try {
     return await db.transaction(async (tx) => {
+      await lockModeShared(tx as unknown as DB, companyId);
+      await assertNotCrmOwned(tx as unknown as DB, main, companyId, id);
       const [p] = await tx.update(main)
         .set({ legalName: v.legalName, tradeName: v.tradeName ?? null, docType: v.docType, document: v.document, updatedAt: new Date() })
         .where(and(eq(main.id, id), eq(main.companyId, companyId))).returning();
@@ -113,9 +154,10 @@ export async function setArchived(db: DB, actorId: string, companyId: string, id
   const kind = await kindOf(db, companyId, id);
   if (!kind) throw new Invalid("Cadastro não encontrado");
   const { main } = tables(kind);
-  await assertNotCrmOwned(db, main, companyId, id);
   try {
     await db.transaction(async (tx) => {
+      await lockModeShared(tx as unknown as DB, companyId);
+      await assertNotCrmOwned(tx as unknown as DB, main, companyId, id);
       await tx.update(main).set({ archivedAt: archived ? new Date() : null, updatedAt: new Date() })
         .where(and(eq(main.id, id), eq(main.companyId, companyId)));
       await audit(tx as unknown as DB, companyId, actorId, archived ? "party.archived" : "party.restored", { partyId: id });
@@ -135,16 +177,20 @@ export async function addContact(db: DB, actorId: string, companyId: string, par
 
 export async function removeContact(db: DB, actorId: string, companyId: string, contactId: string) {
   await requirePerm(db, actorId, companyId, "crm.write");
-  for (const k of ["cliente", "fornecedor"] as const) {
-    const { contacts } = tables(k);
-    const [c] = await db.select().from(contacts).where(and(eq(contacts.id, contactId), eq(contacts.companyId, companyId)));
-    if (!c) continue;
-    if (c.source === "crm") throw new Invalid("Contato sincronizado do CRM: remova no CRM.");
-    await db.delete(contacts).where(eq(contacts.id, contactId));
-    await audit(db, companyId, actorId, "party.contact_removed", { partyId: c.partyId });
-    return;
-  }
-  throw new Invalid("Contato não encontrado");
+  await db.transaction(async (tx) => {
+    const t = tx as unknown as DB;
+    await lockModeShared(t, companyId);
+    for (const k of ["cliente", "fornecedor"] as const) {
+      const { contacts } = tables(k);
+      const [c] = await t.select().from(contacts).where(and(eq(contacts.id, contactId), eq(contacts.companyId, companyId)));
+      if (!c) continue;
+      if (c.source === "crm" && (await readCustomerMode(t, companyId)) === "crm") throw new Invalid("Contato sincronizado do CRM: remova no CRM.");
+      await t.delete(contacts).where(eq(contacts.id, contactId));
+      await audit(t, companyId, actorId, "party.contact_removed", { partyId: c.partyId });
+      return;
+    }
+    throw new Invalid("Contato não encontrado");
+  });
 }
 
 export async function history(db: DB, actorId: string, companyId: string, partyId: string) {
@@ -206,6 +252,7 @@ export async function previewImport(db: DB, actorId: string, companyId: string, 
   if (body.length > IMPORT_MAX_ROWS) throw new Invalid(`Máximo de ${IMPORT_MAX_ROWS} linhas por importação`);
   const col = (r: string[], n: string) => (r[head.indexOf(n)] ?? "").trim();
 
+  const crmMode = (await readCustomerMode(db, companyId)) === "crm";
   const seen = new Set<string>();
   for (const k of ["cliente", "fornecedor"] as const) {
     const { main: t } = tables(k);
@@ -218,6 +265,7 @@ export async function previewImport(db: DB, actorId: string, companyId: string, 
     const email = col(r, "email_financeiro");
     const base = { line, legalName: col(r, "razao_social"), tradeName: col(r, "nome_fantasia") || undefined, email: email || undefined, phone: col(r, "telefone") || undefined };
     if (kind !== "cliente" && kind !== "fornecedor") return { ...base, status: "erro", message: "tipo deve ser cliente ou fornecedor" };
+    if (kind === "cliente" && crmMode) return { ...base, kind, status: "erro", message: "clientes vêm do CRM nesta empresa" };
     const p = partySchema.safeParse({ kind, legalName: base.legalName, tradeName: base.tradeName, document: col(r, "documento") });
     if (!p.success) return { ...base, kind, status: "erro", message: firstIssue(p.error) };
     const doc = parseDocument(p.data.document);
@@ -239,6 +287,9 @@ export async function importParties(db: DB, actorId: string, companyId: string, 
   const { rows } = await previewImport(db, actorId, companyId, text);
   const ok = rows.filter((r) => r.status === "ok");
   try { await db.transaction(async (tx) => {
+    await lockModeShared(tx as unknown as DB, companyId);
+    // a prévia pode estar velha: se a empresa virou CRM no meio do caminho, nenhum cliente é gravado
+    if (ok.some((r) => r.kind === "cliente") && (await readCustomerMode(tx as unknown as DB, companyId)) === "crm") throw new Invalid("A origem dos clientes mudou para CRM durante a importação. Revise e tente de novo.");
     for (const r of ok) {
       const { main, contacts } = tables(r.kind!);
       const [p] = await tx.insert(main).values({

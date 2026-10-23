@@ -3,7 +3,7 @@ import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
-import { listParties, type Kind } from "@/modules/crm/service";
+import { getCustomerMode, listParties, type Kind } from "@/modules/crm/service";
 
 type SP = { q?: string; tipo?: string; arq?: string; page?: string };
 
@@ -16,6 +16,7 @@ export default async function Clientes({ searchParams }: { searchParams: Promise
   const kind = sp.tipo === "cliente" || sp.tipo === "fornecedor" ? (sp.tipo as Kind) : undefined;
   const archived = sp.arq === "1";
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
+  const mode = await getCustomerMode(db, ctx.user.id, ctx.current.id);
   const r = await listParties(db, ctx.user.id, ctx.current.id, { q: sp.q, kind, archived, page });
   const qs = (o: Partial<SP>) => { const u = new URLSearchParams(); const m = { ...sp, ...o }; for (const [k, v] of Object.entries(m)) if (v) u.set(k, String(v)); const s = u.toString(); return s ? `?${s}` : ""; };
   const tab = (label: string, v?: string) => (
@@ -32,6 +33,7 @@ export default async function Clientes({ searchParams }: { searchParams: Promise
           {can(role, "crm.export") && <a href="/clientes/exportar" className="rounded-xl bg-white px-4 py-2.5 ring-1 ring-slate-300">Exportar CSV</a>}
         </div>
       </div>
+      {mode === "crm" && <p role="note" className="rounded-xl bg-blue-50 p-3 text-sm text-blue-900">Os <strong>clientes</strong> desta empresa vêm do CRM (somente leitura). Fornecedores continuam locais. <Link href="/integracoes" className="underline">Integrações</Link></p>}
       <form className="flex gap-2" role="search">
         {kind && <input type="hidden" name="tipo" value={kind} />}{archived && <input type="hidden" name="arq" value="1" />}
         <label htmlFor="q" className="sr-only">Buscar</label>

@@ -2,8 +2,10 @@ import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
+import { getCustomerMode } from "@/modules/crm/service";
 import { getConnection, listConflicts, listRuns } from "@/modules/integrations/crm/sync";
 import { ConnectionForm } from "./connection-form";
+import { ModeForm } from "./mode-form";
 import { SyncPanel } from "./sync-panel";
 import { resolveAction } from "./actions";
 
@@ -17,12 +19,21 @@ export default async function Integracoes() {
     return <section className="rounded-2xl bg-white p-8 text-center shadow-sm"><h1 className="text-xl font-semibold">Integrações</h1><p className="mt-2 text-slate-600">Seu papel não tem acesso às integrações.</p></section>;
   }
   const manage = can(role, "integrations.manage") && can(role, "crm.write");
+  const mode = await getCustomerMode(db, ctx.user.id, ctx.current.id);
   const [conn, conflicts, runs] = await Promise.all([getConnection(db, ctx.current.id), listConflicts(db, ctx.user.id, ctx.current.id), listRuns(db, ctx.user.id, ctx.current.id)]);
   const master = process.env.CRM_SYNC_ENABLED === "true";
   const configured = !!process.env.CRM_BASE_URL && !!process.env.CRM_API_TOKEN;
   return (
     <div className="max-w-3xl space-y-5">
       <div><h1 className="text-2xl font-semibold">Integrações</h1><p className="text-sm text-slate-600">{ctx.current.name}</p></div>
+      <section className="rounded-2xl bg-white p-5 shadow-sm">
+        <h2 className="mb-1 font-semibold">Origem dos clientes</h2>
+        <p className="mb-3 text-sm text-slate-600">Escolha, para esta empresa, onde os clientes são mantidos. Atual: <strong>{mode === "crm" ? "CRM" : "Local"}</strong>.</p>
+        <ModeForm mode={mode} canChange={manage} />
+      </section>
+      {mode === "local" ? (
+        <p role="note" className="rounded-2xl bg-white p-5 text-sm text-slate-600 shadow-sm">No modo <strong>Local</strong> a integração com o CRM está desligada. Para importar clientes do CRM, mude a origem para <strong>CRM</strong>.</p>
+      ) : (<>
       <section className="rounded-2xl bg-white p-5 shadow-sm">
         <h2 className="mb-1 font-semibold">CRM — clientes e contratos</h2>
         <p className="mb-3 text-sm text-slate-600">O CRM é a fonte de verdade. O K3G Finance só <strong>lê</strong> dados dele; nunca grava no CRM. Cadastros vindos do CRM ficam somente leitura aqui.</p>
@@ -62,6 +73,7 @@ export default async function Integracoes() {
           {runs.map((r) => { const s = r.stats as Record<string, number>; return <li key={r.id}>{fmt(r.createdAt)} — {r.status === "applied" ? `aplicada (${s.create ?? 0} novos, ${s.update ?? 0} alterados, ${s.archive ?? 0} arquivados, ${s.conflict ?? 0} conflitos)` : `falhou: ${r.error ?? "erro"}`}</li>; })}
         </ul>
       </section>
+      </>)}
     </div>
   );
 }

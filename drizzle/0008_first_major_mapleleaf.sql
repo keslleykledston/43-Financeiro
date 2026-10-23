@@ -1,0 +1,1 @@
+ALTER TABLE "companies" ADD CONSTRAINT "companies_customer_mode_chk" CHECK ("companies"."customer_mode" in ('local', 'crm'));

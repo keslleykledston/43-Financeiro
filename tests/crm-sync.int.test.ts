@@ -7,7 +7,7 @@ import { databaseUrl } from "@/lib/db/url";
 import * as schema from "@/lib/db/schema";
 import type { DB } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
-import { addContact, createParty, getParty, listParties, removeContact, setArchived, updateParty } from "@/modules/crm/service";
+import { addContact, createParty, getParty, listParties, removeContact, setArchived, setCustomerMode, updateParty } from "@/modules/crm/service";
 import { applySync, listConflicts, listRuns, previewSync, resolveConflict, saveConnection } from "@/modules/integrations/crm/sync";
 import type { CrmAdapter } from "@/modules/integrations/crm/types";
 import { MockCrmAdapter } from "@/modules/integrations/crm/mock";
@@ -41,6 +41,8 @@ describe.skipIf(!enabled)("CRM sync: prévia, aplicação idempotente, conflitos
       { userId: dirA, companyId: A, role: "diretoria" }, { userId: dirB, companyId: B, role: "diretoria" },
       { userId: gerA, companyId: A, role: "gerente" }, { userId: techA, companyId: A, role: "admin_tecnico" }, { userId: contA, companyId: A, role: "contabilidade" },
     ]);
+    await setCustomerMode(db, dirA, A, "crm");
+    await setCustomerMode(db, dirB, B, "crm");
     await saveConnection(db, dirA, A, { enabled: true });
     await saveConnection(db, dirB, B, { enabled: true });
   });
@@ -119,7 +121,9 @@ describe.skipIf(!enabled)("CRM sync: prévia, aplicação idempotente, conflitos
   });
 
   it("conflito com cadastro manual NUNCA sobrescreve; não duplica aviso; vincular e ignorar", async () => {
+    await setCustomerMode(db, dirA, A, "local");
     const manual = await createParty(db, dirA, A, { kind: "cliente", legalName: "Manual Ltda", document: CNPJ1 });
+    await setCustomerMode(db, dirA, A, "crm");
     const m = new MockCrmAdapter([item({ legalName: "Nome do CRM" })]);
     expect(await applyNow(db, m, dirA, A, ON)).toMatchObject({ create: 0, conflict: 1 });
     expect((await getParty(db, dirA, A, manual.id))!.legalName).toBe("Manual Ltda"); // intacto
@@ -137,7 +141,9 @@ describe.skipIf(!enabled)("CRM sync: prévia, aplicação idempotente, conflitos
 
     // ignorar: não volta a avisar
     const m2 = new MockCrmAdapter([item({ externalId: "x9", legalName: "Outro", document: CNPJ2 })]);
+    await setCustomerMode(db, dirA, A, "local");
     await createParty(db, dirA, A, { kind: "cliente", legalName: "Local Dois", document: CNPJ2 });
+    await setCustomerMode(db, dirA, A, "crm");
     await applyNow(db, m2, dirA, A, ON);
     const [c2] = await listConflicts(db, dirA, A);
     await resolveConflict(db, dirA, A, c2.id, "ignore");
@@ -195,7 +201,9 @@ describe.skipIf(!enabled)("CRM sync: prévia, aplicação idempotente, conflitos
     await applyNow(db, m, dirA, A, ON);
     await applyNow(db, m, dirB, B, ON); // mesmo externalId/documento em outra empresa: independente
     expect(await total(A)).toBe(1); expect(await total(B)).toBe(1);
+    await setCustomerMode(db, dirA, A, "local");
     await createParty(db, dirA, A, { kind: "cliente", legalName: "Manual", document: CNPJ2 });
+    await setCustomerMode(db, dirA, A, "crm");
     await applyNow(db, new MockCrmAdapter([item({ externalId: "z", document: CNPJ2, legalName: "Zeta Ltda" })]), dirA, A, ON);
     const [conf] = await listConflicts(db, dirA, A);
     await expect(resolveConflict(db, dirB, B, conf.id, "ignore")).rejects.toBeInstanceOf(Invalid);
@@ -247,7 +255,9 @@ describe.skipIf(!enabled)("CRM sync: prévia, aplicação idempotente, conflitos
   });
 
   it("P2: ao resolver um conflito o payload (nome/documento) é apagado", async () => {
+    await setCustomerMode(db, dirA, A, "local");
     await createParty(db, dirA, A, { kind: "cliente", legalName: "Local", document: CNPJ1 });
+    await setCustomerMode(db, dirA, A, "crm");
     await applyNow(db, new MockCrmAdapter([item({ legalName: "Nome Sensível" })]), dirA, A, ON);
     const [c] = await listConflicts(db, dirA, A);
     expect(JSON.stringify(c.payload)).toContain("Nome Sensível");

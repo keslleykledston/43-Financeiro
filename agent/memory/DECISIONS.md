@@ -41,3 +41,6 @@ Variações conscientes do desenho: perfis em enum + mapa de permissões no cód
 
 ## ADR-008 CRM é a fonte de verdade de clientes e contratos (2026-10-23, pedido do usuário)
 Importação via API, somente leitura, com prévia/conflitos/aprovação (docs/API_E_INTEGRACOES.md, fase E03b). Qual CRM e credenciais: pendente de informação do usuário. CRM real só com credencial read-only, fora do Git, e autorização explícita.
+
+## ADR-009 Dois cenários de clientes por empresa: LOCAL ou CRM (2026-10-23, pedido do usuário)
+`companies.customer_mode` = `local` (padrão) | `crm`. **Local:** clientes e fornecedores cadastrados/importados (CSV) na plataforma; sincronização com o CRM recusada. **CRM:** clientes (e, no E04, contratos) vêm do CRM, somente leitura; cadastro manual e CSV de *clientes* bloqueados; fornecedores continuam locais. Imposto no servidor (createParty, import CSV, update/archive, remover contato, sync) e só refletido na tela. Trocar o modo exige `integrations.manage` + `crm.write` (diretoria) e é auditado (`company.customer_mode_changed`). No modo local cadastros `source=crm` ficam editáveis; ao voltar ao modo CRM o sync sobrescreve os campos vinculados (aviso na tela). Contatos locais adicionais valem nos dois modos. Modo é por empresa (as duas empresas podem escolher diferente).

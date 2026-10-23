@@ -50,6 +50,20 @@
       "when": 1792731329685,
       "tag": "0006_nosy_reptil",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792732478381,
+      "tag": "0007_dear_old_lace",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792732804125,
+      "tag": "0008_first_major_mapleleaf",
+      "breakpoints": true
     }
   ]
 }

@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
+import { setCustomerMode } from "@/modules/crm/service";
 import { getCrmAdapter } from "@/modules/integrations/crm/factory";
 import { applySync, previewSync, resolveConflict, saveConnection } from "@/modules/integrations/crm/sync";
 
@@ -46,4 +47,14 @@ export async function resolveAction(fd: FormData) {
   const action = fd.get("action") === "link" ? "link" : "ignore";
   try { const c = await ctx(); await resolveConflict(db, c.userId, c.companyId, String(fd.get("conflictId") ?? ""), action); } catch (e) { msg(e); }
   revalidatePath("/integracoes");
+}
+
+export type ModeState = { error?: string; saved?: boolean } | undefined;
+
+export async function setModeAction(_: ModeState, fd: FormData): Promise<ModeState> {
+  const mode = fd.get("mode") === "crm" ? "crm" : "local";
+  try { const c = await ctx(); await setCustomerMode(db, c.userId, c.companyId, mode); }
+  catch (e) { return { error: msg(e) }; }
+  revalidatePath("/integracoes"); revalidatePath("/clientes");
+  return { saved: true };
 }

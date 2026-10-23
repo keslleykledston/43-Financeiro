@@ -10,27 +10,46 @@ const crmItem = (externalId: string, legalName: string, document: string, extra:
 const alerta = (p: Page) => p.locator("p[role=alert]");
 
 test("E03b — CRM: ativar, prévia sem gravar, aplicar, idempotência, somente leitura, conflito, alteração/arquivamento e falha", async ({ page }) => {
-  await test.step("desativada por padrão: o botão de revisar é recusado", async () => {
+  await test.step("padrão LOCAL: sincronizar nem aparece e dá para cadastrar cliente", async () => {
     await setCrm(page, { items: [], failStatus: 0, pageSize: 2 });
     await page.goto("/integracoes");
-    await expect(page.getByText("Chave geral do servidor:")).toContainText("ligada");
-    await expect(page.getByText("Nesta empresa:")).toContainText("desativada");
-    await page.getByRole("button", { name: "Revisar sincronização" }).click();
-    await expect(alerta(page)).toContainText("não está ativada");
+    await expect(page.getByText("Atual:")).toContainText("Local");
+    await expect(page.getByRole("button", { name: "Revisar sincronização" })).toHaveCount(0);
+    await expect(page.getByRole("note")).toContainText("modo Local");
+    await page.goto("/clientes/novo");
+    await expect(page.getByLabel("Tipo").locator("option")).toHaveText(["Cliente", "Fornecedor"]);
   });
 
-  await test.step("ativar a conexão", async () => {
-    await page.getByLabel(/Ativar sincronização/).check();
-    await page.getByRole("button", { name: "Salvar configuração" }).click();
-    await expect(page.getByText("Configuração salva.")).toBeVisible();
-  });
-
-  // cadastro manual que vai conflitar com o CRM (mesmo documento)
+  // cadastro manual (modo local) que vai conflitar com o CRM depois (mesmo documento)
   await page.goto("/clientes/novo");
   await page.getByLabel("Razão social / nome").fill("Manual Conflito Ltda");
   await page.getByLabel("CPF ou CNPJ").fill(C);
   await page.getByRole("button", { name: "Cadastrar" }).click();
   await expect(page.getByRole("heading", { name: "Manual Conflito Ltda" })).toBeVisible();
+
+  await test.step("trocar a origem para CRM: banner na lista; novo cadastro só permite fornecedor", async () => {
+    await page.goto("/integracoes");
+    await page.getByLabel(/^CRM/).check();
+    await page.getByRole("button", { name: "Salvar origem dos clientes" }).click();
+    await expect(page.getByText("Origem dos clientes salva.")).toBeVisible();
+    await expect(page.getByText("Atual:")).toContainText("CRM");
+    await page.goto("/clientes");
+    await expect(page.getByRole("note")).toContainText("vêm do CRM");
+    await page.goto("/clientes/novo");
+    await expect(page.getByLabel("Tipo").locator("option")).toHaveText(["Fornecedor"]);
+    await expect(page.getByRole("note")).toContainText("apenas fornecedores");
+  });
+
+  await test.step("conexão desativada: o botão de revisar é recusado; depois ativar", async () => {
+    await page.goto("/integracoes");
+    await expect(page.getByText("Chave geral do servidor:")).toContainText("ligada");
+    await expect(page.getByText("Nesta empresa:")).toContainText("desativada");
+    await page.getByRole("button", { name: "Revisar sincronização" }).click();
+    await expect(alerta(page)).toContainText("não está ativada");
+    await page.getByLabel(/Ativar sincronização/).check();
+    await page.getByRole("button", { name: "Salvar configuração" }).click();
+    await expect(page.getByText("Configuração salva.")).toBeVisible();
+  });
 
   await setCrm(page, { items: [
     crmItem("x1", "Rede Alfa CRM", A, { contacts: [{ name: "Ana Financeiro", email: "ana@alfa.test", isFinancial: true }] }),
@@ -111,5 +130,28 @@ test("E03b — CRM: ativar, prévia sem gravar, aplicar, idempotência, somente 
     const r = await page.goto("/clientes");
     expect(r?.status()).toBe(200);
     await setCrm(page, { failStatus: 0 }); // restaura o CRM falso para os demais testes
+  });
+
+  await test.step("voltar para LOCAL libera a edição do cadastro importado; CRM bloqueia de novo", async () => {
+    await page.goto("/integracoes");
+    await page.getByLabel(/^Local/).check();
+    await page.getByRole("button", { name: "Salvar origem dos clientes" }).click();
+    await expect(page.getByText("Atual:")).toContainText("Local");
+    await page.goto("/clientes?q=Rede+Alfa+Renomeada");
+    await page.getByRole("link", { name: /Rede Alfa Renomeada/ }).click();
+    await expect(page.getByRole("button", { name: "Salvar" })).toBeVisible();
+    await expect(page.getByRole("note")).toContainText("modo Local");
+    await page.goto("/integracoes");
+    await page.getByLabel(/^CRM/).check();
+    await page.getByRole("button", { name: "Salvar origem dos clientes" }).click();
+    await expect(page.getByText("Atual:")).toContainText("CRM");
+    await page.goto("/clientes?q=Rede+Alfa+Renomeada");
+    await page.getByRole("link", { name: /Rede Alfa Renomeada/ }).click();
+    await expect(page.getByRole("button", { name: "Salvar" })).toHaveCount(0);
+    // deixa o sandbox no padrão
+    await page.goto("/integracoes");
+    await page.getByLabel(/^Local/).check();
+    await page.getByRole("button", { name: "Salvar origem dos clientes" }).click();
+    await expect(page.getByText("Atual:")).toContainText("Local");
   });
 });

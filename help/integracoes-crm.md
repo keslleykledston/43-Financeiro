@@ -25,3 +25,20 @@ A sincronização mostra o erro e **não altera nada**. O resto do sistema conti
 
 ## Segurança
 Chave geral do servidor desligada por padrão. Credenciais ficam no servidor (não no banco nem no Git), somente leitura. Registros de auditoria guardam apenas contagens, sem dados pessoais.
+
+---
+## Dois cenários: Local ou CRM (por empresa)
+Em *Integrações → Origem dos clientes* a diretoria escolhe, **para cada empresa**:
+
+| | **Local** (padrão) | **CRM** |
+|---|---|---|
+| Clientes | cadastrados aqui ou por CSV | vêm do CRM, **somente leitura** |
+| Fornecedores | locais | locais |
+| Novo cliente / CSV de clientes | permitido | **bloqueado** |
+| Sincronização | desligada | disponível (com prévia e confirmação) |
+| Cadastros que vieram do CRM | editáveis | somente leitura |
+
+- Voltar para **Local** libera a edição dos cadastros já importados. Ao voltar para **CRM**, o CRM volta a sobrescrever os campos dos cadastros vinculados.
+- As duas empresas podem usar modos diferentes.
+- Contatos adicionais (locais) podem ser criados nos dois modos.
+- A troca fica registrada na auditoria.

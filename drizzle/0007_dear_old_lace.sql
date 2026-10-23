@@ -1,0 +1,1 @@
+ALTER TABLE "companies" ADD COLUMN "customer_mode" text DEFAULT 'local' NOT NULL;
