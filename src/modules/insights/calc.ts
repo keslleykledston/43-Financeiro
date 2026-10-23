@@ -46,6 +46,25 @@ export function buildForecast(today: string, open: { dueDate: string; cents: num
   return { weeks, overdueCents, beyondCents, plannedOverdueCount, totals: { confirmedCents: sum("confirmedCents"), plannedCents: sum("plannedCents") }, end: horizonEnd(today) };
 }
 
+export type OutflowWeek = { start: string; end: string; approvedCents: number; pendingCents: number };
+/**
+ * Saídas projetadas: contas APROVADAS a pagar (saldo) por vencimento = alta qualidade; contas ainda AGUARDANDO aprovação = pendentes (podem ser rejeitadas).
+ * Vencido fica à parte (já deveria ter sido pago). Nenhuma estimativa: só o que está lançado.
+ */
+export function buildOutflow(today: string, items: { dueDate: string; cents: number; approved: boolean }[]) {
+  const ws = weekStart(today);
+  const weeks: OutflowWeek[] = Array.from({ length: WEEKS }, (_, i) => ({ start: addDays(ws, i * 7), end: addDays(ws, i * 7 + 6), approvedCents: 0, pendingCents: 0 }));
+  let overdueApprovedCents = 0, overduePendingCents = 0, beyondCents = 0;
+  for (const it of items) {
+    if (it.dueDate < today) { if (it.approved) overdueApprovedCents += it.cents; else overduePendingCents += it.cents; continue; }
+    const i = weekIndex(today, it.dueDate);
+    if (i === null) { beyondCents += it.cents; continue; }
+    if (it.approved) weeks[i].approvedCents += it.cents; else weeks[i].pendingCents += it.cents;
+  }
+  const sum = (k: "approvedCents" | "pendingCents") => weeks.reduce((s, w) => s + w[k], 0);
+  return { weeks, overdueApprovedCents, overduePendingCents, beyondCents, totals: { approvedCents: sum("approvedCents"), pendingCents: sum("pendingCents") } };
+}
+
 /** Últimos `n` meses terminando em `month` (AAAA-MM), do mais antigo ao atual. */
 export const lastMonths = (month: string, n: number) => Array.from({ length: n }, (_, i) => addMonths(month, i - (n - 1)));
 
@@ -56,6 +75,7 @@ export type AlertInput = {
   draftBatches: { id: string; issueDate: string }[]; dueSoonCount: number;
   pendingCredits: number; accounts: number; daysSinceLastTx: number | null;
   blockedMessages: number; failedIssuance: number; customersNoContact: number; customersNoContract: number; plannedOverdueCount: number;
+  payablesOverdueCount?: number; payablesOverdueCents?: number; payablesPendingCount?: number; payablesDueSoonCount?: number;
 };
 const n = (v: number, one: string, many: string) => `${v} ${v === 1 ? one : many}`;
 export const DELINQUENCY_CRITICAL = 0.1;
@@ -81,6 +101,9 @@ export function buildAlerts(i: AlertInput, today: string): Alert[] {
   if (i.failedIssuance > 0) out.push({ key: "failed-issuance", severity: "warning", title: `${n(i.failedIssuance, "emissão com falha", "emissões com falha")}`, detail: "Revise no provedor (simulado) antes de repetir.", href: "/faturamento/emissoes?status=falhou" });
   if (i.customersNoContract > 0) out.push({ key: "no-contract", severity: "info", title: `${n(i.customersNoContract, "cliente ativo", "clientes ativos")} sem contrato`, detail: "Sem contrato aprovado não há cobrança nem previsão de receita.", href: "/contratos" });
   if (i.customersNoContact > 0) out.push({ key: "no-contact", severity: "info", title: `${n(i.customersNoContact, "cliente ativo", "clientes ativos")} sem contato financeiro com e-mail`, detail: "As mensagens da régua ficam bloqueadas.", href: "/clientes" });
+  if ((i.payablesOverdueCount ?? 0) > 0) out.push({ key: "payables-overdue", severity: "critical", title: `${n(i.payablesOverdueCount!, "conta a pagar vencida", "contas a pagar vencidas")}`, detail: "Aprovadas e ainda sem baixa: pague no banco e registre a baixa.", href: "/contas-a-pagar?status=vencidas" });
+  if ((i.payablesPendingCount ?? 0) > 0) out.push({ key: "payables-pending", severity: "warning", title: `${n(i.payablesPendingCount!, "conta aguardando aprovação", "contas aguardando aprovação")}`, detail: "Sem aprovação elas não entram na fila de execução.", href: "/contas-a-pagar?status=aguardando" });
+  if ((i.payablesDueSoonCount ?? 0) > 0) out.push({ key: "payables-soon", severity: "info", title: `${n(i.payablesDueSoonCount!, "conta a pagar vence", "contas a pagar vencem")} em até 3 dias`, detail: "Veja a fila de execução.", href: "/contas-a-pagar/execucao" });
   const rank = { critical: 0, warning: 1, info: 2, positive: 3 } as const;
   return out.sort((a, b) => rank[a.severity] - rank[b.severity]);
 }

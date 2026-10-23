@@ -127,6 +127,13 @@
       "when": 1792792724906,
       "tag": "0017_cynical_killraven",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792799208176,
+      "tag": "0018_cultured_sentinels",
+      "breakpoints": true
     }
   ]
 }

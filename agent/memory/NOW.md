@@ -9,6 +9,7 @@
 **E08a (conciliação, migração 0016):** SANDBOX PASS 218 unit/int + 59 e2e; revisão Codex feita (2 P1 + 3 P2 tratados, ver agent/reviews/2026-10-23-codex-e08a-conciliacao.md); DEPLOYADO (migração 0016, backup k3gfinance-20261023T214555Z). E08b (transferência entre CNPJs, CSV real da Cora) pendente.
 **E10a (motor de emissão SIMULADO, migração 0017):** SANDBOX PASS 235 unit/int + 62 e2e; revisão Codex feita (1 P1 + 2 P2 corrigidos, ver agent/reviews/2026-10-23-codex-e10a-motor-emissao.md); DEPLOYADO (migração 0017, backup k3gfinance-20261023T220827Z). E10b (real) BLOQUEADO: faltam credenciais Cora/SMTP/WAHA, homologação, calendário fiscal e autorização escrita (docs/E10_GOLIVE.md).
 **E12 (painel executivo real, sem migração):** SANDBOX PASS 250 unit/int + 63 e2e; revisão Codex feita (1 P1 + 2 P2 corrigidos, ver agent/reviews/2026-10-23-codex-e12-painel.md); DEPLOYADO (sem migração; backup k3gfinance-20261023T225859Z; cálculo conferido contra o banco de produção).
+**E11a (contas a pagar, migração 0018):** SANDBOX PASS 266 unit/int + 70 e2e; revisão Codex em andamento; depois backup → migrar → build → smoke → push. Anexos (E11b/E07b) pendentes.
 **Pendente do usuário:** refazer a sincronização do CRM em Integrações (esperado: 63 novos + 1 conflito de CNPJ duplicado).
 **Próxima ação:** (3) E09 adapters (mocks) + agendador; (4) E10 real por provedor só com credenciais + autorização; depois E07, E08, E11, E12.
 **Bloqueios:** nenhum.

@@ -9,7 +9,7 @@ import { Callout, Money, PageHeader, SectionCard, SeverityBadge, StatusPill } fr
 import { EmptyState } from "@/components/k3g/states";
 import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass } from "@/components/k3g/button";
-import { ForecastBars, PairedBars } from "@/components/k3g/charts";
+import { ForecastBars, PairedBars, PALETTE_OUT } from "@/components/k3g/charts";
 import { formatBRL } from "@/lib/format";
 
 const br = (d: string) => d.split("-").reverse().join("/");
@@ -54,7 +54,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     open: t?.openCents ?? o?.receivables?.openCents, overdue: t?.overdueCents ?? o?.receivables?.overdueCents, ratio: t?.delinquencyRatio ?? o?.receivables?.delinquencyRatio,
     billed: t?.billedMonthCents ?? o?.billed?.monthCents, received: t?.receivedMonthCents ?? o?.received?.monthCents, balance: t?.balanceCents ?? (o?.bank && o.bank.accounts > 0 ? o.bank.balanceCents : undefined),
     pending: t?.pendingCents ?? o?.bank?.pendingCents,
+    payApproved: t?.payableApprovedCents ?? o?.payables?.approvedOpenCents, payOverdue: t?.payableOverdueCents ?? o?.payables?.overdueCents,
   };
+  const outWeeks = (g?.outWeeks ?? o?.outflow?.weeks ?? []).map((w) => ({ start: w.start, end: w.end, confirmedCents: w.approvedCents, plannedCents: w.pendingCents }));
+  const hasPayables = g ? g.companies.some((c) => c.payables) : !!o?.payables;
+  const inConfirmed = weeks.reduce((s, w) => s + w.confirmedCents, 0), outApproved = outWeeks.reduce((s, w) => s + w.confirmedCents, 0);
   const noBank = g ? g.companies.every((c) => !c.bank || c.bank.accounts === 0) : !o!.bank || o!.bank.accounts === 0;
 
   return (
@@ -75,6 +79,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <Kpi label="Recebido no mês" href={`/contas-a-receber/recebimentos?mes=${mes}`} tone="positive" sub="pagamentos ativos, por data de pagamento">{val.received === undefined ? "—" : formatBRL(val.received)}</Kpi>
         <Kpi label="Saldo pelo extrato" href="/conciliacao" sub={noBank ? "Banco não conectado: nenhuma conta cadastrada" : "saldo inicial + movimentos importados"}>{noBank || val.balance === undefined ? "—" : formatBRL(val.balance)}</Kpi>
         <Kpi label="Créditos a conciliar" href="/conciliacao" sub="entradas do extrato sem cobrança vinculada">{noBank || val.pending === undefined ? "—" : formatBRL(val.pending)}</Kpi>
+        <Kpi label="A pagar (aprovadas)" href="/contas-a-pagar?status=aprovadas" sub="contas aprovadas sem baixa">{val.payApproved === undefined ? "—" : formatBRL(val.payApproved)}</Kpi>
+        <Kpi label="A pagar vencidas" href="/contas-a-pagar?status=vencidas" tone={val.payOverdue ? "negative" : undefined} sub="aprovadas e já vencidas">{val.payOverdue === undefined ? "—" : formatBRL(val.payOverdue)}</Kpi>
       </section>
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -87,10 +93,20 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
             <li><strong>Qualidade:</strong> {QUALITY_LABEL.alta}; {QUALITY_LABEL.media}.</li>
             {overdueOut > 0 && <li className="text-negative-foreground"><AlertTriangle className="mr-1 inline size-3.5 align-text-bottom" aria-hidden />{formatBRL(overdueOut)} já estão vencidos e <strong>não</strong> entram como entrada projetada (não há como estimar quando serão pagos).</li>}
-            <li>Saídas não estão consideradas: contas a pagar ainda não existem.</li>
+            {hasPayables ? <li>Saídas aparecem no gráfico abaixo; elas <strong>não</strong> estão descontadas deste gráfico.</li> : <li>Saídas não estão consideradas: seu papel não vê contas a pagar.</li>}
           </ul>
         </SectionCard>
       </div>
+
+      {hasPayables && (
+        <SectionCard title="Saídas programadas — 13 semanas" action={<StatusPill tone="info">só o que está lançado</StatusPill>}>
+          <ForecastBars title="Saídas programadas por semana" weeks={outWeeks} labelA="Aprovadas (a pagar no banco)" labelB="Aguardando aprovação" short={["aprovadas", "aguardando aprovação"]} palette={PALETTE_OUT} />
+          <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
+            <li><strong>Resultado projetado apenas do confirmado:</strong> entradas confirmadas <Money cents={inConfirmed} /> − saídas aprovadas <Money cents={outApproved} /> = <Money cents={inConfirmed - outApproved} className={inConfirmed - outApproved < 0 ? "font-semibold text-negative-foreground" : "font-semibold"} />. Previstos por contrato e contas ainda sem aprovação não entram neste resultado.</li>
+            <li>Só entram contas lançadas aqui; despesas não cadastradas (folha, impostos, tarifas…) não aparecem.</li>
+          </ul>
+        </SectionCard>
+      )}
 
       <SectionCard title="O que precisa de atenção">
         {alerts.length === 0 ? <p className="text-sm text-muted-foreground">Nada pendente agora.</p> : (

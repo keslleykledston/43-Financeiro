@@ -56,7 +56,8 @@ Pré-requisitos: disponibilidade documentada da API por CNPJ, homologação Cora
 Aceite: emissão teste homologação, confirmação/reconsulta remota, comprovantes e falha segura, reconciliação, e-mails canários internos, kill switch; NUNCA executar em produção por conveniência.
 Pré-requisito (Codex E06, P2): antes de qualquer envio real, a FK `message_queue.charge_id` deve virar RESTRICT e `cancelBatch`/`generateBatch` devem marcar cobranças como `cancelada` em vez de apagar, preservando o histórico de envios.
 
-## E11 — Contas a pagar [ ]
+## E11 — Contas a pagar [~]
+**E11a [x]** fornecedores, lançamento, aprovação com alçada e segregação, duplicidade, fila de execução, baixa manual com protocolo, estorno, CSV, integração com o painel (A pagar e saídas 13 semanas). **E11b [ ]** anexos privados (nota/boleto; junto com o E07b).
 Saída: fornecedores, vencimentos, anexos, aprovações, exportação e controle da execução manual no Cora.
 Aceite: sem executar pagamento pela app; logs, permissão de alçada, duplicidade, vencimento.
 

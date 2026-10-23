@@ -551,3 +551,75 @@ export const issuanceRequests = pgTable("issuance_requests", {
   check("issuance_requests_attempts_chk", sql`${t.attempts} between 0 and 20`),
   check("issuance_requests_done_chk", sql`${t.status} not in ('emitido', 'processando') or ${t.externalRef} is not null`),
 ]);
+
+// E11 — contas a pagar. A aplicação NUNCA executa pagamento: ela organiza, aprova (com alçada) e REGISTRA o que foi pago à mão no Cora.
+// Fluxo: rascunho → aguardando_aprovacao → aprovado | rejeitado | cancelado. "Paga" é derivado (soma das baixas ativas), como nas contas a receber.
+export const payables = pgTable("payables", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  vendorId: uuid("vendor_id").notNull(),
+  description: text("description").notNull(),
+  documentNumber: text("document_number"), // nº da nota/boleto/fatura do fornecedor: base da detecção de duplicidade
+  amount: numeric("amount", { precision: 18, scale: 2 }).notNull(),
+  dueDate: date("due_date", { mode: "string" }).notNull(),
+  category: text("category"),
+  status: text("status").notNull().default("rascunho"),
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+  submittedAt: timestamp("submitted_at", { withTimezone: true }),
+  decidedBy: uuid("decided_by").references(() => users.id), // aprovou ou rejeitou
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  decisionNote: text("decision_note"),
+  cancelledBy: uuid("cancelled_by").references(() => users.id),
+  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  cancelReason: text("cancel_reason"),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.vendorId], foreignColumns: [vendors.companyId, vendors.id] }),
+  unique("payables_company_id_uq").on(t.companyId, t.id),
+  uniqueIndex("payables_doc_uq").on(t.companyId, t.vendorId, t.documentNumber).where(sql`${t.documentNumber} is not null and ${t.status} not in ('cancelado', 'rejeitado')`),
+  index("payables_due_idx").on(t.companyId, t.status, t.dueDate),
+  check("payables_status_chk", sql`${t.status} in ('rascunho', 'aguardando_aprovacao', 'aprovado', 'rejeitado', 'cancelado')`),
+  check("payables_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),
+  check("payables_text_chk", sql`char_length(${t.description}) between 2 and 200 and (${t.documentNumber} is null or char_length(${t.documentNumber}) between 1 and 40) and (${t.category} is null or char_length(${t.category}) <= 40)`),
+  check("payables_decision_chk", sql`case when ${t.status} in ('aprovado', 'rejeitado') then ${t.decidedBy} is not null and ${t.decidedAt} is not null when ${t.status} in ('rascunho', 'aguardando_aprovacao') then ${t.decidedBy} is null else true end`),
+  check("payables_reject_chk", sql`${t.status} <> 'rejeitado' or ${t.decisionNote} is not null`),
+  check("payables_cancel_chk", sql`(${t.status} = 'cancelado') = (${t.cancelledBy} is not null and ${t.cancelledAt} is not null and ${t.cancelReason} is not null)`),
+]);
+
+export const payablePayments = pgTable("payable_payments", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  payableId: uuid("payable_id").notNull(),
+  amount: numeric("amount", { precision: 18, scale: 2 }).notNull(),
+  paidAt: date("paid_at", { mode: "string" }).notNull(),
+  method: text("method").notNull(), // pix | boleto | ted | transferencia | outro
+  reference: text("reference"), // protocolo/comprovante informado por quem executou no banco
+  note: text("note"),
+  requestKey: text("request_key"),
+  status: text("status").notNull().default("ativo"), // ativo | estornado
+  registeredBy: uuid("registered_by").notNull().references(() => users.id),
+  reversedBy: uuid("reversed_by").references(() => users.id),
+  reversedAt: timestamp("reversed_at", { withTimezone: true }),
+  reverseReason: text("reverse_reason"),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.payableId], foreignColumns: [payables.companyId, payables.id] }),
+  unique("payable_payments_company_id_uq").on(t.companyId, t.id),
+  uniqueIndex("payable_payments_request_key_uq").on(t.companyId, t.requestKey).where(sql`${t.requestKey} is not null`),
+  index("payable_payments_payable_idx").on(t.companyId, t.payableId),
+  check("payable_payments_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),
+  check("payable_payments_method_chk", sql`${t.method} in ('pix', 'boleto', 'ted', 'transferencia', 'outro')`),
+  check("payable_payments_status_chk", sql`${t.status} in ('ativo', 'estornado')`),
+  check("payable_payments_reversal_chk", sql`(${t.status} = 'estornado' and ${t.reversedBy} is not null and ${t.reversedAt} is not null and ${t.reverseReason} is not null) or (${t.status} = 'ativo' and ${t.reversedBy} is null and ${t.reversedAt} is null and ${t.reverseReason} is null)`),
+  check("payable_payments_text_chk", sql`(${t.reference} is null or char_length(${t.reference}) <= 60) and (${t.note} is null or char_length(${t.note}) <= 200)`),
+]);
+
+// Alçada e segregação por empresa. Padrão conservador: gerente aprova até R$ 5.000,00; ninguém aprova o que criou.
+export const payablesSettings = pgTable("payables_settings", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  managerLimit: numeric("manager_limit", { precision: 18, scale: 2 }).notNull().default("5000.00"),
+  directorSelfApproval: boolean("director_self_approval").notNull().default(false),
+  updatedBy: uuid("updated_by").references(() => users.id),
+}, (t) => [
+  unique("payables_settings_company_uq").on(t.companyId),
+  check("payables_settings_limit_chk", sql`${t.managerLimit} >= 0 and ${t.managerLimit} <= 99999999999.99`),
+]);

@@ -9,7 +9,8 @@ import { todayManaus } from "@/modules/messaging/service";
 import { addDays } from "@/modules/messaging/dates";
 import { listAccounts } from "@/modules/banking/service";
 import { receivablesSummary } from "@/modules/receivables/service";
-import { buildAlerts, buildForecast, horizonEnd, lastMonths, type Alert } from "./calc";
+import { payablesSummary } from "@/modules/payables/service";
+import { buildAlerts, buildForecast, buildOutflow, horizonEnd, lastMonths, type Alert } from "./calc";
 
 /**
  * E12 — painel executivo com números REAIS e rastreáveis. Cada bloco só aparece se o papel do usuário tem a permissão da fonte.
@@ -29,6 +30,8 @@ export type Overview = {
   series: { month: string; billedCents: number; receivedCents: number }[];
   bank: { accounts: number; balanceCents: number; pendingCredits: number; pendingCents: number; lastTxDate: string | null; internalInCents: number; internalOutCents: number } | null;
   forecast: ReturnType<typeof buildForecast> | null;
+  payables: { approvedOpenCents: number; overdueCents: number; overdueCount: number; pendingCents: number; pendingCount: number; dueSoonCount: number; paidMonthCents: number } | null;
+  outflow: ReturnType<typeof buildOutflow> | null;
   alerts: Alert[];
   notes: string[];
 };
@@ -41,7 +44,7 @@ export async function getOverview(db: DB, actorId: string, companyId: string, to
   const months = lastMonths(month, 6);
   const [co] = rows(await db.execute(sql`select id, name from companies where id = ${companyId}`));
   const notes: string[] = [];
-  const ov: Overview = { company: { id: String(co.id), name: String(co.name) }, today, month, receivables: null, billed: null, received: null, series: months.map((m) => ({ month: m, billedCents: 0, receivedCents: 0 })), bank: null, forecast: null, alerts: [], notes };
+  const ov: Overview = { company: { id: String(co.id), name: String(co.name) }, today, month, receivables: null, billed: null, received: null, series: months.map((m) => ({ month: m, billedCents: 0, receivedCents: 0 })), bank: null, forecast: null, payables: null, outflow: null, alerts: [], notes };
   const alertIn = { overdueCents: 0, overdueCount: 0, openCents: 0, over30Cents: 0, draftBatches: [] as { id: string; issueDate: string }[], dueSoonCount: 0, pendingCredits: 0, accounts: 0, daysSinceLastTx: null as number | null, blockedMessages: 0, failedIssuance: 0, customersNoContact: 0, customersNoContract: 0, plannedOverdueCount: 0 };
 
   if (ok("receivables.read")) {
@@ -106,7 +109,15 @@ export async function getOverview(db: DB, actorId: string, companyId: string, to
     const [{ n }] = rows(await db.execute(sql`select count(*)::int n from contracts where company_id = ${companyId} and status = 'ativo'`)) as { n: number }[];
     if (Number(n) === 0) notes.push("Sem contratos ativos: não há previsão de cobranças futuras por contrato.");
   }
-  notes.push("Contas a pagar ainda não existem (E11): o fluxo projetado mostra apenas ENTRADAS, sem saídas.");
+  if (ok("payables.read")) {
+    const ps = await payablesSummary(db, actorId, companyId, today);
+    ov.payables = ps;
+    const items = rows(await db.execute(sql`select p.due_date::text d, p.status, (p.amount - coalesce(pp.paid, 0))::text o from payables p
+      left join (select payable_id, sum(amount) paid from payable_payments where company_id = ${companyId} and status = 'ativo' group by payable_id) pp on pp.payable_id = p.id
+      where p.company_id = ${companyId} and ((p.status = 'aprovado' and coalesce(pp.paid, 0) < p.amount) or p.status = 'aguardando_aprovacao')`));
+    ov.outflow = buildOutflow(today, items.map((r) => ({ dueDate: String(r.d), cents: cents(r.o), approved: r.status === "aprovado" })));
+    Object.assign(alertIn, { payablesOverdueCount: ps.overdueCount, payablesOverdueCents: ps.overdueCents, payablesPendingCount: ps.pendingCount, payablesDueSoonCount: ps.dueSoonCount });
+  } else notes.push("Seu papel não vê contas a pagar: as saídas não estão consideradas.");
 
   if (ok("billing.read")) {
     const dr = rows(await db.execute(sql`select id::text, issue_date::text d from billing_batches where company_id = ${companyId} and status = 'rascunho' and issue_date <= ${addDays(today, 3)}::date and issue_date >= ${addDays(today, -30)}::date order by issue_date`));
@@ -127,8 +138,9 @@ export async function getOverview(db: DB, actorId: string, companyId: string, to
 
 export type GroupOverview = {
   companies: Overview[]; skipped: string[];
-  total: { openCents: number; overdueCents: number; billedMonthCents: number; receivedMonthCents: number; balanceCents: number; pendingCents: number; internalInCents: number; internalOutCents: number; delinquencyRatio: number };
+  total: { payableApprovedCents: number; payableOverdueCents: number; payablePendingCents: number; openCents: number; overdueCents: number; billedMonthCents: number; receivedMonthCents: number; balanceCents: number; pendingCents: number; internalInCents: number; internalOutCents: number; delinquencyRatio: number };
   series: Overview["series"]; weeks: { start: string; end: string; confirmedCents: number; plannedCents: number }[]; overdueCents: number;
+  outWeeks: { start: string; end: string; approvedCents: number; pendingCents: number }[];
 };
 
 /** Consolidado: cada empresa é consultada com a autorização do usuário NELA; empresas sem acesso são omitidas (e listadas). */
@@ -141,10 +153,12 @@ export async function getGroupOverview(db: DB, actorId: string, companyList: { i
   const series = lastMonths(month, 6).map((m) => ({ month: m, billedCents: sum((o) => o.series.find((p) => p.month === m)?.billedCents ?? 0), receivedCents: sum((o) => o.series.find((p) => p.month === m)?.receivedCents ?? 0) }));
   const wk = companies.find((o) => o.forecast)?.forecast?.weeks ?? [];
   const weeks = wk.map((w, i) => ({ start: w.start, end: w.end, confirmedCents: sum((o) => o.forecast?.weeks[i]?.confirmedCents ?? 0), plannedCents: sum((o) => o.forecast?.weeks[i]?.plannedCents ?? 0) }));
+  const ow = companies.find((o) => o.outflow)?.outflow?.weeks ?? [];
+  const outWeeks = ow.map((w, i) => ({ start: w.start, end: w.end, approvedCents: sum((o) => o.outflow?.weeks[i]?.approvedCents ?? 0), pendingCents: sum((o) => o.outflow?.weeks[i]?.pendingCents ?? 0) }));
   const open = sum((o) => o.receivables?.openCents ?? 0), overdue = sum((o) => o.receivables?.overdueCents ?? 0);
   return {
-    companies, skipped, series, weeks, overdueCents: sum((o) => o.forecast?.overdueCents ?? 0),
-    total: { openCents: open, overdueCents: overdue, billedMonthCents: sum((o) => o.billed?.monthCents ?? 0), receivedMonthCents: sum((o) => o.received?.monthCents ?? 0), balanceCents: sum((o) => o.bank?.balanceCents ?? 0), pendingCents: sum((o) => o.bank?.pendingCents ?? 0), internalInCents: sum((o) => o.bank?.internalInCents ?? 0), internalOutCents: sum((o) => o.bank?.internalOutCents ?? 0), delinquencyRatio: open > 0 ? overdue / open : 0 },
+    companies, skipped, series, weeks, outWeeks, overdueCents: sum((o) => o.forecast?.overdueCents ?? 0),
+    total: { payableApprovedCents: sum((o) => o.payables?.approvedOpenCents ?? 0), payableOverdueCents: sum((o) => o.payables?.overdueCents ?? 0), payablePendingCents: sum((o) => o.payables?.pendingCents ?? 0), openCents: open, overdueCents: overdue, billedMonthCents: sum((o) => o.billed?.monthCents ?? 0), receivedMonthCents: sum((o) => o.received?.monthCents ?? 0), balanceCents: sum((o) => o.bank?.balanceCents ?? 0), pendingCents: sum((o) => o.bank?.pendingCents ?? 0), internalInCents: sum((o) => o.bank?.internalInCents ?? 0), internalOutCents: sum((o) => o.bank?.internalOutCents ?? 0), delinquencyRatio: open > 0 ? overdue / open : 0 },
   };
 }
 

@@ -13,6 +13,7 @@ import { approveBatch, generateBatch, getBatch } from "@/modules/billing/batches
 import { registerPayment, reversePayment } from "@/modules/receivables/service";
 import { confirmImport, createAccount, listTransactions, markTransaction, previewImport } from "@/modules/banking/service";
 import { getGroupOverview, getOverview, listReceipts } from "@/modules/insights/service";
+import { approvePayable, createPayable, registerPayablePayment, submitPayable } from "@/modules/payables/service";
 
 const enabled = !!process.env.POSTGRES_USER;
 const CNPJ1 = "11.222.333/0001-81", CNPJ2 = "12.ABC.345/01DE-35";
@@ -35,7 +36,7 @@ describe.skipIf(!enabled)("E12 painel executivo: números reais, previsão, aler
   afterAll(async () => { await conn?.end(); await admin?.end(); });
 
   beforeEach(async () => {
-    await db.execute(sql`truncate issuance_requests, issuance_settings, bank_transaction_marks, bank_allocations, bank_transactions, bank_import_rows, bank_import_batches, bank_accounts, payments, messaging_settings, message_queue, message_template_versions, message_templates, charges, billing_batches, holidays, contract_versions, contracts, integration_conflicts, integration_sync_runs, integration_connections, rate_limits, customer_contacts, vendor_contacts, customers, vendors, audit_log, invitations, memberships, companies, users restart identity cascade`);
+    await db.execute(sql`truncate payable_payments, payables_settings, payables, issuance_requests, issuance_settings, bank_transaction_marks, bank_allocations, bank_transactions, bank_import_rows, bank_import_batches, bank_accounts, payments, messaging_settings, message_queue, message_template_versions, message_templates, charges, billing_batches, holidays, contract_versions, contracts, integration_conflicts, integration_sync_runs, integration_connections, rate_limits, customer_contacts, vendor_contacts, customers, vendors, audit_log, invitations, memberships, companies, users restart identity cascade`);
     const [a, b] = await db.insert(schema.companies).values([{ name: "Empresa A" }, { name: "Empresa B" }]).returning();
     A = a.id; B = b.id;
     const mk = async (e: string) => (await db.insert(schema.users).values({ email: e, name: e, passwordHash: "x" }).returning())[0].id;
@@ -174,7 +175,7 @@ describe.skipIf(!enabled)("E12 painel executivo: números reais, previsão, aler
     expect(o.alerts.find((a) => a.key === "no-contact")).toBeUndefined(); // os dois têm contato financeiro com e-mail
     await db.delete(schema.customerContacts).where(eq(schema.customerContacts.partyId, cli2));
     expect((await getOverview(db, contA, A, "2026-10-14")).alerts.find((a) => a.key === "no-contact")).toMatchObject({ title: expect.stringContaining("1 cliente ativo") });
-    expect((await getOverview(db, contA, A, "2026-10-14")).notes.join(" ")).toMatch(/Contas a pagar ainda não existem/);
+    expect((await getOverview(db, contA, A, "2026-10-14")).notes.join(" ")).not.toMatch(/Contas a pagar ainda não existem/); // agora existem (E11)
   });
 
   it("grupo: soma empresa por empresa com a autorização do usuário em cada uma; sem duplicar transferência interna", async () => {
@@ -206,6 +207,39 @@ describe.skipIf(!enabled)("E12 painel executivo: números reais, previsão, aler
     expect(only.total.openCents).toBe(a.receivables!.openCents);
     // admin técnico não vê números financeiros
     await expect(getGroupOverview(db, techA, [{ id: A, name: "Empresa A" }], TODAY).then((x) => x.companies.length)).resolves.toBe(0);
+  });
+
+  it("contas a pagar no painel: saídas aprovadas × aguardando por semana, vencidas à parte, alertas e resultado só do confirmado", async () => {
+    const vend = (await createParty(db, dirA, A, { kind: "fornecedor", legalName: "Fornecedor Alfa", document: CNPJ2 })).id;
+    const mk = async (doc: string, amount: string, due: string, approve: boolean) => {
+      const id = await createPayable(db, asstA, A, { vendorId: vend, description: `Conta ${doc}`, documentNumber: doc, amount, dueDate: due });
+      await submitPayable(db, asstA, A, id); if (approve) await approvePayable(db, dirA, A, id); return id;
+    };
+    const t = "2026-10-21"; // quarta; semana começa em 19/10
+    await mk("P1", "1.000,00", "2026-10-10", true); // vencida aprovada
+    await mk("P2", "2.000,00", "2026-10-22", true); // semana 0, aprovada (vence em 1 dia)
+    const p3 = await mk("P3", "3.000,00", "2026-10-28", true); // semana 1
+    await mk("P4", "4.000,00", "2026-10-29", false); // semana 1, aguardando aprovação
+    await mk("P5", "5.000,00", "2027-03-01", true); // além do horizonte
+    await registerPayablePayment(db, dirA, A, p3, { amount: "500,00", paidAt: "2026-10-20", method: "pix" }, t); // baixa parcial reduz o saldo
+    const o = await getOverview(db, contA, A, t);
+    expect(o.payables).toMatchObject({ approvedOpenCents: 100000 + 200000 + 250000 + 500000, overdueCents: 100000, overdueCount: 1, pendingCents: 400000, pendingCount: 1, dueSoonCount: 1, paidMonthCents: 50000 });
+    expect(o.outflow!.weeks[0]).toMatchObject({ start: "2026-10-19", approvedCents: 200000, pendingCents: 0 });
+    expect(o.outflow!.weeks[1]).toMatchObject({ start: "2026-10-26", approvedCents: 250000, pendingCents: 400000 });
+    expect(o.outflow).toMatchObject({ overdueApprovedCents: 100000, beyondCents: 500000, totals: { approvedCents: 450000, pendingCents: 400000 } });
+    // conservação: aprovadas (semanas + vencida + além) = a pagar aprovado
+    expect(o.outflow!.totals.approvedCents + o.outflow!.overdueApprovedCents + o.outflow!.beyondCents - 0).toBe(o.payables!.approvedOpenCents);
+    const keys = o.alerts.map((a) => a.key);
+    expect(keys).toEqual(expect.arrayContaining(["payables-overdue", "payables-pending", "payables-soon"]));
+    expect(o.alerts.find((a) => a.key === "payables-overdue")).toMatchObject({ severity: "critical", href: "/contas-a-pagar?status=vencidas" });
+    expect(o.notes.join(" ")).not.toMatch(/Seu papel não vê contas a pagar/);
+    // outra empresa não vê nada disso
+    const b = await getOverview(db, dirB, B, t);
+    expect(b.payables).toMatchObject({ approvedOpenCents: 0, pendingCount: 0 });
+    // consolidado soma as saídas das empresas autorizadas
+    const g = await getGroupOverview(db, dirA, [{ id: A, name: "Empresa A" }], t);
+    expect(g.total.payableApprovedCents).toBe(o.payables!.approvedOpenCents); expect(g.total.payableOverdueCents).toBe(100000); expect(g.total.payablePendingCents).toBe(400000);
+    expect(g.outWeeks[1]).toMatchObject({ approvedCents: 250000, pendingCents: 400000 });
   });
 
   it("isolamento: a empresa B nunca enxerga números da A; admin técnico é barrado", async () => {
