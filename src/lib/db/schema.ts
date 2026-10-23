@@ -350,3 +350,32 @@ export const messagingSettings = pgTable("messaging_settings", {
   check("messaging_settings_limits_chk", sql`${t.maxPerRun} between 1 and 500 and ${t.maxPerHour} between 1 and 2000 and ${t.maxLateDays} between 0 and 30`),
   check("messaging_settings_weekdays_chk", sql`cardinality(${t.weekdays}) between 1 and 7 and ${t.weekdays} <@ array[0,1,2,3,4,5,6]`),
 ]);
+
+// E07 — contas a receber. A cobrança aprovada (charges) é o título; o que foi pago é a soma dos pagamentos ATIVOS.
+// Nada é apagado nem sobrescrito: pagamento errado é ESTORNADO (com motivo) e o saldo é sempre recalculado.
+// O total pago nunca passa do valor da cobrança (trigger no banco, além da validação no serviço).
+export const payments = pgTable("payments", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  chargeId: uuid("charge_id").notNull(),
+  amount: numeric("amount", { precision: 18, scale: 2 }).notNull(),
+  paidAt: date("paid_at", { mode: "string" }).notNull(),
+  method: text("method").notNull(), // pix | boleto | transferencia | dinheiro | outro
+  note: text("note"),
+  requestKey: text("request_key"), // idempotência do formulário: duplo clique não registra duas vezes
+  status: text("status").notNull().default("ativo"), // ativo | estornado
+  registeredBy: uuid("registered_by").notNull().references(() => users.id),
+  reversedBy: uuid("reversed_by").references(() => users.id),
+  reversedAt: timestamp("reversed_at", { withTimezone: true }),
+  reverseReason: text("reverse_reason"),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.chargeId], foreignColumns: [charges.companyId, charges.id] }),
+  unique("payments_company_id_uq").on(t.companyId, t.id),
+  uniqueIndex("payments_request_key_uq").on(t.companyId, t.requestKey).where(sql`${t.requestKey} is not null`),
+  index("payments_charge_idx").on(t.companyId, t.chargeId),
+  check("payments_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),
+  check("payments_method_chk", sql`${t.method} in ('pix', 'boleto', 'transferencia', 'dinheiro', 'outro')`),
+  check("payments_status_chk", sql`${t.status} in ('ativo', 'estornado')`),
+  check("payments_reversal_chk", sql`(${t.status} = 'estornado') = (${t.reversedBy} is not null and ${t.reversedAt} is not null and ${t.reverseReason} is not null)`),
+  check("payments_note_chk", sql`${t.note} is null or char_length(${t.note}) <= 200`),
+]);

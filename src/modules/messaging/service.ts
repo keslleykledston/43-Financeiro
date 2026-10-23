@@ -113,7 +113,8 @@ export async function scheduleQueue(db: DB, actorId: string, companyId: string, 
     await lockQueue(x, companyId);
     const cancelled = await cancelOrphans(x, companyId);
     const rows = await x.select({ c: charges }).from(charges).innerJoin(billingBatches, and(eq(billingBatches.id, charges.batchId), eq(billingBatches.companyId, charges.companyId)))
-      .where(and(eq(charges.companyId, companyId), eq(charges.status, "aprovada"), eq(billingBatches.status, "aprovado")));
+      .where(and(eq(charges.companyId, companyId), eq(charges.status, "aprovada"), eq(billingBatches.status, "aprovado"),
+        sql`coalesce((select sum(p.amount) from payments p where p.company_id = ${charges.companyId} and p.charge_id = ${charges.id} and p.status = 'ativo'), 0) < ${charges.amount}`)); // quitada não recebe régua
     const active = await x.select({ t: messageTemplates, v: messageTemplateVersions }).from(messageTemplateVersions)
       .innerJoin(messageTemplates, and(eq(messageTemplates.id, messageTemplateVersions.templateId), eq(messageTemplates.companyId, messageTemplateVersions.companyId)))
       .where(and(eq(messageTemplateVersions.companyId, companyId), eq(messageTemplateVersions.state, "ativa")));
@@ -154,7 +155,8 @@ async function cancelOrphans(x: DB, companyId: string) {
     update message_queue q set status = 'cancelado', blocked_reason = null, updated_at = now()
     where q.company_id = ${companyId} and q.status in ('pendente', 'bloqueado')
       and not exists (select 1 from charges c join billing_batches b on b.company_id = c.company_id and b.id = c.batch_id
-        where c.company_id = q.company_id and c.id = q.charge_id and c.status = 'aprovada' and b.status = 'aprovado')`);
+        where c.company_id = q.company_id and c.id = q.charge_id and c.status = 'aprovada' and b.status = 'aprovado'
+          and coalesce((select sum(p.amount) from payments p where p.company_id = c.company_id and p.charge_id = c.id and p.status = 'ativo'), 0) < c.amount)`);
   return res.count as number;
 }
 

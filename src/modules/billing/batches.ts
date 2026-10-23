@@ -172,6 +172,8 @@ export async function reopenBatch(db: DB, actorId: string, companyId: string, ba
     await lockCompany(x, companyId);
     const [b] = await x.select().from(billingBatches).where(and(eq(billingBatches.id, batchId), eq(billingBatches.companyId, companyId))).for("update");
     if (!b || b.status !== "aprovado") throw new Invalid("Só é possível reabrir um lote aprovado");
+    const [paid] = await x.execute(sql`select count(*)::int n from payments p join charges c on c.company_id = p.company_id and c.id = p.charge_id where c.company_id = ${companyId} and c.batch_id = ${b.id}`) as unknown as { n: number }[];
+    if (paid.n > 0) throw new Invalid("Este lote tem pagamentos (ou estornos) registrados em Contas a receber e não pode ser reaberto");
     const now = new Date();
     await x.update(billingBatches).set({ status: "rascunho", approvedBy: null, approvedAt: null, reopenReason: why, generatedBy: actorId, updatedAt: now }).where(and(eq(billingBatches.id, b.id), eq(billingBatches.companyId, companyId)));
     const ids = (await x.update(charges).set({ status: "previa", updatedAt: now }).where(and(eq(charges.companyId, companyId), eq(charges.batchId, b.id))).returning({ id: charges.id })).map((r) => r.id);

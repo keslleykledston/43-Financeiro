@@ -35,7 +35,8 @@ Aceite: reexecutar lote não duplica cobrança; status aprovado só por papel au
 Saída: editor de templates por empresa/tipo, placeholders restritos, prévia com dados fictícios, versão/ativação, fila de envios DEMO e histórico; templates de faturamento, D-3, D0, D+3, D+7 e revisão D+15.
 Aceite: preview correto, sanitização HTML/injeção, sem e-mail externo real, filas sem duplicatas, aviso "Simulação".
 
-## E07 — Contas a receber [ ]
+## E07 — Contas a receber [~]
+**E07a [x]** lista/filtros/indicadores/envelhecimento/devedores, baixa manual parcial ou total, estorno, histórico, CSV, parada da régua ao quitar, trigger de teto no banco. **E07b [ ]** anexos privados (comprovantes): armazenamento de arquivos com validação e revisão própria.
 Saída: listagem por competência/vencimento/status, pagamento parcial manual autorizado, anexos privados, inadimplência, cálculo não destrutivo.
 Aceite: não marcar quitado antes de soma de alocações/liquidação, exportar CSV, histórico de eventos, relatórios por CNPJ.
 
