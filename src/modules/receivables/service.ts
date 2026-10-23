@@ -2,6 +2,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
 import { auditLog, billingBatches, charges, customers, messageQueue, payments, users } from "@/lib/db/schema";
 import { toCsv } from "@/lib/csv";
+import { isIsoDate } from "@/lib/iso-date";
 import { formatBRL } from "@/lib/format";
 import { centsFromNumeric, numericFromCents, parseMoneyToCents } from "@/lib/money";
 import { Invalid, requirePerm } from "@/modules/identity/service";
@@ -13,7 +14,7 @@ import { AGING, FILTERS, METHODS, SITUATION_LABEL, situationOf, type Filter, typ
  * O saldo é sempre `valor − soma dos pagamentos ativos`; estornar não apaga, só marca; quitada = saldo zero, jamais um botão.
  */
 const audit = (x: DB, companyId: string, actorId: string, action: string, detail: Record<string, unknown>) => x.insert(auditLog).values({ companyId, actorId, action, detail });
-const isoDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
+const isoDate = isIsoDate;
 const uuidOk = (s: string) => /^[0-9a-f-]{36}$/i.test(s);
 type Row = Record<string, unknown>;
 
@@ -145,7 +146,13 @@ export async function registerPayment(db: DB, actorId: string, companyId: string
       return { paymentId: p.id, duplicate: false, settled };
     });
   } catch (e) {
-    const m = (e as Error & { cause?: Error }).cause?.message ?? (e as Error).message;
+    const cause = (e as { cause?: { code?: string; constraint_name?: string; message?: string } }).cause;
+    if (key && cause?.code === "23505" && cause.constraint_name === "payments_request_key_uq") { // duas requisições com a mesma chave ao mesmo tempo
+      const [dup] = await db.select().from(payments).where(and(eq(payments.companyId, companyId), eq(payments.requestKey, key)));
+      if (dup && dup.chargeId === chargeId) return { paymentId: dup.id, duplicate: true, settled: false };
+      throw new Invalid("Chave de envio já usada");
+    }
+    const m = cause?.message ?? (e as Error).message;
     if (/payment_exceeds_open/.test(m)) throw new Invalid("O valor passa do saldo em aberto (outro pagamento acabou de ser registrado)");
     if (/payment_charge_not_approved/.test(m)) throw new Invalid("Cobrança não encontrada");
     throw e;

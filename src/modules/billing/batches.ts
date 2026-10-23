@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
 import { auditLog, billingBatches, charges, customers } from "@/lib/db/schema";
+import { isIsoDate } from "@/lib/iso-date";
 import { centsFromNumeric, numericFromCents } from "@/lib/money";
 import { Forbidden, Invalid, activeRole, requirePerm } from "@/modules/identity/service";
 import { cancelQueueForCharges } from "@/modules/messaging/service";
@@ -15,7 +16,7 @@ import { loadScheduled, type CalendarItem } from "./service";
 export type BatchStatus = "rascunho" | "aprovado" | "cancelado";
 type Row = typeof charges.$inferSelect;
 
-const isoDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
+const isoDate = isIsoDate;
 const sigOf = (v: { dueDate: string; issueDate: string; cents: number; description: string; joint: boolean; warnings: readonly string[] }) => `${v.dueDate}|${v.issueDate}|${v.cents}|${v.description}|${v.joint ? 1 : 0}|${[...v.warnings].sort().join(",")}`;
 const keyOf = (contractId: string, competenceMonth: string) => `${contractId}|${competenceMonth.slice(0, 7)}`;
 const rowSig = (r: Row) => sigOf({ dueDate: r.dueDate, issueDate: r.issueDate, cents: centsFromNumeric(r.amount), description: r.description, joint: r.jointInvoice, warnings: r.warnings as string[] });
@@ -172,6 +173,7 @@ export async function reopenBatch(db: DB, actorId: string, companyId: string, ba
     await lockCompany(x, companyId);
     const [b] = await x.select().from(billingBatches).where(and(eq(billingBatches.id, batchId), eq(billingBatches.companyId, companyId))).for("update");
     if (!b || b.status !== "aprovado") throw new Invalid("Só é possível reabrir um lote aprovado");
+    await x.select({ id: charges.id }).from(charges).where(and(eq(charges.companyId, companyId), eq(charges.batchId, b.id))).for("update"); // mesma ordem de lock da baixa: espera uma baixa em curso e enxerga o resultado
     const [paid] = await x.execute(sql`select count(*)::int n from payments p join charges c on c.company_id = p.company_id and c.id = p.charge_id where c.company_id = ${companyId} and c.batch_id = ${b.id}`) as unknown as { n: number }[];
     if (paid.n > 0) throw new Invalid("Este lote tem pagamentos (ou estornos) registrados em Contas a receber e não pode ser reaberto");
     const now = new Date();

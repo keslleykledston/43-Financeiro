@@ -1,5 +1,5 @@
 {
-  "id": "9d9da887-8a96-464a-a77b-b562a1e13a5d",
+  "id": "746d1d84-20b2-4b13-a1b2-98fc7ebb15f4",
   "prevId": "bf3462b3-4287-4499-83b7-7033f3ecf392",
   "version": "7",
   "dialect": "postgresql",
@@ -3086,7 +3086,7 @@
         },
         "payments_reversal_chk": {
           "name": "payments_reversal_chk",
-          "value": "(\"payments\".\"status\" = 'estornado') = (\"payments\".\"reversed_by\" is not null and \"payments\".\"reversed_at\" is not null and \"payments\".\"reverse_reason\" is not null)"
+          "value": "(\"payments\".\"status\" = 'estornado' and \"payments\".\"reversed_by\" is not null and \"payments\".\"reversed_at\" is not null and \"payments\".\"reverse_reason\" is not null) or (\"payments\".\"status\" = 'ativo' and \"payments\".\"reversed_by\" is null and \"payments\".\"reversed_at\" is null and \"payments\".\"reverse_reason\" is null)"
         },
         "payments_note_chk": {
           "name": "payments_note_chk",

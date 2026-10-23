@@ -24,7 +24,7 @@ export function parseCsv(text: string): string[][] {
 }
 
 /** Protege contra CSV injection (planilha interpreta =,+,-,@ como fórmula). */
-const guard = (v: string) => (/^[=+\-@\t\r]/.test(v) ? `'${v}` : v);
+const guard = (v: string) => (/^\s*[=+\-@\t\r]/.test(v) ? `'${v}` : v);
 
 export function toCsv(rows: string[][], delim = ";"): string {
   const esc = (v: string) => {

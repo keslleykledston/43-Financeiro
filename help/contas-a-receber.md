@@ -39,7 +39,7 @@ Pagamento nunca é apagado. Diretoria e gerente usam **Estornar**, com motivo (5
 
 ## Quem pode
 - Ver: diretoria, gerente, assistente e contabilidade.
-- Registrar pagamento: diretoria, gerente, assistente e contabilidade.
+- Registrar pagamento: diretoria, gerente e assistente.
 - Estornar: diretoria e gerente.
 - Exportar: diretoria, gerente e contabilidade.
 

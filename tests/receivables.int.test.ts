@@ -122,12 +122,64 @@ describe.skipIf(!enabled)("E07 contas a receber: baixa manual, saldo, estorno, i
     await expect(ins("500.01")).rejects.toThrow(); // 2000 + 500,01 > 2500
     await ins("500.00");
     await expect(ins("0.01")).rejects.toThrow();
-    await db.execute(sql`update charges set status = 'previa' where id = ${c.id}`);
-    await expect(ins("0.01")).rejects.toThrow();
+    await expect(db.execute(sql`update charges set status = 'previa' where id = ${c.id}`)).rejects.toThrow(); // cobrança com pagamento não sai de "aprovada"
+    await expect(db.execute(sql`update charges set amount = 1 where id = ${c.id}`)).rejects.toThrow(); // nem muda de valor
+    const c2 = await chargeOf(cli2);
+    await db.execute(sql`update charges set status = 'previa' where id = ${c2.id}`); // sem pagamento, pode
+    await expect(db.insert(schema.payments).values({ companyId: A, chargeId: c2.id, amount: "1", paidAt: "2026-10-15", method: "pix", registeredBy: asstA })).rejects.toThrow(); // só cobrança aprovada recebe
     await expect(db.insert(schema.payments).values({ companyId: A, chargeId: c.id, amount: "0", paidAt: "2026-10-15", method: "pix", registeredBy: asstA })).rejects.toThrow();
     await expect(db.insert(schema.payments).values({ companyId: A, chargeId: c.id, amount: "1", paidAt: "2026-10-15", method: "cheque", registeredBy: asstA })).rejects.toThrow();
     await expect(db.insert(schema.payments).values({ companyId: B, chargeId: c.id, amount: "1", paidAt: "2026-10-15", method: "pix", registeredBy: asstA })).rejects.toThrow(); // FK composta: outra empresa
     await expect(db.update(schema.payments).set({ status: "estornado" })).rejects.toThrow(); // estorno exige quem/quando/motivo
+  });
+
+  it("banco: pagamento estornado é imutável; ativo só vira estornado; nada se apaga nem se reativa", async () => {
+    await approvedBatch();
+    const c = await chargeOf(cli1);
+    const { paymentId } = await pay(c.id, "1.000,00");
+    const { paymentId: p2 } = await pay(c.id, "500,00");
+    await expect(db.execute(sql`delete from payments where id = ${paymentId}`)).rejects.toThrow();
+    await expect(db.execute(sql`update payments set amount = 1 where id = ${paymentId}`)).rejects.toThrow();
+    await expect(db.execute(sql`update payments set charge_id = ${(await chargeOf(cli2)).id} where id = ${paymentId}`)).rejects.toThrow();
+    await expect(db.execute(sql`update payments set paid_at = '2026-10-02' where id = ${paymentId}`)).rejects.toThrow();
+    await expect(db.execute(sql`update payments set reverse_reason = 'x' where id = ${paymentId}`)).rejects.toThrow(); // metadado parcial em ativo (CHECK)
+    await reversePayment(db, gerA, A, paymentId, "estorno de teste do banco");
+    await expect(db.execute(sql`update payments set status = 'ativo', reversed_by = null, reversed_at = null, reverse_reason = null where id = ${paymentId}`)).rejects.toThrow(); // reativar
+    await expect(db.execute(sql`update payments set amount = 2 where id = ${paymentId}`)).rejects.toThrow();
+    await expect(db.execute(sql`delete from payments where id = ${paymentId}`)).rejects.toThrow();
+    await expect(db.insert(schema.payments).values({ companyId: A, chargeId: c.id, amount: "1", paidAt: "2026-10-15", method: "pix", registeredBy: asstA, status: "estornado", reversedBy: gerA, reversedAt: new Date(), reverseReason: "nasceu estornado" })).rejects.toThrow();
+    expect((await getReceivable(db, contA, A, c.id, TODAY))!.paidCents).toBe(50000); void p2;
+  });
+
+  it("reabrir lote × baixa simultânea: a reabertura espera e enxerga o pagamento; nunca reabre com pagamento", async () => {
+    const batchId = await approvedBatch();
+    const c = await chargeOf(cli1);
+    let release!: () => void; const hold = new Promise<void>((r) => { release = r; });
+    let locked!: () => void; const ready = new Promise<void>((r) => { locked = r; });
+    // baixa em curso: tem a cobrança travada e o pagamento ainda não confirmado
+    const paying = conn.begin(async (q) => {
+      await q`select id from charges where id = ${c.id} for update`;
+      await q`insert into payments (company_id, charge_id, amount, paid_at, method, registered_by) values (${A}, ${c.id}, 100, '2026-10-15', 'pix', ${asstA})`;
+      locked(); await hold;
+    });
+    await ready;
+    const reopening = reopenBatch(db, gerA, A, batchId, "preciso reabrir agora");
+    await new Promise((r) => setTimeout(r, 300));
+    release(); await paying;
+    await expect(reopening).rejects.toThrow(/pagamentos/);
+    expect((await getBatch(db, asstA, A, batchId))!.batch.status).toBe("aprovado");
+  });
+
+  it("data impossível é recusada com mensagem (sem erro 500); chave repetida em cobranças diferentes ao mesmo tempo", async () => {
+    await approvedBatch();
+    const c = await chargeOf(cli1), c2 = await chargeOf(cli2);
+    await expect(pay(c.id, "1,00", { paidAt: "2026-02-31" })).rejects.toThrow(/Data do pagamento inválida/);
+    await expect(pay(c.id, "1,00", { paidAt: "0000-01-01" })).rejects.toThrow(/inválida/);
+    expect(await listReceivables(db, contA, A, { status: "todas", dueFrom: "2026-02-31", dueTo: "9999-99-99", competence: "2026-13" }, TODAY)).toHaveLength(2); // filtros inválidos são ignorados
+    await expect(generateBatch(db, asstA, A, "2026-02-31")).rejects.toThrow(/Data inválida/);
+    const r = await Promise.allSettled([pay(c.id, "10,00", { requestKey: "mesma-chave-001" }), pay(c2.id, "10,00", { requestKey: "mesma-chave-001" })]);
+    expect(r.filter((x) => x.status === "fulfilled")).toHaveLength(1);
+    expect((r.find((x) => x.status === "rejected") as PromiseRejectedResult).reason.message).toMatch(/já usada/);
   });
 
   it("concorrência: dois pagamentos simultâneos que juntos passam do saldo → só um entra", async () => {

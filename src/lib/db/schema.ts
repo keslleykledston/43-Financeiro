@@ -376,6 +376,6 @@ export const payments = pgTable("payments", {
   check("payments_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),
   check("payments_method_chk", sql`${t.method} in ('pix', 'boleto', 'transferencia', 'dinheiro', 'outro')`),
   check("payments_status_chk", sql`${t.status} in ('ativo', 'estornado')`),
-  check("payments_reversal_chk", sql`(${t.status} = 'estornado') = (${t.reversedBy} is not null and ${t.reversedAt} is not null and ${t.reverseReason} is not null)`),
+  check("payments_reversal_chk", sql`(${t.status} = 'estornado' and ${t.reversedBy} is not null and ${t.reversedAt} is not null and ${t.reverseReason} is not null) or (${t.status} = 'ativo' and ${t.reversedBy} is null and ${t.reversedAt} is null and ${t.reverseReason} is null)`),
   check("payments_note_chk", sql`${t.note} is null or char_length(${t.note}) <= 200`),
 ]);

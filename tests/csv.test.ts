@@ -23,3 +23,11 @@ describe("toCsv", () => {
     expect(out).toContain('"a""b"');
   });
 });
+
+describe("toCsv: proteção contra fórmula com espaço inicial", () => {
+  it("prefixa aspas mesmo com espaços/tabs antes do operador", () => {
+    const out = toCsv([["  =1+1", "\t@x", " -2", "normal", " ok"]]);
+    expect(out).toContain("'  =1+1"); expect(out).toContain("'\t@x"); expect(out).toContain("' -2");
+    expect(out).toContain(";normal;"); expect(out).toContain("; ok");
+  });
+});
