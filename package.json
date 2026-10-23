@@ -15,7 +15,8 @@
     "sandbox": "bash scripts/sandbox.sh",
     "crm:discover": "tsx scripts/crm-discover.ts",
     "crm:profile": "tsx scripts/crm-profile.ts",
-    "crm:plan": "tsx scripts/crm-plan.ts"
+    "crm:plan": "tsx scripts/crm-plan.ts",
+    "ops:enable-crm": "tsx scripts/ops-enable-crm.ts"
   },
   "dependencies": {
     "@fontsource-variable/space-grotesk": "^5.3.0",
