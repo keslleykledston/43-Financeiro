@@ -1,0 +1,5 @@
+# Override SOMENTE dev: expõe o DB apenas em loopback. Não usar em produção.
+services:
+  db:
+    ports:
+      - "127.0.0.1:5440:5432"
