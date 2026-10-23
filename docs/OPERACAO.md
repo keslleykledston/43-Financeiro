@@ -27,5 +27,6 @@ Regra: antes de `pnpm db:migrate` em produção, `scripts/backup.sh`. A reversã
 | 0010 | cria `contracts`, `contract_versions`, `holidays` | `DROP TABLE contract_versions; DROP TABLE contracts; DROP TABLE holidays;` (nessa ordem; perde contratos/feriados cadastrados) |
 | 0011 | CHECK de valor máximo em `contracts`; estado `substituida` em `contract_versions` | `ALTER TABLE contracts DROP CONSTRAINT contracts_amount_chk; ALTER TABLE contracts ADD CONSTRAINT contracts_amount_chk CHECK (monthly_amount > 0);` e, se não houver versão `substituida`, recriar `contract_versions_state_chk` com 3 estados. Com versões `substituida` existentes, restaurar o backup. |
 | 0012 | cria `billing_batches` e `charges` (E05) | `DROP TABLE charges; DROP TABLE billing_batches;` (nessa ordem; perde lotes/cobranças — só antes de qualquer emissão real; depois, restaurar backup) |
+| 0013 | cria `message_templates`, `message_template_versions`, `message_queue` e `charges_company_id_uq` (E06) | `DROP TABLE message_queue; DROP TABLE message_template_versions; DROP TABLE message_templates; ALTER TABLE charges DROP CONSTRAINT charges_company_id_uq;` (nessa ordem; perde modelos editados e a fila simulada — só antes de qualquer envio real; depois, restaurar backup) |
 
 Cada nova migração deve acrescentar sua linha nesta tabela no mesmo commit.

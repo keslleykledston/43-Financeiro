@@ -256,7 +256,71 @@ export const charges = pgTable("charges", {
   foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
   uniqueIndex("charges_one_per_competence_uq").on(t.companyId, t.contractId, t.competenceMonth).where(sql`${t.status} <> 'cancelada'`),
   index("charges_batch_idx").on(t.companyId, t.batchId),
+  unique("charges_company_id_uq").on(t.companyId, t.id),
   check("charges_status_chk", sql`${t.status} in ('previa', 'aprovada', 'cancelada')`),
   check("charges_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),
   check("charges_competence_day_chk", sql`extract(day from ${t.competenceMonth}) = 1`),
+]);
+
+// E06 — modelos de mensagem e fila de envios. SIMULAÇÃO: nenhuma mensagem sai do sistema; a fila só registra o que seria enviado.
+// Um modelo = (empresa, tipo da régua, canal). O texto vive em versões; só uma versão fica ativa por modelo.
+export const messageTemplates = pgTable("message_templates", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  kind: text("kind").notNull(), // emissao | d_menos_3 | d0 | d_mais_3 | d_mais_7
+  channel: text("channel").notNull(), // email | whatsapp
+}, (t) => [
+  unique("message_templates_company_id_uq").on(t.companyId, t.id),
+  uniqueIndex("message_templates_one_uq").on(t.companyId, t.kind, t.channel),
+  check("message_templates_kind_chk", sql`${t.kind} in ('emissao', 'd_menos_3', 'd0', 'd_mais_3', 'd_mais_7')`),
+  check("message_templates_channel_chk", sql`${t.channel} in ('email', 'whatsapp')`),
+]);
+
+export const messageTemplateVersions = pgTable("message_template_versions", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  templateId: uuid("template_id").notNull(),
+  version: integer("version").notNull(),
+  subject: text("subject").notNull().default(""), // só e-mail; uma linha, sem quebras
+  body: text("body").notNull(), // texto simples com {{campos}} permitidos; nunca HTML
+  state: text("state").notNull().default("rascunho"), // rascunho | ativa | arquivada
+  createdBy: uuid("created_by").references(() => users.id),
+  activatedBy: uuid("activated_by").references(() => users.id),
+  activatedAt: timestamp("activated_at", { withTimezone: true }),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.templateId], foreignColumns: [messageTemplates.companyId, messageTemplates.id] }),
+  unique("message_template_versions_company_id_uq").on(t.companyId, t.id),
+  unique("message_template_versions_ver_uq").on(t.templateId, t.version),
+  uniqueIndex("message_template_versions_one_active_uq").on(t.templateId).where(sql`${t.state} = 'ativa'`),
+  check("message_template_versions_state_chk", sql`${t.state} in ('rascunho', 'ativa', 'arquivada')`),
+  check("message_template_versions_body_chk", sql`char_length(${t.body}) between 1 and 4000 and char_length(${t.subject}) <= 200`),
+]);
+
+// Fila: um item por (cobrança aprovada, tipo da régua, canal). O texto é renderizado só ao "processar" (snapshot, sem dados além do necessário).
+export const messageQueue = pgTable("message_queue", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  chargeId: uuid("charge_id").notNull(),
+  customerId: uuid("customer_id").notNull(),
+  kind: text("kind").notNull(), // emissao | d_menos_3 | d0 | d_mais_3 | d_mais_7 | revisao_d15
+  channel: text("channel").notNull(), // email | whatsapp | interno (revisão humana)
+  scheduledFor: date("scheduled_for", { mode: "string" }).notNull(),
+  status: text("status").notNull().default("pendente"), // pendente | bloqueado | simulado | cancelado
+  blockedReason: text("blocked_reason"),
+  templateVersionId: uuid("template_version_id"),
+  renderedSubject: text("rendered_subject"),
+  renderedBody: text("rendered_body"),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+  processedBy: uuid("processed_by").references(() => users.id),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.chargeId], foreignColumns: [charges.companyId, charges.id] }).onDelete("cascade"),
+  foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
+  foreignKey({ columns: [t.companyId, t.templateVersionId], foreignColumns: [messageTemplateVersions.companyId, messageTemplateVersions.id] }),
+  uniqueIndex("message_queue_one_uq").on(t.companyId, t.chargeId, t.kind, t.channel).where(sql`${t.status} <> 'cancelado'`),
+  index("message_queue_due_idx").on(t.companyId, t.status, t.scheduledFor),
+  check("message_queue_status_chk", sql`${t.status} in ('pendente', 'bloqueado', 'simulado', 'cancelado')`),
+  check("message_queue_kind_chk", sql`${t.kind} in ('emissao', 'd_menos_3', 'd0', 'd_mais_3', 'd_mais_7', 'revisao_d15')`),
+  check("message_queue_channel_chk", sql`${t.channel} in ('email', 'whatsapp', 'interno')`),
+  check("message_queue_internal_chk", sql`(${t.kind} = 'revisao_d15') = (${t.channel} = 'interno')`),
+  check("message_queue_blocked_chk", sql`(${t.status} = 'bloqueado') = (${t.blockedReason} is not null)`),
 ]);

@@ -4,6 +4,7 @@ import type { DB } from "@/lib/db";
 import { auditLog, billingBatches, charges, customers } from "@/lib/db/schema";
 import { centsFromNumeric, numericFromCents } from "@/lib/money";
 import { Forbidden, Invalid, activeRole, requirePerm } from "@/modules/identity/service";
+import { cancelQueueForCharges } from "@/modules/messaging/service";
 import { loadScheduled, type CalendarItem } from "./service";
 
 /**
@@ -173,8 +174,9 @@ export async function reopenBatch(db: DB, actorId: string, companyId: string, ba
     if (!b || b.status !== "aprovado") throw new Invalid("Só é possível reabrir um lote aprovado");
     const now = new Date();
     await x.update(billingBatches).set({ status: "rascunho", approvedBy: null, approvedAt: null, reopenReason: why, generatedBy: actorId, updatedAt: now }).where(and(eq(billingBatches.id, b.id), eq(billingBatches.companyId, companyId)));
-    await x.update(charges).set({ status: "previa", updatedAt: now }).where(and(eq(charges.companyId, companyId), eq(charges.batchId, b.id)));
-    await audit(x, companyId, actorId, "billing.batch.reopened", { batchId: b.id, issueDate: b.issueDate });
+    const ids = (await x.update(charges).set({ status: "previa", updatedAt: now }).where(and(eq(charges.companyId, companyId), eq(charges.batchId, b.id))).returning({ id: charges.id })).map((r) => r.id);
+    const queueCancelled = await cancelQueueForCharges(x, companyId, ids); // mensagens ainda não processadas deixam de valer
+    await audit(x, companyId, actorId, "billing.batch.reopened", { batchId: b.id, issueDate: b.issueDate, queueCancelled });
   });
 }
 
