@@ -26,26 +26,36 @@ async function extraHolidays(db: DB, companyId: string, years: number[]): Promis
  * Sem checagem de permissão: quem chama autoriza.
  */
 export async function loadScheduled(db: DB, companyId: string, month: string) {
-  parseMonth(month);
+  const m = await loadScheduledMany(db, companyId, [month]);
+  return m.get(month)!;
+}
+
+/** Vários meses de uma vez: contratos e feriados são lidos UMA vez (painel executivo). Mesmo resultado de `loadScheduled` por mês. */
+export async function loadScheduledMany(db: DB, companyId: string, months: string[]) {
+  for (const mo of months) parseMonth(mo);
   const rows = await db.select({ c: contracts, cu: customers }).from(contracts)
     .innerJoin(customers, and(eq(customers.id, contracts.customerId), eq(customers.companyId, contracts.companyId)))
     .where(and(eq(contracts.companyId, companyId), eq(contracts.status, "ativo")));
-  const years = [...new Set([+month.slice(0, 4) - 1, +month.slice(0, 4), +month.slice(0, 4) + 1])];
+  const years = [...new Set(months.flatMap((mo) => [+mo.slice(0, 4) - 1, +mo.slice(0, 4), +mo.slice(0, 4) + 1]))];
   const extra = await extraHolidays(db, companyId, years);
-  const hol = holidaysFor([`${month}-01`], extra);
-  for (const y of years) for (const [k, v] of nationalHolidays(y)) hol.set(k, v);
-  const entries: { item: CalendarItem; dueMonth: string }[] = [];
-  for (const { c, cu } of rows) {
-    // eventos do mês podem vir de dois vencimentos: o deste mês (emitido no 1/8/15 ou, p/ 1–12, no 25 anterior) e o do mês seguinte (emitido no dia 25 deste mês)
-    for (const dueMonth of [month, addMonths(month, 1)]) {
-      const competence = addMonths(dueMonth, -1);
-      if (!isContractBillable(c, cu, competence)) continue;
-      const r = billingSchedule({ competenceMonth: competence, dueDay: c.dueDay, jointInvoice: c.invoiceJointRequired, issueDayOverride: c.issueDayOverride }, extra);
-      entries.push({ dueMonth, item: { contractId: c.id, customerId: cu.id, customerName: cu.legalName, description: c.description, amountCents: centsFromNumeric(c.monthlyAmount), jointInvoice: c.invoiceJointRequired,
-        competenceMonth: competence, dueDate: r.dueDate, issueDate: r.issueDate, batch: r.batch, review: r.review, reason: r.reason, warnings: r.warnings } });
+  const out = new Map<string, { entries: { item: CalendarItem; dueMonth: string }[]; hol: HolidayMap }>();
+  for (const month of months) {
+    const hol = holidaysFor([`${month}-01`], extra);
+    for (const y of [+month.slice(0, 4) - 1, +month.slice(0, 4), +month.slice(0, 4) + 1]) for (const [k, v] of nationalHolidays(y)) hol.set(k, v);
+    const entries: { item: CalendarItem; dueMonth: string }[] = [];
+    for (const { c, cu } of rows) {
+      // eventos do mês podem vir de dois vencimentos: o deste mês (emitido no 1/8/15 ou, p/ 1–12, no 25 anterior) e o do mês seguinte (emitido no dia 25 deste mês)
+      for (const dueMonth of [month, addMonths(month, 1)]) {
+        const competence = addMonths(dueMonth, -1);
+        if (!isContractBillable(c, cu, competence)) continue;
+        const r = billingSchedule({ competenceMonth: competence, dueDay: c.dueDay, jointInvoice: c.invoiceJointRequired, issueDayOverride: c.issueDayOverride }, extra);
+        entries.push({ dueMonth, item: { contractId: c.id, customerId: cu.id, customerName: cu.legalName, description: c.description, amountCents: centsFromNumeric(c.monthlyAmount), jointInvoice: c.invoiceJointRequired,
+          competenceMonth: competence, dueDate: r.dueDate, issueDate: r.issueDate, batch: r.batch, review: r.review, reason: r.reason, warnings: r.warnings } });
+      }
     }
+    out.set(month, { entries, hol });
   }
-  return { entries, hol };
+  return out;
 }
 
 /**

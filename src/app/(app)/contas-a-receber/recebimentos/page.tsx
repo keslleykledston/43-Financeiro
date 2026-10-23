@@ -23,6 +23,7 @@ export default async function Recebimentos({ searchParams }: { searchParams: Pro
       <PageHeader title={`Recebimentos de ${mes.slice(5, 7)}/${mes.slice(0, 4)}`} description={`${ctx.current.name} · os pagamentos que compõem o “Recebido no mês” do painel.`}
         actions={<AppLink href="/" className={buttonClass("outline")}><ArrowLeft className="size-4" aria-hidden /> Painel</AppLink>} />
       <Callout tone="info">Total dos pagamentos <strong>ativos</strong>: <Money cents={r.totalCents} className="font-semibold" />. Estornos aparecem na lista, mas não entram na soma.</Callout>
+      {r.truncated && <Callout tone="warning">Mostrando os 500 pagamentos mais recentes do mês. O total acima considera todos.</Callout>}
       <SectionCard title="Pagamentos">
         {r.items.length === 0 ? <EmptyState title="Nenhum pagamento neste mês" description="Registre baixas em Contas a receber ou concilie o extrato." /> : (
           <ul className="divide-y divide-border text-sm">

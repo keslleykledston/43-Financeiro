@@ -3,7 +3,7 @@ import type { DB } from "@/lib/db";
 import { centsFromNumeric } from "@/lib/money";
 import { Forbidden, activeRole, requirePerm } from "@/modules/identity/service";
 import { can, type Permission } from "@/modules/identity/permissions";
-import { loadScheduled } from "@/modules/billing/service";
+import { loadScheduledMany } from "@/modules/billing/service";
 import { addMonths } from "@/modules/billing/calendar";
 import { todayManaus } from "@/modules/messaging/service";
 import { addDays } from "@/modules/messaging/dates";
@@ -83,13 +83,17 @@ export async function getOverview(db: DB, actorId: string, companyId: string, to
     const open = rows(await db.execute(sql`select c.due_date::text d, (c.amount - coalesce(p.paid, 0))::text o from charges c join billing_batches b on b.company_id = c.company_id and b.id = c.batch_id
       left join (select charge_id, sum(amount) paid from payments where company_id = ${companyId} and status = 'ativo' group by charge_id) p on p.charge_id = c.id
       where c.company_id = ${companyId} and c.status = 'aprovada' and b.status = 'aprovado' and coalesce(p.paid, 0) < c.amount`));
-    // previsto pelos contratos: itens agendados SEM cobrança (qualquer lote/estado não cancelado) para o mesmo contrato e competência
-    const have = new Set(rows(await db.execute(sql`select contract_id::text || '|' || to_char(competence_month, 'YYYY-MM') k from charges where company_id = ${companyId} and status <> 'cancelada'`)).map((r) => String(r.k)));
+    // previsto pelos contratos: itens agendados SEM cobrança APROVADA (lote aprovado) para o mesmo contrato e competência.
+    // Cobrança só em prévia (rascunho) continua "prevista": ainda não é confirmada e não pode sumir da projeção.
+    const have = new Set(rows(await db.execute(sql`select c.contract_id::text || '|' || to_char(c.competence_month, 'YYYY-MM') k from charges c join billing_batches b on b.company_id = c.company_id and b.id = c.batch_id
+      where c.company_id = ${companyId} and c.status = 'aprovada' and b.status = 'aprovado'`)).map((r) => String(r.k)));
     const planned = new Map<string, { dueDate: string; cents: number }>();
     const floor = `${addMonths(month, -2)}-01`;
-    for (let m = addMonths(month, -2); m <= addMonths(end.slice(0, 7), 1); m = addMonths(m, 1)) {
-      const { entries } = await loadScheduled(db, companyId, m);
-      for (const { item } of entries) {
+    const span: string[] = [];
+    for (let m = addMonths(month, -2); m <= addMonths(end.slice(0, 7), 1); m = addMonths(m, 1)) span.push(m);
+    const sched = await loadScheduledMany(db, companyId, span); // contratos e feriados lidos uma vez
+    for (const m of span) {
+      for (const { item } of sched.get(m)!.entries) {
         if (item.review || !item.dueDate) continue;
         const key = `${item.contractId}|${item.competenceMonth}`;
         if (have.has(key) || planned.has(key)) continue;
@@ -130,9 +134,8 @@ export type GroupOverview = {
 /** Consolidado: cada empresa é consultada com a autorização do usuário NELA; empresas sem acesso são omitidas (e listadas). */
 export async function getGroupOverview(db: DB, actorId: string, companyList: { id: string; name: string }[], today = todayManaus()): Promise<GroupOverview> {
   const companies: Overview[] = []; const skipped: string[] = [];
-  for (const c of companyList) {
-    try { companies.push(await getOverview(db, actorId, c.id, today)); } catch (e) { if (e instanceof Forbidden) skipped.push(c.name); else throw e; }
-  }
+  const results = await Promise.all(companyList.map(async (c) => { try { return { c, o: await getOverview(db, actorId, c.id, today) }; } catch (e) { if (e instanceof Forbidden) return { c, o: null }; throw e; } }));
+  for (const r of results) { if (r.o) companies.push(r.o); else skipped.push(r.c.name); }
   const sum = (f: (o: Overview) => number) => companies.reduce((s, o) => s + f(o), 0);
   const month = today.slice(0, 7);
   const series = lastMonths(month, 6).map((m) => ({ month: m, billedCents: sum((o) => o.series.find((p) => p.month === m)?.billedCents ?? 0), receivedCents: sum((o) => o.series.find((p) => p.month === m)?.receivedCents ?? 0) }));
@@ -148,10 +151,11 @@ export async function getGroupOverview(db: DB, actorId: string, companyList: { i
 /** Rastreabilidade do "Recebido no mês": os pagamentos que compõem o número (ativos e estornados, com origem). */
 export async function listReceipts(db: DB, actorId: string, companyId: string, month: string) {
   await requirePerm(db, actorId, companyId, "receivables.read");
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return { month, items: [], totalCents: 0 };
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return { month, items: [], totalCents: 0, truncated: false };
   const r = rows(await db.execute(sql`select p.id, p.paid_at::text d, p.amount::text a, p.method, p.status, p.charge_id, cu.legal_name
     from payments p join charges c on c.company_id = p.company_id and c.id = p.charge_id join customers cu on cu.company_id = c.company_id and cu.id = c.customer_id
     where p.company_id = ${companyId} and p.paid_at >= ${month + "-01"}::date and p.paid_at < (${month + "-01"}::date + interval '1 month') order by p.paid_at desc, p.created_at desc limit 500`));
   const items = r.map((x) => ({ id: String(x.id), paidAt: String(x.d), amountCents: cents(x.a), method: String(x.method), status: String(x.status), chargeId: String(x.charge_id), customerName: String(x.legal_name) }));
-  return { month, items, totalCents: items.filter((i) => i.status === "ativo").reduce((s, i) => s + i.amountCents, 0) };
+  const [tot] = rows(await db.execute(sql`select coalesce(sum(amount), 0)::text s, count(*)::int n from payments where company_id = ${companyId} and status = 'ativo' and paid_at >= ${month + "-01"}::date and paid_at < (${month + "-01"}::date + interval '1 month')`));
+  return { month, items, totalCents: cents(tot.s), truncated: Number((rows(await db.execute(sql`select count(*)::int n from payments where company_id = ${companyId} and paid_at >= ${month + "-01"}::date and paid_at < (${month + "-01"}::date + interval '1 month')`))[0]).n) > items.length };
 }

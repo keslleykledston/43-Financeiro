@@ -96,6 +96,7 @@ describe.skipIf(!enabled)("E12 painel executivo: números reais, previsão, aler
     const r = await listReceipts(db, contA, A, "2026-10");
     expect(r.items).toHaveLength(1); expect(r.items[0]).toMatchObject({ status: "estornado", customerName: "Cliente Um", method: "pix", amountCents: 100000 }); expect(r.totalCents).toBe(0);
     expect((await listReceipts(db, contA, A, "lixo")).items).toEqual([]);
+    expect(r.truncated).toBe(false);
     expect((await listReceipts(db, dirB, B, "2026-10")).items).toEqual([]);
     await expect(listReceipts(db, techA, A, "2026-10")).rejects.toThrow(Forbidden);
   });
@@ -111,8 +112,12 @@ describe.skipIf(!enabled)("E12 painel executivo: números reais, previsão, aler
     expect(o.forecast!.totals).toEqual({ confirmedCents: 0, plannedCents: 600000 }); // 28/12 já está fora do horizonte
     expect(o.forecast!.plannedOverdueCount).toBe(2); // competências de jul e ago (vencimentos de 28/08 e 28/09) sem cobrança emitida
     expect(o.alerts.find((a) => a.key === "missing-charges")).toMatchObject({ severity: "warning", href: "/faturamento/lotes" });
-    // aprova o lote de 15/10: a cobrança de 28/10 deixa de ser "prevista" e passa a "confirmada" — sem duplicar
+    // gera só a PRÉVIA do lote de 15/10: continua PREVISTO (ainda não é confirmado) — não pode sumir da projeção
     const { batchId } = await generateBatch(db, asstA, A, "2026-10-15");
+    o = await getOverview(db, contA, A, t);
+    expect(o.forecast!.weeks[4]).toMatchObject({ confirmedCents: 0, plannedCents: 300000 });
+    expect(o.forecast!.totals).toEqual({ confirmedCents: 0, plannedCents: 600000 });
+    // aprova o lote de 15/10: a cobrança de 28/10 deixa de ser "prevista" e passa a "confirmada" — sem duplicar
     await approveBatch(db, dirA, A, batchId, (await getBatch(db, asstA, A, batchId))!.hash);
     o = await getOverview(db, contA, A, t);
     expect(o.forecast!.weeks[4]).toMatchObject({ confirmedCents: 300000, plannedCents: 0 });
@@ -132,6 +137,15 @@ describe.skipIf(!enabled)("E12 painel executivo: números reais, previsão, aler
     // conservação: confirmado + vencido + além do horizonte = em aberto
     const f = o.forecast!;
     expect(f.totals.confirmedCents + f.overdueCents + f.beyondCents).toBe(o.receivables!.openCents);
+  });
+
+  it("recebimentos: o total vem do banco (sem o limite da lista) e bate com o KPI do painel", async () => {
+    await approvedBatch();
+    const c1 = await chargeOf(cli1);
+    for (let i = 0; i < 3; i++) await registerPayment(db, asstA, A, c1.id, { amount: "100,00", paidAt: "2026-10-15", method: "pix" }, TODAY);
+    const r = await listReceipts(db, contA, A, "2026-10");
+    const o = await getOverview(db, contA, A, TODAY);
+    expect(r.totalCents).toBe(30000); expect(o.received!.monthCents).toBe(r.totalCents);
   });
 
   it("banco: saldo pelo extrato, créditos a conciliar, extrato desatualizado e transferência entre contas do grupo FORA do recebido", async () => {
