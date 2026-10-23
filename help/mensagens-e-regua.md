@@ -16,7 +16,7 @@ Para cada cobrança de um lote **aprovado**, a fila prevê:
 | Atraso D+3 e D+7 | 3 e 7 dias depois |
 | Revisão humana D+15 | 15 dias depois — **tarefa interna**, não é mensagem ao cliente |
 
-Cada etapa sai por **e-mail** e **WhatsApp**. Fins de semana, feriados e horários permitidos de envio entram na fase dos provedores.
+Cada etapa sai por **e-mail** e **WhatsApp**.
 
 ## Passo a passo
 1. **Modelos → Criar modelos padrão.** Cria os textos iniciais, já ativos em seu nome. Revise cada um.
@@ -36,3 +36,17 @@ Cada etapa sai por **e-mail** e **WhatsApp**. Fins de semana, feriados e horári
 - Ver: diretoria, gerente, assistente e contabilidade.
 - Programar e processar: diretoria, gerente e assistente.
 - Editar e ativar modelos: diretoria e gerente.
+
+## Configuração de envio e agendador (Mensagens → Configuração)
+- **Pausar tudo:** chave de emergência. Com ela ligada nada é processado, nem manual nem automático.
+- **Envio automático:** um agendador (a cada minuto) processa a fila sozinho **só nas empresas em que isto estiver ligado**. Vem desligado.
+- **Canais:** e-mail vem ligado; **WhatsApp vem desligado** (WAHA não é oficial e a conta pode ser bloqueada).
+- **Janela:** horário de Manaus e dias da semana permitidos (padrão seg–sex, 09:00–18:00), sem feriados nacionais nem os cadastrados em Faturamento. Fora da janela o agendador espera. O botão manual *Processar vencidos* ignora a janela, mas respeita pausa, canais e limites.
+- **Limites:** máximo por execução e por hora.
+- **Tolerância:** mensagem com mais dias de atraso que o permitido (padrão 2) **não sai**; vai para *Bloqueado* para decisão manual. Um lembrete "vence em 3 dias" depois do vencimento não faz sentido.
+- **Falhas:** erro temporário tenta de novo (até 3 vezes); erro definitivo bloqueia o item com o motivo.
+- Destinatários: só contatos **financeiros** do cliente, com e-mail válido, sem repetição (até 3 por mensagem).
+- Quem altera a configuração: diretoria e gerente.
+
+## Provedores
+Em *Integrações → Provedores* aparecem Cora (boletos/Pix e extrato), NFS-e da Cora (beta), SMTP e WAHA. Todos **simulados**. Se alguma chave de envio real for ligada no servidor sem existir adaptador homologado, o sistema **recusa enviar** e mostra um aviso.

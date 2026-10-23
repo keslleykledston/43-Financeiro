@@ -46,3 +46,36 @@ test("E06 — modelos: criar padrão, rascunho com prévia fictícia, HTML barra
     await expect(page.getByText(/Simulação concluída:.*Nada foi enviado/)).toBeVisible();
   });
 });
+
+test("E09 — configuração de envio: padrões seguros, validação, salvar; provedores aparecem como simulados", async ({ page }) => {
+  await page.goto("/mensagens/configuracao");
+  await expect(page.getByRole("heading", { name: "Configuração de envio" })).toBeVisible();
+  await expect(page.getByText("nenhuma mensagem real é enviada")).toBeVisible();
+  await expect(page.getByLabel(/Canal WhatsApp ligado/)).not.toBeChecked(); // nasce desligado
+  await expect(page.getByLabel(/Envio automático —/)).not.toBeChecked();
+
+  await test.step("horário inválido é recusado", async () => {
+    await page.getByLabel("Início").fill("18:00");
+    await page.getByLabel("Fim").fill("09:00");
+    await page.getByRole("button", { name: "Salvar configuração" }).click();
+    await expect(page.getByText("O horário final deve ser depois do inicial")).toBeVisible();
+  });
+
+  await test.step("salva limites válidos", async () => {
+    await page.goto("/mensagens/configuracao");
+    await page.getByLabel("Por execução").fill("40");
+    await page.getByLabel("Início").fill("08:30");
+    await page.getByRole("button", { name: "Salvar configuração" }).click();
+    await expect(page.getByText("Configuração salva")).toBeVisible();
+    await expect(page.getByLabel("Por execução")).toHaveValue("40");
+    await expect(page.getByLabel("Início")).toHaveValue("08:30");
+  });
+
+  await test.step("integrações mostra provedores em modo simulado, chaves desligadas", async () => {
+    await page.goto("/integracoes");
+    await expect(page.getByRole("heading", { name: "Provedores de cobrança e mensagens" })).toBeVisible();
+    await expect(page.getByText("NFS-e da Cora (beta)")).toBeVisible();
+    await expect(page.getByText(/Simulado · chave desligada/).first()).toBeVisible();
+    await expect(page.getByText(/LIGADA/)).toHaveCount(0);
+  });
+});

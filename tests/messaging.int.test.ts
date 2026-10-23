@@ -10,7 +10,8 @@ import { Forbidden, Invalid } from "@/modules/identity/service";
 import { createParty } from "@/modules/crm/service";
 import { createContract, decideVersion, getContract } from "@/modules/contracts/service";
 import { approveBatch, cancelBatch, generateBatch, getBatch, reopenBatch } from "@/modules/billing/batches";
-import { activateVersion, ensureDefaultTemplates, listQueue, listTemplates, processQueue, saveDraft, scheduleQueue } from "@/modules/messaging/service";
+import { activateVersion, ensureDefaultTemplates, listQueue, listTemplates, processQueue, saveDraft, saveSettings, scheduleQueue } from "@/modules/messaging/service";
+import { DEFAULT_SETTINGS } from "@/modules/messaging/window";
 
 const enabled = !!process.env.POSTGRES_USER;
 const CNPJ1 = "11.222.333/0001-81", CNPJ2 = "12.ABC.345/01DE-35";
@@ -63,6 +64,7 @@ describe.skipIf(!enabled)("E06 modelos e fila simulada (DB de teste)", () => {
     await approveBatch(db, dirA, A, batchId, g.hash);
     return batchId;
   };
+  const wa = () => saveSettings(db, dirA, A, { ...DEFAULT_SETTINGS, whatsappEnabled: true }); // WhatsApp nasce desligado
   const n = async (q: string) => Number((await db.execute(sql.raw(`select count(*)::int n from ${q}`)))[0].n);
 
   it("modelos padrão: só quem tem permissão cria; 10 modelos ativos; idempotente", async () => {
@@ -140,8 +142,11 @@ describe.skipIf(!enabled)("E06 modelos e fila simulada (DB de teste)", () => {
     await approvedBatch(); await ensureDefaultTemplates(db, dirA, A);
     await scheduleQueue(db, asstA, A, D);
     expect(await processQueue(db, asstA, A, "2026-09-30")).toMatchObject({ processed: 0 });
-    // 14/10: emissão, D-3 e D0 → 3 etapas × 2 canais × 2 cobranças − 3 WhatsApp bloqueados do Cliente Dois = 9
-    expect(await processQueue(db, asstA, A, "2026-10-14")).toMatchObject({ processed: 9 });
+    await wa();
+    // processa cada data quando ela chega (mensagem com mais de 2 dias de atraso não sai): emissão, D-3 e D0 → 3 por etapa (Cliente Dois não tem WhatsApp)
+    expect(await processQueue(db, asstA, A, D)).toMatchObject({ processed: 3 });
+    expect(await processQueue(db, asstA, A, "2026-10-11")).toMatchObject({ processed: 3 });
+    expect(await processQueue(db, asstA, A, "2026-10-14")).toMatchObject({ processed: 3 });
     expect(await processQueue(db, asstA, A, "2026-10-14")).toMatchObject({ processed: 0 });
     const sim = (await listQueue(db, contA, A, "simulado")).items;
     expect(sim).toHaveLength(9);
@@ -154,14 +159,15 @@ describe.skipIf(!enabled)("E06 modelos e fila simulada (DB de teste)", () => {
     expect(sim.filter((i) => i.channel === "whatsapp").every((i) => i.renderedSubject === "")).toBe(true);
     expect((await listQueue(db, contA, A)).counts).toMatchObject({ simulado: 9, pendente: 8, bloqueado: 5 });
     // revisão D+15 vira tarefa interna, não mensagem
-    await processQueue(db, asstA, A, "2026-10-29");
+    await processQueue(db, asstA, A, "2026-10-17"); await processQueue(db, asstA, A, "2026-10-21");
+    expect(await processQueue(db, asstA, A, "2026-10-29")).toMatchObject({ processed: 2 });
     const rev = (await listQueue(db, contA, A, "simulado")).items.find((i) => i.kind === "revisao_d15")!;
     expect(rev.renderedBody).toContain("15 dias em atraso"); expect(rev.channel).toBe("interno");
   });
 
   it("parar ao reabrir/cancelar: itens abertos são cancelados, os simulados ficam, reaprovar reprograma sem duplicar", async () => {
     const batchId = await approvedBatch(); await ensureDefaultTemplates(db, dirA, A);
-    await scheduleQueue(db, asstA, A, D); await processQueue(db, asstA, A, D); // emissão (4 itens, 1 bloqueado de WhatsApp... Cliente Dois tem só e-mail)
+    await wa(); await scheduleQueue(db, asstA, A, D); await processQueue(db, asstA, A, D); // emissão: 3 itens (Cliente Dois não tem WhatsApp)
     const before = (await listQueue(db, contA, A)).counts;
     expect(before.simulado).toBe(3);
     await reopenBatch(db, gerA, A, batchId, "Valor do contrato mudou");
@@ -181,9 +187,10 @@ describe.skipIf(!enabled)("E06 modelos e fila simulada (DB de teste)", () => {
     await approvedBatch(); await ensureDefaultTemplates(db, dirA, A);
     await scheduleQueue(db, asstA, A, D);
     await db.execute(sql`update charges set status = 'cancelada' where customer_id = ${cli1}`);
-    const r = await processQueue(db, asstA, A, "2026-10-14");
+    const r = await processQueue(db, asstA, A, D);
     expect(r.cancelled).toBeGreaterThan(0);
     const sim = (await listQueue(db, contA, A, "simulado")).items;
+    expect(sim).toHaveLength(1);
     expect(sim.every((i) => i.customerName === "Cliente Dois")).toBe(true);
   });
 
@@ -209,7 +216,7 @@ describe.skipIf(!enabled)("E06 modelos e fila simulada (DB de teste)", () => {
 
   it("isolamento e auditoria: outra empresa não vê nem mexe; auditoria só com ids e contagens", async () => {
     await approvedBatch(); await ensureDefaultTemplates(db, dirA, A);
-    await scheduleQueue(db, asstA, A, D); await processQueue(db, asstA, A, "2026-10-14");
+    await scheduleQueue(db, asstA, A, D); await processQueue(db, asstA, A, D);
     expect((await listQueue(db, dirB, B)).items).toHaveLength(0);
     expect(await scheduleQueue(db, dirB, B, D)).toMatchObject({ charges: 0, created: 0 });
     await expect(listQueue(db, dirB, A)).rejects.toThrow(Forbidden);
@@ -227,7 +234,7 @@ describe.skipIf(!enabled)("E06 modelos e fila simulada (DB de teste)", () => {
     // "reabrir lote" ainda não confirmado: cancelou os itens abertos e segura a transação
     const reopening = conn.begin(async (q) => { await q`update message_queue set status = 'cancelado', blocked_reason = null where status in ('pendente', 'bloqueado')`; locked(); await hold; });
     await ready;
-    const processing = processQueue(db, asstA, A, "2026-10-14");
+    const processing = processQueue(db, asstA, A, D);
     await new Promise((r) => setTimeout(r, 300)); // processQueue chega ao bloqueio e espera
     release(); await reopening;
     expect(await processing).toMatchObject({ processed: 0 });

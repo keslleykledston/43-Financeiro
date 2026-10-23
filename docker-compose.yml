@@ -14,6 +14,7 @@ x-app-env: &app-env
   EMAIL_EXTERNAL_ENABLED: "false"
   CORA_LIVE_ENABLED: "false"
   FISCAL_LIVE_ENABLED: "false"
+  WHATSAPP_LIVE_ENABLED: "false"
 
 services:
   db:
@@ -48,6 +49,23 @@ services:
       db: { condition: service_healthy }
     networks: [k3g_finance]
     mem_limit: 768m
+
+  # Agendador da fila de mensagens (E09). Só age em empresas com "envio automático" ligado em Mensagens → Configuração.
+  # Provedores SIMULADOS: nada é enviado. Usa a imagem "tools" (código embutido): rebuild a cada deploy → docker compose build scheduler.
+  scheduler:
+    build: { context: ., target: tools }
+    restart: unless-stopped
+    command: ["pnpm", "exec", "tsx", "scripts/scheduler.ts"]
+    env_file:
+      - .env
+      - .env.auth
+      - path: .env.crm
+        required: false
+    environment: *app-env
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [k3g_finance]
+    mem_limit: 256m
 
   # docker compose --profile tools run --rm tools pnpm db:migrate | seed | test
   tools:

@@ -43,7 +43,8 @@ Aceite: não marcar quitado antes de soma de alocações/liquidação, exportar 
 Saída: importação CSV e OFX **quando formato validado**, prévia de importação, dedup, matching seguro, pendências, vínculo parcial, estorno, transferência entre CNPJs.
 Aceite: extrato repetido não duplica; dois PIX iguais não autoassociam sem identificador; saldo segue movimentos; histórico e rollback controlado.
 
-## E09 — APIs e adapters [ ]
+## E09 — APIs e adapters [~]
+**E09a [x]** provedores simulados (e-mail, WhatsApp, boleto/extrato Cora, NFS-e Cora) com falha fechada se chave *_LIVE ligar, janela/limites/pausa/tolerância, agendador (serviço `scheduler`), tela Configuração e painel de provedores. **E09b [ ]** abaixo (API pública).
 Saída: `/api/v1` com OpenAPI, API key hashed scopes/expiry/revocation, rate limiting, exemplos curl sem segredo, webhooks com teste HMAC, mock adapters Cora/e-NF/e-mail.
 Aceite: contrato OpenAPI e testes auth/no cross-tenant/replay/idempotência; sandbox simulada.
 

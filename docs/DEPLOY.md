@@ -33,3 +33,6 @@ Sem sudo/DNS/certificado → app em localhost com autenticação, documentação
 - Proxy -> 127.0.0.1:3150 (container web). HTTP->HTTPS 301 OK; anônimo -> /login OK; headers nosniff/referrer/X-Frame OK.
 - HSTS e CSP ainda NÃO ativados (avaliar impacto nos demais subdomínios).
 - Rollback: `sudo cp /etc/nginx/conf.d/financeiro.conf.bak.http-only /etc/nginx/conf.d/financeiro.conf && sudo nginx -t && sudo systemctl reload nginx` (ou remover o arquivo).
+
+## Agendador de mensagens (E09)
+Serviço `scheduler` do Compose (imagem `tools`, código embutido): `docker compose build scheduler && docker compose up -d scheduler`. Rebuild a cada deploy, junto com `web`. Log só com contagens (`docker compose logs scheduler`). Ele só age nas empresas com *Envio automático* ligado e usa provedores simulados. Parar: `docker compose stop scheduler` (a fila apenas acumula).

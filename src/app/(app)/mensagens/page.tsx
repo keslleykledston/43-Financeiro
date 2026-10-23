@@ -18,8 +18,9 @@ const br = (d: string) => d.split("-").reverse().join("/");
 
 function okText(ok?: string) {
   const [k, ...n] = (ok ?? "").split(":"); const v = n.map(Number);
+  const waiting = k === "processado" && n[5] ? ` Aviso: ${decodeURIComponent(n[5])}.` : "";
   if (k === "programado") return `Fila programada: ${v[0]} novo(s), ${v[1]} bloqueado(s) por falta de contato, ${v[2]} sem modelo ativo, ${v[3]} já no passado, ${v[4]} cancelado(s).`;
-  if (k === "processado") return `Simulação concluída: ${v[0]} mensagem(ns) processada(s), ${v[1]} cancelada(s). Nada foi enviado.`;
+  if (k === "processado") return `Simulação concluída: ${v[0]} mensagem(ns) processada(s), ${v[1]} cancelada(s)${v[2] ? `, ${v[2]} bloqueada(s)` : ""}${v[3] ? `, ${v[3]} com falha` : ""}${v[4] ? `, ${v[4]} aguardando canal desligado` : ""}. Nada foi enviado.${waiting}`;
   return "";
 }
 
@@ -35,7 +36,7 @@ export default async function Mensagens({ searchParams }: { searchParams: Promis
   return (
     <div className="space-y-5">
       <PageHeader title="Mensagens" description={`${ctx.current.name} · régua de cobrança por e-mail e WhatsApp.`}
-        actions={<AppLink href="/mensagens/modelos" className={buttonClass("outline")}>Modelos</AppLink>} />
+        actions={<div className="flex gap-2"><AppLink href="/mensagens/modelos" className={buttonClass("outline")}>Modelos</AppLink><AppLink href="/mensagens/configuracao" className={buttonClass("outline")}>Configuração</AppLink></div>} />
       <Callout tone="info">Simulação: a fila mostra o que <strong>seria</strong> enviado. Nenhum e-mail ou WhatsApp sai do sistema. O envio real só será ligado em fase própria, com provedores homologados e autorização.</Callout>
       {sp.erro && <Callout tone="negative" role="alert">{sp.erro}</Callout>}
       {msg && <Callout tone="positive" role="status">{msg}</Callout>}
@@ -43,7 +44,7 @@ export default async function Mensagens({ searchParams }: { searchParams: Promis
       <SectionCard title="Fila" action={write ? (
         <div className="flex flex-wrap gap-2">
           <form action={scheduleAction}><button className={buttonClass("outline", "sm")}>Programar mensagens</button></form>
-          <form action={processAction}><button className={buttonClass("primary", "sm")}>Processar vencidos (simulação)</button></form>
+          <form action={processAction}><button className={buttonClass("primary", "sm")} title="Ignora a janela de horário; respeita pausa, canais e limites">Processar vencidos (simulação)</button></form>
         </div>
       ) : undefined}>
         <nav aria-label="Filtrar por situação" className="mb-3 flex flex-wrap gap-2 text-sm">

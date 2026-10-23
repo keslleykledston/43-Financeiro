@@ -311,7 +311,10 @@ export const messageQueue = pgTable("message_queue", {
   renderedSubject: text("rendered_subject"),
   renderedBody: text("rendered_body"),
   processedAt: timestamp("processed_at", { withTimezone: true }),
-  processedBy: uuid("processed_by").references(() => users.id),
+  processedBy: uuid("processed_by").references(() => users.id), // null = agendador automático
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"), // código/motivo genérico do provedor, sem dados do cliente
+  providerRef: text("provider_ref"), // identificador devolvido pelo provedor (simulado enquanto não houver E10)
 }, (t) => [
   foreignKey({ columns: [t.companyId, t.chargeId], foreignColumns: [charges.companyId, charges.id] }).onDelete("cascade"),
   foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
@@ -323,4 +326,27 @@ export const messageQueue = pgTable("message_queue", {
   check("message_queue_channel_chk", sql`${t.channel} in ('email', 'whatsapp', 'interno')`),
   check("message_queue_internal_chk", sql`(${t.kind} = 'revisao_d15') = (${t.channel} = 'interno')`),
   check("message_queue_blocked_chk", sql`(${t.status} = 'bloqueado') = (${t.blockedReason} is not null)`),
+]);
+
+// E09 — configuração de envio por empresa: janela de horário, limites, canais e chave geral (pausa). Padrões conservadores.
+export const messagingSettings = pgTable("messaging_settings", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  paused: boolean("paused").notNull().default(false), // kill switch: nada é processado, nem manual nem automático
+  autoDispatch: boolean("auto_dispatch").notNull().default(false), // o agendador só age nas empresas com isto ligado
+  emailEnabled: boolean("email_enabled").notNull().default(true),
+  whatsappEnabled: boolean("whatsapp_enabled").notNull().default(false), // WhatsApp (WAHA, não oficial) nasce desligado
+  windowStart: text("window_start").notNull().default("09:00"),
+  windowEnd: text("window_end").notNull().default("18:00"),
+  weekdays: integer("weekdays").array().notNull().default(sql`'{1,2,3,4,5}'::integer[]`), // 0=domingo … 6=sábado
+  skipHolidays: boolean("skip_holidays").notNull().default(true),
+  maxPerRun: integer("max_per_run").notNull().default(50),
+  maxPerHour: integer("max_per_hour").notNull().default(30),
+  maxLateDays: integer("max_late_days").notNull().default(2), // além disto a mensagem perdeu o sentido: vai para revisão manual
+  updatedBy: uuid("updated_by").references(() => users.id),
+}, (t) => [
+  unique("messaging_settings_company_uq").on(t.companyId),
+  check("messaging_settings_window_chk", sql`${t.windowStart} ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$' and ${t.windowEnd} ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$' and ${t.windowStart} < ${t.windowEnd}`),
+  check("messaging_settings_limits_chk", sql`${t.maxPerRun} between 1 and 500 and ${t.maxPerHour} between 1 and 2000 and ${t.maxLateDays} between 0 and 30`),
+  check("messaging_settings_weekdays_chk", sql`cardinality(${t.weekdays}) between 1 and 7 and ${t.weekdays} <@ array[0,1,2,3,4,5,6]`),
 ]);

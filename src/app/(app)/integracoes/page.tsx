@@ -8,6 +8,7 @@ import { ConnectionForm } from "./connection-form";
 import { ModeForm } from "./mode-form";
 import { SyncPanel } from "./sync-panel";
 import { resolveAction } from "./actions";
+import { PROVIDER_CATALOG, liveFlagsOn } from "@/modules/providers/registry";
 
 const REASON: Record<string, string> = { duplicate_document: "Já existe um cadastro local com este documento", document_collision: "O documento colide com outro cadastro ativo", ambiguous_company: "Não foi possível saber a qual empresa pertence" };
 const fmt = (d: Date) => d.toLocaleString("pt-BR", { timeZone: "America/Manaus" });
@@ -74,6 +75,19 @@ export default async function Integracoes() {
         </ul>
       </section>
       </>)}
+      <section className="rounded-lg border bg-card p-5">
+        <h2 className="mb-1 font-semibold">Provedores de cobrança e mensagens</h2>
+        <p className="mb-3 text-sm text-muted-foreground">Hoje todos funcionam em <strong>modo simulado</strong>: nada é emitido nem enviado de verdade. Cada provedor real entra numa fase própria, só com credenciais fora do Git, homologação e autorização.</p>
+        {liveFlagsOn().length > 0 && <p role="alert" className="mb-3 rounded-md bg-negative-soft p-3 text-sm text-negative-foreground">Atenção: há chave(s) real(is) ligada(s) ({liveFlagsOn().join(", ")}) sem adaptador homologado. O envio fica bloqueado até desligá-las.</p>}
+        <ul className="divide-y divide-border text-sm">
+          {PROVIDER_CATALOG.map((p) => (
+            <li key={p.key} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+              <div><p className="font-medium">{p.label}</p><p className="text-xs text-muted-foreground">{p.note}</p></div>
+              <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium">Simulado · chave {process.env[p.flag] === "true" ? "LIGADA" : "desligada"}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   );
 }
