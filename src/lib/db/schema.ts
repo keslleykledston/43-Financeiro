@@ -57,36 +57,55 @@ export const rateLimits = pgTable("rate_limits", {
   resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
 });
 
-export const partyKindEnum = pgEnum("party_kind", ["cliente", "fornecedor"]);
 export const docTypeEnum = pgEnum("doc_type", ["cpf", "cnpj"]);
 
-// Clientes e fornecedores (ADR-004: tabela única com `kind`). Sempre escopada por company_id.
-export const parties = pgTable("parties", {
+// Desenho original (docs/ARQUITETURA.md): customers, customer_contacts, vendors. Sempre escopados por company_id.
+// Colunas idênticas entre customers e vendors (o serviço escolhe a tabela pelo tipo).
+const partyColumns = () => ({
   ...base,
   companyId: uuid("company_id").notNull().references(() => companies.id),
-  kind: partyKindEnum("kind").notNull(),
   legalName: text("legal_name").notNull(),
   tradeName: text("trade_name"),
   docType: docTypeEnum("doc_type").notNull(),
-  document: text("document").notNull(), // normalizado, sem pontuação
+  document: text("document").notNull(), // normalizado, sem pontuação (CNPJ pode ser alfanumérico)
   archivedAt: timestamp("archived_at", { withTimezone: true }), // exclusão lógica
   createdBy: uuid("created_by").references(() => users.id),
-}, (t) => [
-  uniqueIndex("parties_company_kind_doc_uq").on(t.companyId, t.kind, t.document).where(sql`${t.archivedAt} is null`),
-  index("parties_company_name_idx").on(t.companyId, t.legalName),
-  unique("parties_company_id_uq").on(t.companyId, t.id), // alvo da FK composta dos contatos
+  // origem do cadastro: manual | csv | crm (CRM é a fonte de verdade de clientes e contratos)
+  source: text("source").notNull().default("manual"),
+  externalId: text("external_id"),
+  externalSyncedAt: timestamp("external_synced_at", { withTimezone: true }),
+});
+
+export const customers = pgTable("customers", partyColumns(), (t) => [
+  uniqueIndex("customers_company_doc_uq").on(t.companyId, t.document).where(sql`${t.archivedAt} is null`),
+  uniqueIndex("customers_company_source_ext_uq").on(t.companyId, t.source, t.externalId).where(sql`${t.externalId} is not null`),
+  index("customers_company_name_idx").on(t.companyId, t.legalName),
+  unique("customers_company_id_uq").on(t.companyId, t.id), // alvo da FK composta dos contatos
 ]);
 
-export const partyContacts = pgTable("party_contacts", {
+export const vendors = pgTable("vendors", partyColumns(), (t) => [
+  uniqueIndex("vendors_company_doc_uq").on(t.companyId, t.document).where(sql`${t.archivedAt} is null`),
+  uniqueIndex("vendors_company_source_ext_uq").on(t.companyId, t.source, t.externalId).where(sql`${t.externalId} is not null`),
+  index("vendors_company_name_idx").on(t.companyId, t.legalName),
+  unique("vendors_company_id_uq").on(t.companyId, t.id),
+]);
+
+const contactColumns = () => ({
   ...base,
   companyId: uuid("company_id").notNull().references(() => companies.id),
-  partyId: uuid("party_id").notNull(),
   name: text("name").notNull(),
   email: text("email"),
   phone: text("phone"),
   isFinancial: boolean("is_financial").notNull().default(false),
-}, (t) => [
-  index("party_contacts_party_idx").on(t.companyId, t.partyId),
+});
+
+export const customerContacts = pgTable("customer_contacts", { ...contactColumns(), partyId: uuid("customer_id").notNull() }, (t) => [
+  index("customer_contacts_customer_idx").on(t.companyId, t.partyId),
   // o banco garante que contato e cadastro pertencem à MESMA empresa
-  foreignKey({ columns: [t.companyId, t.partyId], foreignColumns: [parties.companyId, parties.id] }),
+  foreignKey({ columns: [t.companyId, t.partyId], foreignColumns: [customers.companyId, customers.id] }),
+]);
+
+export const vendorContacts = pgTable("vendor_contacts", { ...contactColumns(), partyId: uuid("vendor_id").notNull() }, (t) => [
+  index("vendor_contacts_vendor_idx").on(t.companyId, t.partyId),
+  foreignKey({ columns: [t.companyId, t.partyId], foreignColumns: [vendors.companyId, vendors.id] }),
 ]);

@@ -18,7 +18,12 @@ Aceite: empresa A não enxerga B sem membership; negativa server-side; convite e
 Saída: CRUD com filtros, busca, validação CPF/CNPJ quando aplicável, contato financeiro, histórico, importação CSV simulada/revisável, exportação autorizada.
 Aceite: campos obrigatórios, documento duplicado conforme regra de tenant, pesquisa, paginação, exclusão lógica quando há vínculos, help.
 
+## E03b — Integração CRM: clientes (e base para contratos) [ ]
+Pedido do dono: clientes e contratos vêm do **CRM via API**. Saída: `CrmAdapter` + mock + servidor CRM fake no sandbox; `source/external_id/external_synced_at` em customers; sincronização incremental com **prévia e confirmação**, fila de conflitos, `integration_sync_runs`, tela *Integrações* (estado, última execução, "Sincronizar agora"); kill switch `CRM_SYNC_ENABLED=false`. Cadastro manual/CSV continua como fallback marcado `source`.
+Aceite: reimportar não duplica; conflito com cadastro manual vai para revisão; cliente inativo no CRM é arquivado (não apagado); falhas (429/timeout/payload inválido) não derrubam o app; sem PII em logs; teste e2e com CRM fake. **Conexão real só com CRM identificado, credencial read-only e autorização explícita.**
+
 ## E04 — Contratos e calendário pós-pago [ ]
+(Contratos **importados do CRM** via E03b; criação manual só como fallback. Mudança de valor/vencimento gera versão e exige aprovação antes de afetar cobrança.)
 Saída: CRUD de contratos, valor, empresa, cliente, vigência, due_day, flag NF conjunta, competência anterior, agenda com lotes 25/1/8/15, alerta dia 31 e meses curtos.
 Aceite: testes tabelados para dias 1, 5, 12, 13, 16, 17, 22, 23, 30, 31, mês/ano novo, fev; competência M e vencimento M+1; ajustes não fazem alterações silenciosas.
 

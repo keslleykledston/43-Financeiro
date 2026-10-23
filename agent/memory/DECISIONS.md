@@ -34,3 +34,10 @@ Remoto: `ssh://git@ssh.github.com:443/keslleykledston/43-Financeiro.git` (porta 
 Papel: Lovable = agente de UI/UX em projeto de PROTÓTIPO separado (só dados fictícios, sem backend/Supabase/auth/env). Claude Code revisa o diff, porta para Next.js (server components/actions), liga ao backend real e roda `pnpm sandbox`. Segurança, isolamento por empresa e cálculo ficam no nosso código. Nada de segredo/dados reais/ai-memory enviado ao Lovable. Cada mensagem gasta créditos: agrupar telas em lotes.
 Visual: tema **claro padrão + escuro opcional**; acento teal (tokens do Ledger Lens), Space Grotesk + IBM Plex Sans, `.num` tabular; raio 12px; mobile em cards.
 Projeto Lovable de protótipo: id e352b98c-1cf4-4af5-a90a-f957ea39a0f9 (workspace do dono). Referência analisada: Ledger Lens Gre (39d6711e-…) — ver docs/DESIGN_REFERENCIA_LEDGER_LENS.md.
+
+## ADR-007 Banco = desenho do starter (docs/ARQUITETURA.md) (2026-10-23, ordem do usuário) — substitui ADR-004 no que diz respeito às tabelas
+O banco é o **Postgres 16 próprio (Docker)** com o esquema do desenho original; nada de Supabase/tabelas do Ledger Lens. `parties` foi dividida em `customers`, `customer_contacts`, `vendors`, `vendor_contacts` (migração 0005 preserva dados, testada em banco temporário). Tipo (cliente/fornecedor) não muda após criado. Colunas `source` (manual|csv|crm), `external_id`, `external_synced_at` já existem para a integração CRM.
+Variações conscientes do desenho: perfis em enum + mapa de permissões no código (não tabelas `roles/permissions/role_permissions`, a revisitar se papéis ficarem editáveis); sessão = JWT do Auth.js (sem tabela `sessions`); extras necessários: `invitations`, `rate_limits`.
+
+## ADR-008 CRM é a fonte de verdade de clientes e contratos (2026-10-23, pedido do usuário)
+Importação via API, somente leitura, com prévia/conflitos/aprovação (docs/API_E_INTEGRACOES.md, fase E03b). Qual CRM e credenciais: pendente de informação do usuário. CRM real só com credencial read-only, fora do Git, e autorização explícita.

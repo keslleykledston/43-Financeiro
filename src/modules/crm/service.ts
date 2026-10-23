@@ -1,7 +1,8 @@
 import { and, asc, count, desc, eq, ilike, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { unionAll } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import type { DB } from "@/lib/db";
-import { auditLog, partyContacts, parties } from "@/lib/db/schema";
+import { auditLog, customerContacts, customers, vendorContacts, vendors } from "@/lib/db/schema";
 import { parseCsv, toCsv } from "@/lib/csv";
 import { formatDocument, parseDocument } from "@/lib/validators/document";
 import { Invalid, requirePerm } from "@/modules/identity/service";
@@ -10,6 +11,13 @@ export type Kind = "cliente" | "fornecedor";
 export const PAGE_SIZE = 20;
 export const IMPORT_MAX_ROWS = 1000;
 export const IMPORT_MAX_BYTES = 500_000;
+
+// Desenho original: `customers` + `customer_contacts` e `vendors` (+ contatos). Colunas idênticas,
+// então o serviço escolhe a tabela pelo tipo. O cast preserva a tipagem (mesmo formato de colunas).
+const tables = (k: Kind) =>
+  k === "cliente"
+    ? { main: customers, contacts: customerContacts }
+    : { main: vendors as unknown as typeof customers, contacts: vendorContacts as unknown as typeof customerContacts };
 
 const str = (max: number) => z.string().trim().max(max);
 export const partySchema = z.object({
@@ -41,38 +49,53 @@ function normalize(input: unknown) {
 const audit = (db: DB, companyId: string, actorId: string, action: string, detail: Record<string, unknown>) =>
   db.insert(auditLog).values({ companyId, actorId, action, detail });
 
+/** Descobre em qual tabela o ID existe — sempre filtrando pela empresa (ID de outra empresa => null). */
+async function kindOf(db: DB, companyId: string, id: string): Promise<Kind | null> {
+  for (const k of ["cliente", "fornecedor"] as const) {
+    const { main } = tables(k);
+    const [r] = await db.select({ id: main.id }).from(main).where(and(eq(main.id, id), eq(main.companyId, companyId)));
+    if (r) return k;
+  }
+  return null;
+}
+
 export async function createParty(db: DB, actorId: string, companyId: string, input: unknown) {
   await requirePerm(db, actorId, companyId, "crm.write");
   const v = normalize(input);
+  const { main } = tables(v.kind);
   try {
     return await db.transaction(async (tx) => {
-      const [p] = await tx.insert(parties).values({ companyId, createdBy: actorId, kind: v.kind, legalName: v.legalName, tradeName: v.tradeName, docType: v.docType, document: v.document }).returning();
+      const [p] = await tx.insert(main).values({ companyId, createdBy: actorId, legalName: v.legalName, tradeName: v.tradeName, docType: v.docType, document: v.document }).returning();
       await audit(tx as unknown as DB, companyId, actorId, "party.created", { partyId: p.id, kind: v.kind });
-      return p;
+      return { ...p, kind: v.kind };
     });
   } catch (e) { if (pgCode(e) === "23505") throw new Invalid(DUP); throw e; }
 }
 
 export async function getParty(db: DB, actorId: string, companyId: string, id: string) {
   await requirePerm(db, actorId, companyId, "crm.read");
-  const [p] = await db.select().from(parties).where(and(eq(parties.id, id), eq(parties.companyId, companyId)));
-  if (!p) return null;
-  const contacts = await db.select().from(partyContacts)
-    .where(and(eq(partyContacts.partyId, id), eq(partyContacts.companyId, companyId))).orderBy(asc(partyContacts.createdAt));
-  return { ...p, contacts, documentFormatted: formatDocument(p.docType, p.document) };
+  const kind = await kindOf(db, companyId, id);
+  if (!kind) return null;
+  const { main, contacts } = tables(kind);
+  const [p] = await db.select().from(main).where(and(eq(main.id, id), eq(main.companyId, companyId)));
+  const list = await db.select().from(contacts)
+    .where(and(eq(contacts.partyId, id), eq(contacts.companyId, companyId))).orderBy(asc(contacts.createdAt));
+  return { ...p, kind, contacts: list, documentFormatted: formatDocument(p.docType, p.document) };
 }
 
 export async function updateParty(db: DB, actorId: string, companyId: string, id: string, input: unknown) {
   await requirePerm(db, actorId, companyId, "crm.write");
-  const v = normalize(input);
+  const kind = await kindOf(db, companyId, id);
+  if (!kind) throw new Invalid("Cadastro não encontrado");
+  const v = normalize({ ...(input as object), kind }); // o tipo não muda na edição
+  const { main } = tables(kind);
   try {
     return await db.transaction(async (tx) => {
-      const [p] = await tx.update(parties)
-        .set({ kind: v.kind, legalName: v.legalName, tradeName: v.tradeName ?? null, docType: v.docType, document: v.document, updatedAt: new Date() })
-        .where(and(eq(parties.id, id), eq(parties.companyId, companyId))).returning();
-      if (!p) throw new Invalid("Cadastro não encontrado");
+      const [p] = await tx.update(main)
+        .set({ legalName: v.legalName, tradeName: v.tradeName ?? null, docType: v.docType, document: v.document, updatedAt: new Date() })
+        .where(and(eq(main.id, id), eq(main.companyId, companyId))).returning();
       await audit(tx as unknown as DB, companyId, actorId, "party.updated", { partyId: id });
-      return p;
+      return { ...p, kind };
     });
   } catch (e) { if (pgCode(e) === "23505") throw new Invalid(DUP); throw e; }
 }
@@ -80,11 +103,13 @@ export async function updateParty(db: DB, actorId: string, companyId: string, id
 /** Exclusão lógica: preserva histórico e vínculos futuros (contratos/cobranças). */
 export async function setArchived(db: DB, actorId: string, companyId: string, id: string, archived: boolean) {
   await requirePerm(db, actorId, companyId, "crm.write");
+  const kind = await kindOf(db, companyId, id);
+  if (!kind) throw new Invalid("Cadastro não encontrado");
+  const { main } = tables(kind);
   try {
     await db.transaction(async (tx) => {
-      const r = await tx.update(parties).set({ archivedAt: archived ? new Date() : null, updatedAt: new Date() })
-        .where(and(eq(parties.id, id), eq(parties.companyId, companyId))).returning({ id: parties.id });
-      if (!r.length) throw new Invalid("Cadastro não encontrado");
+      await tx.update(main).set({ archivedAt: archived ? new Date() : null, updatedAt: new Date() })
+        .where(and(eq(main.id, id), eq(main.companyId, companyId)));
       await audit(tx as unknown as DB, companyId, actorId, archived ? "party.archived" : "party.restored", { partyId: id });
     });
   } catch (e) { if (pgCode(e) === "23505") throw new Invalid("Restaurar conflita com outro cadastro ativo de mesmo documento"); throw e; }
@@ -94,17 +119,20 @@ export async function addContact(db: DB, actorId: string, companyId: string, par
   await requirePerm(db, actorId, companyId, "crm.write");
   const c = contactSchema.safeParse(input);
   if (!c.success) throw new Invalid(firstIssue(c.error));
-  const [p] = await db.select({ id: parties.id }).from(parties).where(and(eq(parties.id, partyId), eq(parties.companyId, companyId)));
-  if (!p) throw new Invalid("Cadastro não encontrado");
-  await db.insert(partyContacts).values({ companyId, partyId, ...c.data });
+  const kind = await kindOf(db, companyId, partyId);
+  if (!kind) throw new Invalid("Cadastro não encontrado");
+  await db.insert(tables(kind).contacts).values({ companyId, partyId, ...c.data });
   await audit(db, companyId, actorId, "party.contact_added", { partyId });
 }
 
 export async function removeContact(db: DB, actorId: string, companyId: string, contactId: string) {
   await requirePerm(db, actorId, companyId, "crm.write");
-  const [c] = await db.delete(partyContacts).where(and(eq(partyContacts.id, contactId), eq(partyContacts.companyId, companyId))).returning();
-  if (!c) throw new Invalid("Contato não encontrado");
-  await audit(db, companyId, actorId, "party.contact_removed", { partyId: c.partyId });
+  for (const k of ["cliente", "fornecedor"] as const) {
+    const { contacts } = tables(k);
+    const [c] = await db.delete(contacts).where(and(eq(contacts.id, contactId), eq(contacts.companyId, companyId))).returning();
+    if (c) { await audit(db, companyId, actorId, "party.contact_removed", { partyId: c.partyId }); return; }
+  }
+  throw new Invalid("Contato não encontrado");
 }
 
 export async function history(db: DB, actorId: string, companyId: string, partyId: string) {
@@ -122,15 +150,24 @@ export async function listParties(db: DB, actorId: string, companyId: string, qu
   const q = query.q?.trim().slice(0, 100);
   const like = q ? `%${q.replace(/[\\%_]/g, "\\$&")}%` : null;
   const digits = q?.toUpperCase().replace(/[^0-9A-Z]/g, "");
-  const where = and(
-    eq(parties.companyId, companyId),
-    query.archived ? isNotNull(parties.archivedAt) : isNull(parties.archivedAt),
-    query.kind ? eq(parties.kind, query.kind) : undefined,
-    like ? or(ilike(parties.legalName, like), ilike(parties.tradeName, like), digits ? ilike(parties.document, `%${digits}%`) : undefined) : undefined,
+  const where = (t: typeof customers) => and(
+    eq(t.companyId, companyId),
+    query.archived ? isNotNull(t.archivedAt) : isNull(t.archivedAt),
+    like ? or(ilike(t.legalName, like), ilike(t.tradeName, like), digits ? ilike(t.document, `%${digits}%`) : undefined) : undefined,
   );
-  const [{ total }] = await db.select({ total: count() }).from(parties).where(where);
-  const rows = await db.select().from(parties).where(where)
-    .orderBy(asc(parties.legalName), asc(parties.id)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE);
+  const sel = (k: Kind) => {
+    const { main: t } = tables(k);
+    return db.select({
+      id: t.id, legalName: t.legalName, tradeName: t.tradeName, docType: t.docType, document: t.document,
+      archivedAt: t.archivedAt, source: t.source, kind: sql<Kind>`${sql.raw(`'${k}'`)}::text`.as("kind"),
+    }).from(t).where(where(t));
+  };
+  const kinds: Kind[] = query.kind ? [query.kind] : ["cliente", "fornecedor"];
+  let total = 0;
+  for (const k of kinds) { const { main: t } = tables(k); total += (await db.select({ n: count() }).from(t).where(where(t)))[0].n; }
+  const lists = kinds.map(sel);
+  const base = lists.length === 1 ? lists[0] : unionAll(lists[0], lists[1]);
+  const rows = await (base as typeof lists[0]).orderBy(asc(sql`legal_name`), asc(sql`id`)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE);
   return {
     page, pageSize: PAGE_SIZE, total, pages: Math.max(1, Math.ceil(total / PAGE_SIZE)),
     items: rows.map((r) => ({ ...r, documentFormatted: formatDocument(r.docType, r.document) })),
@@ -151,15 +188,17 @@ export async function previewImport(db: DB, actorId: string, companyId: string, 
   const table = parseCsv(text);
   if (!table.length) throw new Invalid("Arquivo vazio");
   const head = table[0].map((h) => h.trim().toLowerCase());
-  const missing = HEADERS.filter((h) => !head.includes(h) && h !== "nome_fantasia" && h !== "email_financeiro" && h !== "telefone");
+  const missing = ["tipo", "razao_social", "documento"].filter((h) => !head.includes(h));
   if (missing.length) throw new Invalid(`Colunas obrigatórias ausentes: ${missing.join(", ")}`);
   const body = table.slice(1);
   if (body.length > IMPORT_MAX_ROWS) throw new Invalid(`Máximo de ${IMPORT_MAX_ROWS} linhas por importação`);
   const col = (r: string[], n: string) => (r[head.indexOf(n)] ?? "").trim();
 
-  const existing = await db.select({ kind: parties.kind, document: parties.document }).from(parties)
-    .where(and(eq(parties.companyId, companyId), isNull(parties.archivedAt)));
-  const seen = new Set(existing.map((e) => `${e.kind}:${e.document}`));
+  const seen = new Set<string>();
+  for (const k of ["cliente", "fornecedor"] as const) {
+    const { main: t } = tables(k);
+    for (const e of await db.select({ document: t.document }).from(t).where(and(eq(t.companyId, companyId), isNull(t.archivedAt)))) seen.add(`${k}:${e.document}`);
+  }
 
   const rows: ImportRow[] = body.map((r, i) => {
     const line = i + 2;
@@ -189,13 +228,14 @@ export async function importParties(db: DB, actorId: string, companyId: string, 
   const ok = rows.filter((r) => r.status === "ok");
   try { await db.transaction(async (tx) => {
     for (const r of ok) {
-      const [p] = await tx.insert(parties).values({
-        companyId, createdBy: actorId, kind: r.kind!, legalName: r.legalName!, tradeName: r.tradeName,
-        docType: parseDocument(r.document!)!.type, document: r.document!,
-      }).returning({ id: parties.id });
-      if (r.email || r.phone) await tx.insert(partyContacts).values({ companyId, partyId: p.id, name: "Financeiro", email: r.email, phone: r.phone, isFinancial: true });
+      const { main, contacts } = tables(r.kind!);
+      const [p] = await tx.insert(main).values({
+        companyId, createdBy: actorId, legalName: r.legalName!, tradeName: r.tradeName,
+        docType: parseDocument(r.document!)!.type, document: r.document!, source: "csv",
+      }).returning({ id: main.id });
+      if (r.email || r.phone) await tx.insert(contacts).values({ companyId, partyId: p.id, name: "Financeiro", email: r.email, phone: r.phone, isFinancial: true });
     }
-    await audit(tx as unknown as DB, companyId, actorId, "party.imported", { imported: ok.length, skipped: rows.length - ok.length });
+    await audit(tx as unknown as DB, companyId, actorId, "party.imported", { imported: ok.length, skipped: rows.length - ok.length, source: "csv" });
   }); } catch (e) {
     // colisão concorrente no índice único: nada foi gravado (transação revertida)
     if (pgCode(e) === "23505") throw new Invalid("Outro cadastro com o mesmo documento foi criado durante a importação. Revise e tente de novo.");
@@ -206,14 +246,15 @@ export async function importParties(db: DB, actorId: string, companyId: string, 
 
 export async function exportParties(db: DB, actorId: string, companyId: string, kind?: Kind) {
   await requirePerm(db, actorId, companyId, "crm.export");
-  const rows = await db.select().from(parties)
-    .where(and(eq(parties.companyId, companyId), isNull(parties.archivedAt), kind ? eq(parties.kind, kind) : undefined))
-    .orderBy(asc(parties.legalName));
-  const contacts = await db.select().from(partyContacts).where(and(eq(partyContacts.companyId, companyId), eq(partyContacts.isFinancial, true)));
-  const byParty = new Map(contacts.map((c) => [c.partyId, c]));
-  await audit(db, companyId, actorId, "party.exported", { count: rows.length });
-  return toCsv([
-    [...HEADERS],
-    ...rows.map((r) => [r.kind, r.legalName, r.tradeName ?? "", formatDocument(r.docType, r.document), byParty.get(r.id)?.email ?? "", byParty.get(r.id)?.phone ?? ""]),
-  ]);
+  const out: string[][] = [];
+  for (const k of (kind ? [kind] : ["cliente", "fornecedor"]) as Kind[]) {
+    const { main, contacts } = tables(k);
+    const rows = await db.select().from(main).where(and(eq(main.companyId, companyId), isNull(main.archivedAt)));
+    const fin = await db.select().from(contacts).where(and(eq(contacts.companyId, companyId), eq(contacts.isFinancial, true)));
+    const byParty = new Map(fin.map((c) => [c.partyId, c]));
+    for (const r of rows) out.push([k, r.legalName, r.tradeName ?? "", formatDocument(r.docType, r.document), byParty.get(r.id)?.email ?? "", byParty.get(r.id)?.phone ?? ""]);
+  }
+  out.sort((a, b) => a[1].localeCompare(b[1], "pt-BR"));
+  await audit(db, companyId, actorId, "party.exported", { count: out.length });
+  return toCsv([[...HEADERS], ...out]);
 }

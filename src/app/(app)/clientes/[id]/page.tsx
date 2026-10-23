@@ -33,7 +33,7 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
       {sp.salvo && <p role="status" className="rounded-xl bg-green-50 p-3 text-sm text-green-900">Alterações salvas.</p>}
       {write && !p.archivedAt && (
         <section className="rounded-2xl bg-white p-5 shadow-sm"><h2 className="mb-3 font-semibold">Dados</h2>
-          <PartyForm action={updateAction.bind(null, id)} defaults={{ kind: p.kind, legalName: p.legalName, tradeName: p.tradeName, document: p.documentFormatted }} submit="Salvar" /></section>
+          <PartyForm action={updateAction.bind(null, id)} defaults={{ kind: p.kind, legalName: p.legalName, tradeName: p.tradeName, document: p.documentFormatted }} submit="Salvar" lockKind /></section>
       )}
       <section className="rounded-2xl bg-white p-5 shadow-sm">
         <h2 className="mb-3 font-semibold">Contatos ({p.contacts.length})</h2>

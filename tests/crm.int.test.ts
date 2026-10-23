@@ -28,7 +28,7 @@ describe.skipIf(!enabled)("CRM: isolamento, duplicidade, permissões, busca, imp
   afterAll(async () => { await conn?.end(); await admin?.end(); });
 
   beforeEach(async () => {
-    await db.execute(sql`truncate rate_limits, party_contacts, parties, audit_log, invitations, memberships, companies, users restart identity cascade`);
+    await db.execute(sql`truncate rate_limits, customer_contacts, vendor_contacts, customers, vendors, audit_log, invitations, memberships, companies, users restart identity cascade`);
     const [a, b] = await db.insert(schema.companies).values([{ name: "A" }, { name: "B" }]).returning();
     A = a.id; B = b.id;
     const mk = async (e: string) => (await db.insert(schema.users).values({ email: e, name: e, passwordHash: "x" }).returning())[0].id;
@@ -42,7 +42,7 @@ describe.skipIf(!enabled)("CRM: isolamento, duplicidade, permissões, busca, imp
   it("isolamento: empresa B não lê, altera, arquiva nem mexe nos contatos de A (mesmo com o ID)", async () => {
     const p = await createParty(db, dirA, A, novo());
     await addContact(db, dirA, A, p.id, { name: "Fin", email: "f@x.com", isFinancial: true });
-    const [c] = await db.select().from(schema.partyContacts);
+    const [c] = await db.select().from(schema.customerContacts);
     expect(await getParty(db, dirB, B, p.id)).toBeNull();
     await expect(updateParty(db, dirB, B, p.id, novo({ legalName: "Invadido" }))).rejects.toBeInstanceOf(Invalid);
     await expect(setArchived(db, dirB, B, p.id, true)).rejects.toBeInstanceOf(Invalid);
@@ -137,8 +137,8 @@ describe.skipIf(!enabled)("CRM: isolamento, duplicidade, permissões, busca, imp
 
   it("P2: o banco rejeita contato de uma empresa ligado a cadastro de outra (FK composta)", async () => {
     const p = await createParty(db, dirA, A, novo());
-    await expect(db.insert(schema.partyContacts).values({ companyId: B, partyId: p.id, name: "Intruso" })).rejects.toThrow();
-    await db.insert(schema.partyContacts).values({ companyId: A, partyId: p.id, name: "Legítimo" }); // mesma empresa: ok
+    await expect(db.insert(schema.customerContacts).values({ companyId: B, partyId: p.id, name: "Intruso" })).rejects.toThrow();
+    await db.insert(schema.customerContacts).values({ companyId: A, partyId: p.id, name: "Legítimo" }); // mesma empresa: ok
   });
 
   it("exportação: só da própria empresa, neutraliza fórmula e audita", async () => {

@@ -39,6 +39,7 @@ Todas as tabelas mutáveis: `id uuid`, `created_at`, `updated_at`, `created_by`,
 **faturamento:** `billing_batches` (company, issue_date, status, approved_by/at), `charges` (company, contract, competence, due_date, scheduled_issue, original_amount, adjustment_amount, total, status, uniqueness), `charge_adjustments`, `approvals` (ator, etapa, razão), `issuance_requests` (provider, operation, external_ref, idem_key, job_status, attempt_count, payload_hash), `fiscal_documents` (numero/status/provider_ref), `payment_slips` (bank account, slip_ref, barcode/PIX payload encrypted/redacted if needed, status).
 **emails:** `email_templates` (company, kind, version, subject, sanitized body, status), `email_outbox` (company, charge, template snapshot/version, recipient snapshot, scheduled_for, provider_message_id, state, idempotency_key), `email_events`, `collection_holds`.
 **banco:** `bank_accounts` (company/cora external ID masked), `bank_import_batches` (checksum, period, account), `bank_transactions` (account, external_unique_ref or derived hash namespace, posted_at, amount signed numeric, description, source, immutable), `reconciliation_allocations` (bank_transaction ↔ charge/payable, amount), `transfer_pairs` (para intercompany), `payables`.
+**integração CRM:** `customers`/`vendors`/`contracts` ganham `source` (manual|crm|csv), `external_id`, `external_synced_at` (único por `company_id,source,external_id`); `integration_sync_runs` (conexão, status, contagens, erro, confirmado_por) e `integration_conflicts` (entidade, motivo, payload sanitizado, resolução).
 **infra:** `outbox_events`, `jobs`, `api_keys` (hash only/scopes), `integration_connections` (references to secret store, never plain tokens), `integration_webhook_events` (dedupe, signature verification status), `document_files` (private object URI, checksum, ACL).
 
 ## Constraints críticos
@@ -64,6 +65,8 @@ BillingProvider.lookupSlip(externalId) -> {status, paidAt?}
 FiscalProvider.issueServiceInvoice(request, idempotencyKey) -> {status, externalId, documentUrl?}
 FiscalProvider.lookupInvoice(externalId) -> {status, documentUrl?}
 EmailProvider.send(message, idempotencyKey) -> {status, messageId?}
+CrmProvider.listCustomers(cursor, updatedSince?) -> {items, nextCursor}   // somente leitura
+CrmProvider.listContracts(cursor, updatedSince?) -> {items, nextCursor}
 BankProvider.fetchTransactions(account, cursor) -> {items, nextCursor}
 ```
 O mock implementa mesma interface e é padrão até homologação. `real` depende de feature flags, credenciais protegidas, conta específica e checklist aprovado.
