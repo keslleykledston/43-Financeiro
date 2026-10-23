@@ -20,7 +20,7 @@ export function ImportForm() {
       </form>
 
       {prev?.rows && !done?.imported && done?.imported !== 0 && (
-        <section className="space-y-3 rounded-lg bg-card p-5" aria-label="Prévia da importação">
+        <section className="space-y-3 rounded-lg border bg-card p-5" aria-label="Prévia da importação">
           <p role="status" className="text-sm"><strong>{prev.summary!.ok}</strong> válidas · <strong>{prev.summary!.duplicado}</strong> duplicadas · <strong>{prev.summary!.erro}</strong> com erro</p>
           <ul className="max-h-80 divide-y divide-border overflow-auto text-sm">
             {prev.rows.map((r) => (

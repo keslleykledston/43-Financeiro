@@ -158,6 +158,24 @@ describe.skipIf(!enabled)("CRM: isolamento, duplicidade, permissões, busca, imp
     expect(await history(db, dirB, B, p.id)).toEqual([]);
   });
 
+  it("P2: voltar a faturar (suspenso/cancelado → ativo) exige gerente ou diretoria; assistente pode suspender/cancelar", async () => {
+    const gerA = (await db.insert(schema.users).values({ email: "ger@t.com", name: "g", passwordHash: "x" }).returning())[0].id;
+    await db.insert(schema.memberships).values({ userId: gerA, companyId: A, role: "gerente" });
+    const c = await createParty(db, asstA, A, novo({ legalName: "Cliente", document: CNPJ }));            // assistente cria como ativo: ok
+    const edit = (status: string) => ({ legalName: "Cliente", document: CNPJ, status });
+    await updateParty(db, asstA, A, c.id, edit("cancelado"));                                              // reduzir cobrança: ok para assistente
+    await expect(updateParty(db, asstA, A, c.id, edit("ativo"))).rejects.toThrow(/gerente ou diretoria/);   // reativar: negado
+    expect((await getParty(db, dirA, A, c.id))!.status).toBe("cancelado");                                  // nada mudou
+    await updateParty(db, asstA, A, c.id, { legalName: "Renomeado", document: CNPJ });                      // sem tocar na situação: ok
+    await updateParty(db, gerA, A, c.id, edit("ativo"));                                                    // gerente pode
+    expect((await getParty(db, dirA, A, c.id))!.status).toBe("ativo");
+    await updateParty(db, asstA, A, c.id, edit("ativo"));                                                   // ativo→ativo não é reativação
+    await updateParty(db, dirA, A, c.id, edit("suspenso"));
+    await updateParty(db, dirA, A, c.id, edit("ativo"));                                                    // diretoria pode
+    const log = await db.select().from(schema.auditLog).where(sql`action = 'party.updated' and detail ? 'status'`);
+    expect(log.length).toBeGreaterThanOrEqual(4);                                                           // mudanças de situação ficam auditadas
+  });
+
   it("situação (local): criar/editar com situação, filtrar, só ativo é faturável, CSV com coluna situacao e exportação", async () => {
     const a = await createParty(db, dirA, A, novo({ legalName: "Ativo SA", document: CNPJ }));
     const s = await createParty(db, dirA, A, novo({ legalName: "Suspenso SA", document: CNPJ2, status: "suspenso" }));

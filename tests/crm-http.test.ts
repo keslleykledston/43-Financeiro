@@ -30,7 +30,9 @@ describe("CanonicalHttpAdapter — limites e redirects (revisão Codex)", () => 
 describe("CanonicalHttpAdapter", () => {
   it("exige HTTPS (exceto dev explícito) e token", () => {
     expect(() => new CanonicalHttpAdapter({ baseUrl: "http://crm.test", token: "t" })).toThrow(/HTTPS/);
-    expect(() => new CanonicalHttpAdapter({ baseUrl: "http://crm.test", token: "t", allowInsecureHttp: true })).not.toThrow();
+    expect(() => new CanonicalHttpAdapter({ baseUrl: "http://sandbox-crm:4000", token: "t", allowInsecureHttp: true })).not.toThrow();   // host interno de laboratório
+    expect(() => new CanonicalHttpAdapter({ baseUrl: "http://crm.test", token: "t", allowInsecureHttp: true })).toThrow(/HTTPS/);       // domínio real NUNCA por HTTP
+    expect(() => new CanonicalHttpAdapter({ baseUrl: "http://sandbox-crm", token: "t" })).toThrow(/HTTPS/);                              // sem opt-in explícito
     expect(() => new CanonicalHttpAdapter({ baseUrl: "https://crm.test", token: "" })).toThrow(/Token/);
   });
 
@@ -72,5 +74,15 @@ describe("CanonicalHttpAdapter", () => {
     const net = vi.fn(async () => { throw new Error("ECONNRESET https://crm?token=tok-secreto"); });
     const err2 = await mk(net as unknown as typeof fetch, { maxRetries: 0 }).a.listCustomers({}).catch((e) => e);
     expect(err2.message).not.toContain("tok-secreto");
+  });
+});
+
+describe("destino do token (revisão Codex)", () => {
+  it("só envia o token a hosts da lista permitida", () => {
+    const ok = (h: string, hosts: string[]) => () => new CanonicalHttpAdapter({ baseUrl: `https://${h}/api`, token: "t", allowedHosts: hosts });
+    expect(ok("api.k3gsolutions.com.br", ["api.k3gsolutions.com.br"])).not.toThrow();
+    expect(ok("evil.example.com", ["api.k3gsolutions.com.br"])).toThrow(/lista permitida/);
+    expect(ok("api.k3gsolutions.com.br.evil.com", ["api.k3gsolutions.com.br"])).toThrow(/lista permitida/); // sufixo enganoso
+    expect(ok("169.254.169.254", ["api.k3gsolutions.com.br"])).toThrow(/lista permitida/);               // metadata de nuvem
   });
 });

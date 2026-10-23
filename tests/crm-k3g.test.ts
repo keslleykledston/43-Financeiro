@@ -81,8 +81,13 @@ describe("factory", () => {
   const env = (o: Record<string, string>) => o as unknown as NodeJS.ProcessEnv;
   it("exige configuração; escolhe K3G por padrão e canônico por CRM_PROVIDER", () => {
     expect(() => getCrmAdapter(env({}))).toThrow(/não configurado/);
-    expect(getCrmAdapter(env({ CRM_BASE_URL: "https://x.test/api", CRM_API_TOKEN: "t" }))).toBeInstanceOf(K3gCrmAdapter);
-    expect(getCrmAdapter(env({ CRM_BASE_URL: "https://x.test/api", CRM_API_TOKEN: "t", CRM_PROVIDER: "canonical" }))).not.toBeInstanceOf(K3gCrmAdapter);
-    expect(() => getCrmAdapter(env({ CRM_BASE_URL: "http://x.test/api", CRM_API_TOKEN: "t" }))).toThrow(/HTTPS/); // http só com opt-in explícito
+    const base = { CRM_BASE_URL: "https://api.k3gsolutions.com.br/api", CRM_API_TOKEN: "t" };
+    expect(getCrmAdapter(env(base))).toBeInstanceOf(K3gCrmAdapter);
+    expect(getCrmAdapter(env({ ...base, CRM_PROVIDER: "canonical" }))).not.toBeInstanceOf(K3gCrmAdapter);
+    // destino do token: por padrão só o host do K3G CRM; outro host exige lista explícita
+    expect(() => getCrmAdapter(env({ ...base, CRM_BASE_URL: "https://outro.example.com/api" }))).toThrow(/lista permitida/);
+    expect(getCrmAdapter(env({ ...base, CRM_BASE_URL: "https://outro.example.com/api", CRM_ALLOWED_HOSTS: "outro.example.com" }))).toBeInstanceOf(K3gCrmAdapter);
+    expect(() => getCrmAdapter(env({ CRM_BASE_URL: "http://api.k3gsolutions.com.br/api", CRM_API_TOKEN: "t", CRM_ALLOW_INSECURE_HTTP: "true" }))).toThrow(/HTTPS/); // nem com a flag, domínio real vai por HTTP
+    expect(() => getCrmAdapter(env({ CRM_BASE_URL: "http://x.test/api", CRM_API_TOKEN: "t" }))).toThrow(/lista permitida|HTTPS/); // http só com opt-in explícito
   });
 });

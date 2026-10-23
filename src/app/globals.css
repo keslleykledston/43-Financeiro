@@ -208,6 +208,7 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
   }
+  input[type="checkbox"], input[type="radio"] { accent-color: var(--color-primary); }
   input, select, textarea { background-color: var(--color-card); color: var(--color-foreground); }
   input::placeholder, textarea::placeholder { color: var(--color-muted-foreground); }
   h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: -0.01em; }

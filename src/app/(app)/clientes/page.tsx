@@ -11,7 +11,7 @@ export default async function Clientes({ searchParams }: { searchParams: Promise
   const [sp, ctx] = await Promise.all([searchParams, requireContext()]);
   const role = ctx.current ? await activeRole(db, ctx.user.id, ctx.current.id) : null;
   if (!ctx.current || !role || !can(role, "crm.read")) {
-    return <section className="rounded-lg bg-card p-8 text-center"><h1 className="text-xl font-semibold">Clientes e fornecedores</h1><p className="mt-2 text-muted-foreground">Seu papel não tem acesso a este cadastro.</p></section>;
+    return <section className="rounded-lg border bg-card p-8 text-center"><h1 className="text-xl font-semibold">Clientes e fornecedores</h1><p className="mt-2 text-muted-foreground">Seu papel não tem acesso a este cadastro.</p></section>;
   }
   const kind = sp.tipo === "cliente" || sp.tipo === "fornecedor" ? (sp.tipo as Kind) : undefined;
   const archived = sp.arq === "1";
@@ -35,12 +35,12 @@ export default async function Clientes({ searchParams }: { searchParams: Promise
         </div>
       </div>
       {mode === "crm" && <p role="note" className="rounded-md bg-info-soft p-3 text-sm text-info-foreground">Os <strong>clientes</strong> desta empresa vêm do CRM (somente leitura). Fornecedores continuam locais. <Link href="/integracoes" className="underline">Integrações</Link></p>}
-      <form className="flex gap-2" role="search">
+      <form className="flex flex-wrap gap-2" role="search">
         {kind && <input type="hidden" name="tipo" value={kind} />}{archived && <input type="hidden" name="arq" value="1" />}
         <label htmlFor="situacao" className="sr-only">Situação</label>
         <select id="situacao" name="situacao" defaultValue={situacao ?? ""} className="h-10 rounded-md border border-input bg-card px-2 text-sm"><option value="">Todas as situações</option><option value="ativo">Ativos</option><option value="suspenso">Suspensos</option><option value="cancelado">Cancelados</option></select>
         <label htmlFor="q" className="sr-only">Buscar</label>
-        <input id="q" name="q" defaultValue={sp.q} placeholder="Buscar por nome ou documento" className="flex-1 rounded-md border border-input bg-card px-3 py-2.5" />
+        <input id="q" name="q" defaultValue={sp.q} placeholder="Buscar por nome ou documento" className="min-w-[12rem] flex-1 rounded-md border border-input bg-card px-3 py-2.5" />
         <button className="rounded-md bg-card px-4 py-2.5 ring-1 ring-input">Buscar</button>
       </form>
       <div className="flex flex-wrap items-center gap-2">
@@ -48,12 +48,12 @@ export default async function Clientes({ searchParams }: { searchParams: Promise
         <Link href={`/clientes${qs({ arq: archived ? undefined : "1", page: undefined })}`} className="ml-auto text-sm text-primary">{archived ? "Ver ativos" : "Ver arquivados"}</Link>
       </div>
       {r.items.length === 0 ? (
-        <section className="rounded-lg bg-card p-8 text-center">
+        <section className="rounded-lg border bg-card p-8 text-center">
           <p className="font-medium">{sp.q ? "Nada encontrado para essa busca." : archived ? "Nenhum cadastro arquivado." : "Nenhum cadastro ainda."}</p>
           {!sp.q && !archived && can(role, "crm.write") && <p className="mt-1 text-sm text-muted-foreground">Cadastre um cliente ou importe uma planilha CSV para começar.</p>}
         </section>
       ) : (
-        <ul className="divide-y divide-border rounded-lg bg-card">
+        <ul className="divide-y divide-border rounded-lg border bg-card">
           {r.items.map((p) => (
             <li key={p.id}><Link href={`/clientes/${p.id}`} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-accent">
               <div className="min-w-0"><p className="truncate font-medium">{p.legalName}</p><p className="truncate text-sm text-muted-foreground">{p.docType.toUpperCase()} {p.documentFormatted}</p></div>

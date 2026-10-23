@@ -298,6 +298,36 @@ describe.skipIf(!enabled)("CRM sync: prévia, aplicação idempotente, conflitos
     expect(await applyNow(db, m, dirA, A, ON)).toMatchObject({ archive: 1 });
   });
 
+  it("P1: resolver um conflito NÃO toca nos conflitos de outra empresa (UPDATE com escopo de tenant)", async () => {
+    for (const [dir, co] of [[dirA, A], [dirB, B]] as const) {
+      await setCustomerMode(db, dir, co, "local");
+      await createParty(db, dir, co, { kind: "cliente", legalName: `Local ${co === A ? "A" : "B"}`, document: CNPJ1 });
+      await setCustomerMode(db, dir, co, "crm");
+      await applyNow(db, new MockCrmAdapter([item({ legalName: `CRM ${co === A ? "A" : "B"}` })]), dir, co, ON);
+    }
+    const [cA] = await listConflicts(db, dirA, A); const [cB] = await listConflicts(db, dirB, B);
+    expect(cA && cB).toBeTruthy();
+    await resolveConflict(db, dirA, A, cA.id, "ignore");
+    const rows = await db.select().from(schema.integrationConflicts);
+    const a = rows.find((r) => r.id === cA.id)!, b = rows.find((r) => r.id === cB.id)!;
+    expect(a.status).toBe("ignored"); expect(a.payload).toEqual({});
+    expect(b.status).toBe("open");                                  // intacto
+    expect(JSON.stringify(b.payload)).toContain("CRM B");           // payload preservado
+    expect(b.resolvedBy).toBeNull();
+    expect(await listConflicts(db, dirB, B)).toHaveLength(1);
+  });
+
+  it("P2: nome e documento dos conflitos só aparecem para quem pode resolver (diretoria)", async () => {
+    await setCustomerMode(db, dirA, A, "local");
+    await createParty(db, dirA, A, { kind: "cliente", legalName: "Local", document: CNPJ1 });
+    await setCustomerMode(db, dirA, A, "crm");
+    await applyNow(db, new MockCrmAdapter([item()]), dirA, A, ON);
+    await expect(listConflicts(db, gerA, A)).rejects.toBeInstanceOf(Forbidden);
+    await expect(listConflicts(db, techA, A)).rejects.toBeInstanceOf(Forbidden);
+    await expect(listConflicts(db, contA, A)).rejects.toBeInstanceOf(Forbidden);
+    expect(await listConflicts(db, dirA, A)).toHaveLength(1);
+  });
+
   it("auditoria e execuções guardam só contagens (sem PII)", async () => {
     await applyNow(db, new MockCrmAdapter([item({ legalName: "Segredo Silva", contacts: [{ name: "Maria", email: "maria@x.com" }] })]), dirA, A, ON);
     const logs = JSON.stringify(await db.select().from(schema.auditLog).where(sql`action = 'crm.sync.applied'`));

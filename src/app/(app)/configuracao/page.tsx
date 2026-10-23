@@ -11,7 +11,7 @@ export default async function Ajustes() {
   const ctx = await requireContext();
   const role = ctx.current ? await activeRole(db, ctx.user.id, ctx.current.id) : null;
   if (!ctx.current || !role || !can(role, "members.read")) {
-    return <section className="rounded-lg bg-card p-8 text-center"><h1 className="text-xl font-semibold">Ajustes</h1><p className="mt-2 text-muted-foreground">Seu papel não tem acesso à gestão de usuários desta empresa.</p></section>;
+    return <section className="rounded-lg border bg-card p-8 text-center"><h1 className="text-xl font-semibold">Ajustes</h1><p className="mt-2 text-muted-foreground">Seu papel não tem acesso à gestão de usuários desta empresa.</p></section>;
   }
   const members = await listMembers(db, ctx.user.id, ctx.current.id);
   const grantable = ALL.filter((r) => canGrant(role, r));
@@ -19,9 +19,9 @@ export default async function Ajustes() {
     <div className="space-y-5">
       <div><h1 className="text-2xl font-semibold">Usuários e acessos</h1><p className="text-sm text-muted-foreground">{ctx.current.name} · seu papel: {ROLE_LABEL[role]}</p></div>
       {can(role, "members.invite") && (
-        <section className="rounded-lg bg-card p-5"><h2 className="mb-3 font-semibold">Convidar usuário</h2><InviteForm roles={grantable} /></section>
+        <section className="rounded-lg border bg-card p-5"><h2 className="mb-3 font-semibold">Convidar usuário</h2><InviteForm roles={grantable} /></section>
       )}
-      <section className="rounded-lg bg-card p-5">
+      <section className="rounded-lg border bg-card p-5">
         <h2 className="mb-3 font-semibold">Membros ({members.length})</h2>
         <ul className="divide-y divide-border">
           {members.map((m) => (

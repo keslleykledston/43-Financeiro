@@ -5,7 +5,7 @@ import type { DB } from "@/lib/db";
 import { auditLog, companies, customerContacts, customers, vendorContacts, vendors } from "@/lib/db/schema";
 import { parseCsv, toCsv } from "@/lib/csv";
 import { formatDocument, parseDocument } from "@/lib/validators/document";
-import { Invalid, requirePerm } from "@/modules/identity/service";
+import { Forbidden, Invalid, requirePerm } from "@/modules/identity/service";
 
 export type Kind = "cliente" | "fornecedor";
 export type Status = "ativo" | "suspenso" | "cancelado";
@@ -144,6 +144,13 @@ export async function updateParty(db: DB, actorId: string, companyId: string, id
     return await db.transaction(async (tx) => {
       await lockModeShared(tx as unknown as DB, companyId);
       await assertNotCrmOwned(tx as unknown as DB, main, companyId, id);
+      if (v.status === "ativo") { // voltar a ser faturável muda a cobrança futura: exige gerente ou diretoria
+        const [cur] = await tx.select({ st: main.status }).from(main).where(and(eq(main.id, id), eq(main.companyId, companyId)));
+        if (cur && cur.st !== "ativo") {
+          try { await requirePerm(tx as unknown as DB, actorId, companyId, "crm.reactivate"); }
+          catch (e) { if (e instanceof Forbidden) throw new Forbidden("Reativar um cliente (voltar a faturar) exige gerente ou diretoria"); throw e; }
+        }
+      }
       const [p] = await tx.update(main)
         .set({ legalName: v.legalName, tradeName: v.tradeName ?? null, docType: v.docType, document: v.document, ...(v.status ? { status: v.status } : {}), updatedAt: new Date() })
         .where(and(eq(main.id, id), eq(main.companyId, companyId))).returning();

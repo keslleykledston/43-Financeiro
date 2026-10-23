@@ -2,7 +2,8 @@ import { CrmError, MAX_BODY_BYTES, MAX_PAGE_ITEMS, type CrmAdapter, type CrmPage
 
 export type HttpOpts = {
   baseUrl: string; token: string; timeoutMs?: number; maxRetries?: number;
-  allowInsecureHttp?: boolean; // só sandbox/dev
+  allowInsecureHttp?: boolean; // só sandbox/dev, e só para host interno SEM ponto (ex.: sandbox-crm, localhost)
+  allowedHosts?: string[];     // quando informado, o host do CRM precisa estar na lista (evita enviar o token a destino errado)
   fetchImpl?: typeof fetch; sleep?: (ms: number) => Promise<void>;
 };
 
@@ -11,7 +12,11 @@ export class CrmHttp {
   private f: typeof fetch; private sleep: (ms: number) => Promise<void>;
   constructor(private o: HttpOpts) {
     const u = new URL(o.baseUrl);
-    if (u.protocol !== "https:" && !o.allowInsecureHttp) throw new CrmError("CRM exige HTTPS");
+    if (o.allowedHosts && !o.allowedHosts.includes(u.hostname)) throw new CrmError("Host do CRM não está na lista permitida (CRM_ALLOWED_HOSTS)");
+    if (u.protocol !== "https:") {
+      const internal = !u.hostname.includes(".") || u.hostname === "localhost"; // domínio real (com ponto) NUNCA vai por HTTP
+      if (!o.allowInsecureHttp || !internal) throw new CrmError("CRM exige HTTPS");
+    }
     if (!o.token) throw new CrmError("Token do CRM não configurado");
     this.f = o.fetchImpl ?? fetch;
     this.sleep = o.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));

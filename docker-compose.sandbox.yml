@@ -25,6 +25,7 @@ x-env: &env
   CRM_BASE_URL: http://sandbox-crm:4000
   CRM_API_TOKEN: sandbox-crm-token
   CRM_ALLOW_INSECURE_HTTP: "true"
+  CRM_ALLOWED_HOSTS: sandbox-crm
 
 services:
   sandbox-db:

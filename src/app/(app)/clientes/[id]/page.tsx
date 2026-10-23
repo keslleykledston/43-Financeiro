@@ -18,7 +18,7 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
   const [{ id }, sp, ctx] = await Promise.all([params, searchParams, requireContext()]);
   if (!ctx.current || !/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const role = await activeRole(db, ctx.user.id, ctx.current.id);
-  if (!role || !can(role, "crm.read")) return <p className="rounded-lg bg-card p-6">Seu papel não tem acesso a clientes e fornecedores.</p>;
+  if (!role || !can(role, "crm.read")) return <p className="rounded-lg border bg-card p-6">Seu papel não tem acesso a clientes e fornecedores.</p>;
   const p = await getParty(db, ctx.user.id, ctx.current.id, id); // filtrado por empresa: ID de outra empresa => null
   if (!p) notFound();
   const write = can(role, "crm.write");
@@ -37,10 +37,10 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
       {crmOwned && <p role="note" className="rounded-md bg-info-soft p-3 text-sm text-info-foreground">Cadastro sincronizado do CRM (somente leitura). Para alterar dados ou arquivar, edite no CRM. Contatos adicionais locais são permitidos.</p>}
       {p.source === "crm" && !crmMode && <p role="note" className="rounded-md bg-warning-soft p-3 text-sm text-warning-foreground">Este cadastro veio do CRM, mas a empresa está no modo Local, então ele é editável. Se voltar ao modo CRM, os dados do CRM sobrescrevem suas edições.</p>}
       {write && !p.archivedAt && !crmOwned && (
-        <section className="rounded-lg bg-card p-5"><h2 className="mb-3 font-semibold">Dados</h2>
+        <section className="rounded-lg border bg-card p-5"><h2 className="mb-3 font-semibold">Dados</h2>
           <PartyForm action={updateAction.bind(null, id)} defaults={{ kind: p.kind, status: p.status, legalName: p.legalName, tradeName: p.tradeName, document: p.documentFormatted }} submit="Salvar" lockKind /></section>
       )}
-      <section className="rounded-lg bg-card p-5">
+      <section className="rounded-lg border bg-card p-5">
         <h2 className="mb-3 font-semibold">Contatos ({p.contacts.length})</h2>
         {p.contacts.length === 0 && <p className="text-sm text-muted-foreground">Nenhum contato. Adicione um contato financeiro para receber cobranças.</p>}
         <ul className="divide-y divide-border">
@@ -53,7 +53,7 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
         </ul>
         {write && !p.archivedAt && <div className="mt-4 border-t border-border pt-4"><ContactForm partyId={id} /></div>}
       </section>
-      <section className="rounded-lg bg-card p-5">
+      <section className="rounded-lg border bg-card p-5">
         <h2 className="mb-3 font-semibold">Histórico</h2>
         <ul className="space-y-1 text-sm text-muted-foreground">
           {log.map((h, i) => <li key={i}>{h.at.toLocaleString("pt-BR", { timeZone: "America/Manaus" })} — {LABEL[h.action] ?? h.action}</li>)}

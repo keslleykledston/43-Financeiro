@@ -16,7 +16,7 @@ export function SyncPanel() {
       </form>
       {pv?.error && <p role="alert" className="text-sm text-negative-foreground">{pv.error}</p>}
       {st && !done?.stats && (
-        <section aria-label="Prévia da sincronização" className="space-y-3 rounded-lg bg-card p-5">
+        <section aria-label="Prévia da sincronização" className="space-y-3 rounded-lg border bg-card p-5">
           <p role="status" className="text-sm">
             <strong>{st.create}</strong> novos · <strong>{st.update}</strong> alterados · <strong>{st.archive}</strong> a arquivar · <strong>{st.restore}</strong> a restaurar · <strong>{st.conflict}</strong> conflitos · {st.unchanged} sem mudança · {st.invalid} inválidos · {st.skipped} ignorados
           </p>

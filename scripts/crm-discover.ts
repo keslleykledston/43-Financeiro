@@ -38,8 +38,7 @@ const paths = (process.argv[2] ? process.argv.slice(2) : ["crm/companies", "crm/
       if (!ct.includes("json")) { console.log(`(corpo não-JSON, ${text.length} bytes)`); continue; }
       const body = JSON.parse(text);
       if (r.status >= 400) {
-        const m = typeof body?.message === "string" ? body.message : typeof body?.error === "string" ? body.error : "";
-        console.log(`erro: ${m.slice(0, 160)}${r.status === 403 ? "  [dica: o token pode ter IP allowlist — libere o IP deste servidor no CRM]" : ""}`);
+        console.log(`erro HTTP ${r.status} (texto do provedor omitido)${r.status === 403 ? "  [dica: o token pode ter IP allowlist — libere o IP deste servidor no CRM]" : ""}`);
         continue;
       }
       console.log(JSON.stringify(shape(body), null, 2));

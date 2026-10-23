@@ -225,7 +225,7 @@ export async function applySync(db: DB, adapter: CrmAdapter, actorId: string, co
 
 // ---------- conflitos ----------
 export async function listConflicts(db: DB, actorId: string, companyId: string) {
-  await requirePerm(db, actorId, companyId, "crm.read");
+  await requireSync(db, actorId, companyId); // o payload tem nome e documento: só quem pode resolver (diretoria) enxerga
   return db.select().from(integrationConflicts).where(and(eq(integrationConflicts.companyId, companyId), eq(integrationConflicts.status, "open"))).orderBy(desc(integrationConflicts.createdAt));
 }
 
@@ -251,7 +251,10 @@ export async function resolveConflict(db: DB, actorId: string, companyId: string
       if (local.externalId) throw new Invalid("O cadastro local já está vinculado a outro registro do CRM");
       await t.update(customers).set({ source: "crm", externalId: c.externalId, externalSyncedAt: new Date(), updatedAt: new Date() }).where(eq(customers.id, local.id));
     }
-    await t.update(integrationConflicts).set({ status: action === "link" ? "linked" : "ignored", payload: {}, resolvedBy: actorId, resolvedAt: new Date(), updatedAt: new Date() }) // payload (nome/documento) apagado ao resolver.where(eq(integrationConflicts.id, c.id));
+    // payload (nome/documento) é apagado ao resolver; o filtro por id E empresa impede tocar em conflitos de outro tenant
+    await t.update(integrationConflicts)
+      .set({ status: action === "link" ? "linked" : "ignored", payload: {}, resolvedBy: actorId, resolvedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(integrationConflicts.id, c.id), eq(integrationConflicts.companyId, companyId)));
     await t.insert(auditLog).values({ companyId, actorId, action: action === "link" ? "crm.conflict.linked" : "crm.conflict.ignored", detail: { conflictId } });
   });
 }
