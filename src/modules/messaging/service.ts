@@ -179,15 +179,17 @@ export async function processQueue(db: DB, actorId: string, companyId: string, t
       .innerJoin(customers, and(eq(customers.id, messageQueue.customerId), eq(customers.companyId, messageQueue.companyId)))
       .leftJoin(messageTemplateVersions, and(eq(messageTemplateVersions.id, messageQueue.templateVersionId), eq(messageTemplateVersions.companyId, messageQueue.companyId)))
       .where(and(eq(messageQueue.companyId, companyId), eq(messageQueue.status, "pendente"), lte(messageQueue.scheduledFor, today)))
-      .orderBy(asc(messageQueue.scheduledFor)).limit(500);
+      .orderBy(asc(messageQueue.scheduledFor)).limit(500)
+      .for("update", { of: messageQueue }); // reabrir lote (outro lock) cancela estas linhas: espera, e o update abaixo só vale se ainda estiver pendente
     const now = new Date(); let processed = 0;
     for (const r of due) {
       const vars: Vars = { cliente: r.customer, empresa: co.name, valor: formatBRL(centsFromNumeric(r.c.amount)), vencimento: br(r.c.dueDate), competencia: `${r.c.competenceMonth.slice(5, 7)}/${r.c.competenceMonth.slice(0, 4)}`, descricao: r.c.description, emissao: br(r.c.issueDate) };
       const internal = r.q.channel === "interno";
       const subject = internal ? "Revisão humana D+15" : render(r.subject ?? "", vars);
       const body = internal ? `Cobrança de ${vars.cliente} (${vars.valor}, vencida em ${vars.vencimento}) está há 15 dias em atraso. Decidir o próximo passo manualmente.` : render(r.body ?? "", vars);
-      await x.update(messageQueue).set({ status: "simulado", renderedSubject: subject, renderedBody: body, processedAt: now, processedBy: actorId, updatedAt: now }).where(eq(messageQueue.id, r.q.id));
-      processed++;
+      const won = await x.update(messageQueue).set({ status: "simulado", renderedSubject: subject, renderedBody: body, processedAt: now, processedBy: actorId, updatedAt: now })
+        .where(and(eq(messageQueue.id, r.q.id), eq(messageQueue.status, "pendente"))).returning({ id: messageQueue.id });
+      processed += won.length;
     }
     await audit(x, companyId, actorId, "messages.queue.processed_simulated", { processed, cancelled, upTo: today });
     return { processed, cancelled };

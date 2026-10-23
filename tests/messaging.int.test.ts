@@ -219,6 +219,21 @@ describe.skipIf(!enabled)("E06 modelos e fila simulada (DB de teste)", () => {
     for (const bad of ["Cliente Um", "Cliente Dois", "fin1@exemplo.com", "2.500", "Olá", "9299999"]) expect(txt).not.toContain(bad);
   });
 
+  it("corrida processar × reabrir: item cancelado no meio do processamento não vira simulado", async () => {
+    await approvedBatch(); await ensureDefaultTemplates(db, dirA, A);
+    await scheduleQueue(db, asstA, A, D);
+    let release!: () => void; const hold = new Promise<void>((r) => { release = r; });
+    let locked!: () => void; const ready = new Promise<void>((r) => { locked = r; });
+    // "reabrir lote" ainda não confirmado: cancelou os itens abertos e segura a transação
+    const reopening = conn.begin(async (q) => { await q`update message_queue set status = 'cancelado', blocked_reason = null where status in ('pendente', 'bloqueado')`; locked(); await hold; });
+    await ready;
+    const processing = processQueue(db, asstA, A, "2026-10-14");
+    await new Promise((r) => setTimeout(r, 300)); // processQueue chega ao bloqueio e espera
+    release(); await reopening;
+    expect(await processing).toMatchObject({ processed: 0 });
+    expect(await n("message_queue where status = 'simulado'")).toBe(0);
+  });
+
   it("concorrência: duas programações simultâneas não duplicam a fila", async () => {
     await approvedBatch(); await ensureDefaultTemplates(db, dirA, A);
     await Promise.all([scheduleQueue(db, asstA, A, D), scheduleQueue(db, gerA, A, D), scheduleQueue(db, dirA, A, D)]);

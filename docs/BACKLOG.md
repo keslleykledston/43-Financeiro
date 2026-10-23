@@ -31,7 +31,7 @@ Aceite: testes tabelados para dias 1, 5, 12, 13, 16, 17, 22, 23, 30, 31, mês/an
 Saída: serviço idempotente de gerar prévias, lista por empresa, filtros por lote, resumo total, sinalização de exceções, aprovação humana auditável e sem operações externas.
 Aceite: reexecutar lote não duplica cobrança; status aprovado só por papel autorizado; alterações pós-aprovação exigem nova validação; help.
 
-## E06 — E-mails editáveis (modo simulação) [ ]
+## E06 — E-mails editáveis (modo simulação) [x]
 Saída: editor de templates por empresa/tipo, placeholders restritos, prévia com dados fictícios, versão/ativação, fila de envios DEMO e histórico; templates de faturamento, D-3, D0, D+3, D+7 e revisão D+15.
 Aceite: preview correto, sanitização HTML/injeção, sem e-mail externo real, filas sem duplicatas, aviso "Simulação".
 
@@ -50,6 +50,7 @@ Aceite: contrato OpenAPI e testes auth/no cross-tenant/replay/idempotência; san
 ## E10 — Emissão e envio REAL (GATE DE SEGURANÇA) [ ]
 Pré-requisitos: disponibilidade documentada da API por CNPJ, homologação Cora e e-NF, calendário fiscal aprovado, credenciais guardadas fora Git, aprovação explícita de habilitação e limites de envio. Implementar um provedor por vez; flag desligada inicialmente.
 Aceite: emissão teste homologação, confirmação/reconsulta remota, comprovantes e falha segura, reconciliação, e-mails canários internos, kill switch; NUNCA executar em produção por conveniência.
+Pré-requisito (Codex E06, P2): antes de qualquer envio real, a FK `message_queue.charge_id` deve virar RESTRICT e `cancelBatch`/`generateBatch` devem marcar cobranças como `cancelada` em vez de apagar, preservando o histórico de envios.
 
 ## E11 — Contas a pagar [ ]
 Saída: fornecedores, vencimentos, anexos, aprovações, exportação e controle da execução manual no Cora.
