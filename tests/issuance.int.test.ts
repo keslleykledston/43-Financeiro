@@ -277,6 +277,46 @@ describe.skipIf(!enabled)("E10 motor de emissão (simulado): reservar → chamar
     expect((await getBatch(db, asstA, A, batchId))!.batch.status).toBe("aprovado");
   });
 
+  it("last_error nunca guarda texto livre do provedor (possível dado do cliente); só códigos curtos", async () => {
+    await approvedBatch(); await on();
+    const [c1, c2] = [await chargeOf(cli1), await chargeOf(cli2)];
+    const a = await requestIssuance(db, gerA, A, c1.id, "boleto"), b = await requestIssuance(db, gerA, A, c2.id, "boleto");
+    const base = createMockProviders();
+    const nasty: Providers = { ...base, boleto: { ...base.boleto, issue: async (i) => { throw new RangeError(i.customerName === "Cliente Um" ? "Cliente Um 11.222.333/0001-81 inválido" : "documento_invalido"); } } };
+    await processIssuance(db, gerA, A, NOW, nasty);
+    expect((await row(a)).lastError).toBe("validacao_provedor");
+    expect((await row(b)).lastError).toBe("documento_invalido");
+    expect(JSON.stringify(await db.select().from(schema.issuanceRequests))).not.toContain("11.222.333");
+  });
+
+  it("injeção de provedor só existe nos testes: no runtime normal (sem VITEST) é recusada", async () => {
+    await approvedBatch(); await on();
+    await requestIssuance(db, gerA, A, (await chargeOf(cli1)).id, "boleto");
+    const env = process.env as Record<string, string | undefined>; const old = env.VITEST;
+    delete env.VITEST;
+    try { await expect(processIssuance(db, gerA, A, NOW, spy().p)).rejects.toThrow(/proibida fora dos testes/); } finally { env.VITEST = old; }
+    expect(await n("issuance_requests where status = 'pendente'")).toBe(1);
+  });
+
+  it("reabrir × reservar ao mesmo tempo: a reabertura nunca passa por cima de uma reserva em curso", async () => {
+    const batchId = await approvedBatch(); await on();
+    const id = await requestIssuance(db, gerA, A, (await chargeOf(cli1)).id, "boleto");
+    let release!: () => void; const hold = new Promise<void>((r) => { release = r; });
+    let locked!: () => void; const ready = new Promise<void>((r) => { locked = r; });
+    // rodada do motor no meio da reserva: lock do motor + solicitação já em "enviando", ainda sem confirmar
+    const reserving = conn.begin(async (q) => {
+      await q`select pg_advisory_xact_lock(hashtext(${"issuance:" + A}))`;
+      await q`update issuance_requests set status = 'enviando', claimed_at = now(), attempts = 1 where id = ${id}`;
+      locked(); await hold;
+    });
+    await ready;
+    const reopening = reopenBatch(db, gerA, A, batchId, "reabrir durante a reserva");
+    await new Promise((r) => setTimeout(r, 300));
+    release(); await reserving;
+    await expect(reopening).rejects.toThrow(/emissões em andamento ou concluídas/);
+    expect((await getBatch(db, asstA, A, batchId))!.batch.status).toBe("aprovado");
+  });
+
   it("concorrência: duas rodadas ao mesmo tempo nunca emitem a mesma cobrança duas vezes", async () => {
     await approvedBatch(); await on();
     await requestIssuance(db, gerA, A, (await chargeOf(cli1)).id, "boleto"); await requestIssuance(db, gerA, A, (await chargeOf(cli2)).id, "boleto");

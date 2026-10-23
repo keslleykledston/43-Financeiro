@@ -35,3 +35,6 @@ O checklist em *Integrações → Portão da emissão real* só confere se os ar
 - `env_file` mínimo para o `scheduler` (sem credenciais que ele não usa). *(Codex E09)*
 - Teste de contrato contra o ambiente de homologação de cada provedor; teste de timeout após emissão; evento duplicado; pagamento parcial.
 - CHECK `mode` ampliado **somente** nessa migração, com backup e rollback documentados em `docs/OPERACAO.md`.
+- **O provedor DEVE honrar a chave de idempotência** (`Idempotency-Key` ou equivalente): se uma rodada lenta terminar depois de outra já ter reconsultado e reemitido, a mesma chave garante um único documento. Validar na homologação (enviar a mesma chave duas vezes e conferir que há um só boleto/nota).
+- O timeout da chamada ao provedor nos adaptadores deve ser **menor** que o tempo de recuperação de "enviando" travado (`STUCK_MS`, 10 min). Usar `AbortSignal` com ~30 s.
+- A injeção de provedores só existe sob o executor de testes (`resolveProviders` recusa fora de `VITEST`); adaptadores reais entram pelo registro, nunca por parâmetro.

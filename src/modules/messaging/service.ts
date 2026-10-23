@@ -7,7 +7,7 @@ import { Invalid, requirePerm } from "@/modules/identity/service";
 import { CHANNELS, DEFAULTS, KINDS, ladder, render, toEmailHtml, validateTemplate, SAMPLE_VARS, type Channel, type Kind, type QueueKind, type Vars } from "./templates";
 import { DEFAULT_SETTINGS, WINDOW_REASON, localParts, parseSettings, windowState, type MessagingSettings } from "./window";
 import { addDays } from "./dates";
-import { assertSimulated, getProviders } from "@/modules/providers/registry";
+import { resolveProviders } from "@/modules/providers/registry";
 import type { Providers, SendResult } from "@/modules/providers/types";
 
 /**
@@ -211,7 +211,7 @@ async function runQueue(x: DB, companyId: string, actorId: string | null, now: D
     const w = windowState(now, st, new Map(hol.map((h) => [h.day, h.name])));
     if (!w.open) return { ...out, waiting: WINDOW_REASON[w.reason] };
   }
-  const providers = assertSimulated(o.providers ?? getProviders());
+  const providers = resolveProviders(o.providers);
   const today = localParts(now).date;
   out.cancelled = await cancelOrphans(x, companyId);
   const sentLastHour = Number((await x.execute(sql`select count(*)::int n from message_queue where company_id = ${companyId} and status = 'simulado' and channel <> 'interno' and processed_at > ${new Date(now.getTime() - 3600_000).toISOString()}::timestamptz`))[0].n);

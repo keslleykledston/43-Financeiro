@@ -29,6 +29,12 @@ export function assertSimulated(p: Providers, env: Record<string, string | undef
   return p;
 }
 
+/** Ponto único de resolução dos provedores. Injeção só existe sob o executor de testes (VITEST): fora dele, o runtime usa apenas os provedores do registro. */
+export function resolveProviders(injected?: Providers, env: Record<string, string | undefined> = process.env): Providers {
+  if (injected && env.VITEST !== "true") throw new Error("Injeção de provedor é proibida fora dos testes");
+  return assertSimulated(injected ?? getProviders(env), env);
+}
+
 export const PROVIDER_CATALOG = [
   { key: "cora-boleto", label: "Cora — boletos e Pix", note: "Aguardando credenciais (certificado mTLS + client-id)", flag: "CORA_LIVE_ENABLED" },
   { key: "cora-extrato", label: "Cora — extrato e saldo", note: "Aguardando credenciais", flag: "CORA_LIVE_ENABLED" },

@@ -4,7 +4,7 @@ import { auditLog, billingBatches, issuanceRequests, issuanceSettings } from "@/
 import { centsFromNumeric } from "@/lib/money";
 import { Invalid, requirePerm } from "@/modules/identity/service";
 import { localParts } from "@/modules/messaging/window";
-import { assertSimulated, getProviders } from "@/modules/providers/registry";
+import { resolveProviders } from "@/modules/providers/registry";
 import type { Providers } from "@/modules/providers/types";
 
 /**
@@ -24,6 +24,8 @@ export const KIND_LABEL: Record<Kind, string> = { boleto: "Boleto", nfse: "NFS-e
 export const STATUS_LABEL: Record<string, string> = { pendente: "Aguardando", enviando: "Enviando", processando: "Processando no provedor", emitido: "Emitido (simulado)", desconhecido: "Resultado desconhecido: será reconsultado", falhou: "Falhou", cancelado: "Cancelado" };
 export const MAX_ATTEMPTS = 5;
 const STUCK_MS = 10 * 60_000, UNKNOWN_RETRY_MS = 2 * 60_000;
+/** Só códigos curtos em minúsculas vão para o banco/tela; texto livre do provedor (que poderia conter dados do cliente) vira um código genérico. */
+const safeCode = (m: string) => (/^[a-z0-9_]{1,40}$/.test(m) ? m : "validacao_provedor");
 const backoff = (attempts: number) => Math.min(60, 2 ** attempts) * 60_000; // 2, 4, 8… até 60 min
 
 /** Provedor não respondeu / conexão caiu depois do envio: a emissão PODE ter acontecido. */
@@ -113,7 +115,7 @@ export type RunResult = { claimed: number; issued: number; processing: number; u
 export async function processIssuance(db: DB, actorId: string, companyId: string, now = new Date(), providers?: Providers): Promise<RunResult> {
   await requirePerm(db, actorId, companyId, "issuance.run");
   const out: RunResult = { claimed: 0, issued: 0, processing: 0, unknown: 0, retry: 0, failed: 0, skipped: 0, recovered: 0 };
-  const prov = assertSimulated(providers ?? getProviders()); // falha FECHADA antes de reservar qualquer coisa
+  const prov = resolveProviders(providers); // falha FECHADA antes de reservar qualquer coisa
 
   // 1) RESERVAR (transação curta)
   const claimed = await db.transaction(async (tx) => {
@@ -176,7 +178,7 @@ export async function processIssuance(db: DB, actorId: string, companyId: string
     } catch (e) {
       const name = (e as Error).name;
       if (e instanceof RangeError) { // validação do provedor: não adianta repetir
-        await record({ status: "falhou", lastError: String((e as Error).message).slice(0, 60) }, ["enviando"]); out.failed++;
+        await record({ status: "falhou", lastError: safeCode((e as Error).message) }, ["enviando"]); out.failed++;
       } else if (name === "IssuanceRetryable") { // nada foi criado: repetir com backoff
         if (r.attempts >= MAX_ATTEMPTS) { await record({ status: "falhou", lastError: "tentativas_esgotadas" }, ["enviando"]); out.failed++; }
         else { await record({ status: "pendente", nextAttemptAt: new Date(now.getTime() + backoff(r.attempts)), lastError: "retryable" }, ["enviando"]); out.retry++; }
