@@ -1,4 +1,4 @@
-import { AlertTriangle, CalendarClock, ChevronLeft, ChevronRight, FileText, Receipt } from "lucide-react";
+import { AlertTriangle, CalendarClock, ClipboardCheck, ChevronLeft, ChevronRight, FileText, Receipt } from "lucide-react";
 import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
@@ -55,7 +55,7 @@ export default async function Faturamento({ searchParams }: { searchParams: Prom
   return (
     <div className="space-y-5">
       <PageHeader title="Faturamento — calendário" description={`${ctx.current.name} · previsão de quando emitir boletos e notas e quando vencem. Nada é emitido aqui.`}
-        actions={<AppLink href="/contratos" className={buttonClass("outline")}><FileText className="size-4" aria-hidden /> Contratos</AppLink>} />
+        actions={<><AppLink href="/faturamento/lotes" className={buttonClass("primary")}><ClipboardCheck className="size-4" aria-hidden /> Lotes</AppLink><AppLink href="/contratos" className={buttonClass("outline")}><FileText className="size-4" aria-hidden /> Contratos</AppLink></>} />
 
       <nav aria-label="Mês" className="flex items-center justify-between gap-2">
         <AppLink href={`/faturamento?mes=${addMonths(mes, -1)}`} className={buttonClass("outline", "sm")}><ChevronLeft className="size-4" aria-hidden /> {MESES[(m + 10) % 12]}</AppLink>

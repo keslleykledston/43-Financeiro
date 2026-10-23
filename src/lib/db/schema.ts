@@ -217,3 +217,46 @@ export const holidays = pgTable("holidays", {
   day: date("day", { mode: "string" }).notNull(),
   name: text("name").notNull(),
 }, (t) => [unique("holidays_company_day_uq").on(t.companyId, t.day)]);
+
+// E05 — lotes de cobrança e cobranças (prévia → aprovada). Nenhuma operação externa: só planejamento e aprovação humana.
+// Uma cobrança nasce de contrato ativo + competência; os valores são SNAPSHOT do contrato no momento da prévia.
+export const billingBatches = pgTable("billing_batches", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  issueDate: date("issue_date", { mode: "string" }).notNull(),
+  status: text("status").notNull().default("rascunho"), // rascunho | aprovado | cancelado
+  generatedBy: uuid("generated_by").references(() => users.id), // quem gerou/atualizou a prévia pela última vez
+  approvedBy: uuid("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  reopenReason: text("reopen_reason"),
+}, (t) => [
+  unique("billing_batches_company_id_uq").on(t.companyId, t.id),
+  uniqueIndex("billing_batches_one_per_date_uq").on(t.companyId, t.issueDate).where(sql`${t.status} <> 'cancelado'`),
+  check("billing_batches_status_chk", sql`${t.status} in ('rascunho', 'aprovado', 'cancelado')`),
+  check("billing_batches_approval_chk", sql`(${t.status} = 'aprovado') = (${t.approvedBy} is not null and ${t.approvedAt} is not null)`),
+]);
+
+export const charges = pgTable("charges", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  batchId: uuid("batch_id").notNull(),
+  contractId: uuid("contract_id").notNull(),
+  customerId: uuid("customer_id").notNull(),
+  competenceMonth: date("competence_month", { mode: "string" }).notNull(), // 1º dia do mês de competência (M)
+  dueDate: date("due_date", { mode: "string" }).notNull(),
+  issueDate: date("issue_date", { mode: "string" }).notNull(),
+  description: text("description").notNull(),
+  amount: numeric("amount", { precision: 18, scale: 2 }).notNull(),
+  jointInvoice: boolean("joint_invoice").notNull().default(false),
+  warnings: jsonb("warnings").notNull().default(sql`'[]'::jsonb`),
+  status: text("status").notNull().default("previa"), // previa | aprovada | cancelada
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.batchId], foreignColumns: [billingBatches.companyId, billingBatches.id] }),
+  foreignKey({ columns: [t.companyId, t.contractId], foreignColumns: [contracts.companyId, contracts.id] }),
+  foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
+  uniqueIndex("charges_one_per_competence_uq").on(t.companyId, t.contractId, t.competenceMonth).where(sql`${t.status} <> 'cancelada'`),
+  index("charges_batch_idx").on(t.companyId, t.batchId),
+  check("charges_status_chk", sql`${t.status} in ('previa', 'aprovada', 'cancelada')`),
+  check("charges_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),
+  check("charges_competence_day_chk", sql`extract(day from ${t.competenceMonth}) = 1`),
+]);

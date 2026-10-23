@@ -8,7 +8,7 @@ import { isContractBillable } from "@/modules/contracts/service";
 import { addMonths, billingSchedule, daysInMonth, holidaysFor, nationalHolidays, parseMonth, type HolidayMap, type Warning } from "./calendar";
 
 export type CalendarItem = {
-  contractId: string; customerName: string; description: string; amountCents: number; jointInvoice: boolean;
+  contractId: string; customerId: string; customerName: string; description: string; amountCents: number; jointInvoice: boolean;
   competenceMonth: string; dueDate?: string; issueDate?: string; batch?: 25 | 1 | 8 | 15 | null; review: boolean; reason?: string; warnings: Warning[];
 };
 export type CalendarDay = { date: string; issue: CalendarItem[]; due: CalendarItem[]; holiday?: string };
@@ -21,11 +21,11 @@ async function extraHolidays(db: DB, companyId: string, years: number[]): Promis
 }
 
 /**
- * Calendário do mês `month` (YYYY-MM): quando EMITIR boletos/NFs e quando VENCEM, só para contratos faturáveis
- * (contrato ativo + cliente ativo + vigência cobrindo a competência). Nenhuma emissão externa acontece aqui: é previsão.
+ * Itens agendados que tocam o mês `month` (emissão OU vencimento nele), só de contratos faturáveis
+ * (contrato ativo + cliente ativo + vigência cobrindo a competência). Fonte única do calendário e dos lotes (E05).
+ * Sem checagem de permissão: quem chama autoriza.
  */
-export async function getBillingCalendar(db: DB, actorId: string, companyId: string, month: string) {
-  await requirePerm(db, actorId, companyId, "contracts.read");
+export async function loadScheduled(db: DB, companyId: string, month: string) {
   parseMonth(month);
   const rows = await db.select({ c: contracts, cu: customers }).from(contracts)
     .innerJoin(customers, and(eq(customers.id, contracts.customerId), eq(customers.companyId, contracts.companyId)))
@@ -34,28 +34,40 @@ export async function getBillingCalendar(db: DB, actorId: string, companyId: str
   const extra = await extraHolidays(db, companyId, years);
   const hol = holidaysFor([`${month}-01`], extra);
   for (const y of years) for (const [k, v] of nationalHolidays(y)) hol.set(k, v);
-
-  const days = new Map<string, CalendarDay>();
-  const day = (d: string) => days.get(d) ?? (days.set(d, { date: d, issue: [], due: [], holiday: hol.get(d) }), days.get(d)!);
-  const review: CalendarItem[] = []; const batchMap = new Map<number | null, BatchTotal>();
-  const inMonth = (d?: string) => !!d && d.slice(0, 7) === month;
-
+  const entries: { item: CalendarItem; dueMonth: string }[] = [];
   for (const { c, cu } of rows) {
     // eventos do mês podem vir de dois vencimentos: o deste mês (emitido no 1/8/15 ou, p/ 1–12, no 25 anterior) e o do mês seguinte (emitido no dia 25 deste mês)
     for (const dueMonth of [month, addMonths(month, 1)]) {
       const competence = addMonths(dueMonth, -1);
       if (!isContractBillable(c, cu, competence)) continue;
       const r = billingSchedule({ competenceMonth: competence, dueDay: c.dueDay, jointInvoice: c.invoiceJointRequired, issueDayOverride: c.issueDayOverride }, extra);
-      const item: CalendarItem = { contractId: c.id, customerName: cu.legalName, description: c.description, amountCents: centsFromNumeric(c.monthlyAmount), jointInvoice: c.invoiceJointRequired,
-        competenceMonth: competence, dueDate: r.dueDate, issueDate: r.issueDate, batch: r.batch, review: r.review, reason: r.reason, warnings: r.warnings };
-      if (!r.issueDate || !r.dueDate) { if (dueMonth === month) review.push(item); continue; } // dia 31 / mês curto: sem data, vai para "precisa de revisão"
-      if (inMonth(r.issueDate)) {
-        day(r.issueDate).issue.push(item);
-        const t = batchMap.get(r.batch ?? null) ?? { batch: r.batch ?? null, count: 0, cents: 0 }; t.count++; t.cents += item.amountCents; batchMap.set(r.batch ?? null, t);
-        if (r.review) review.push(item);
-      }
-      if (inMonth(r.dueDate)) day(r.dueDate).due.push(item);
+      entries.push({ dueMonth, item: { contractId: c.id, customerId: cu.id, customerName: cu.legalName, description: c.description, amountCents: centsFromNumeric(c.monthlyAmount), jointInvoice: c.invoiceJointRequired,
+        competenceMonth: competence, dueDate: r.dueDate, issueDate: r.issueDate, batch: r.batch, review: r.review, reason: r.reason, warnings: r.warnings } });
     }
+  }
+  return { entries, hol };
+}
+
+/**
+ * Calendário do mês `month` (YYYY-MM): quando EMITIR boletos/NFs e quando VENCEM, só para contratos faturáveis.
+ * Nenhuma emissão externa acontece aqui: é previsão.
+ */
+export async function getBillingCalendar(db: DB, actorId: string, companyId: string, month: string) {
+  await requirePerm(db, actorId, companyId, "contracts.read");
+  const { entries, hol } = await loadScheduled(db, companyId, month);
+  const days = new Map<string, CalendarDay>();
+  const day = (d: string) => days.get(d) ?? (days.set(d, { date: d, issue: [], due: [], holiday: hol.get(d) }), days.get(d)!);
+  const review: CalendarItem[] = []; const batchMap = new Map<number | null, BatchTotal>();
+  const inMonth = (d?: string) => !!d && d.slice(0, 7) === month;
+
+  for (const { item, dueMonth } of entries) {
+    if (!item.issueDate || !item.dueDate) { if (dueMonth === month) review.push(item); continue; } // dia 31 / mês curto: sem data, vai para "precisa de revisão"
+    if (inMonth(item.issueDate)) {
+      day(item.issueDate).issue.push(item);
+      const t = batchMap.get(item.batch ?? null) ?? { batch: item.batch ?? null, count: 0, cents: 0 }; t.count++; t.cents += item.amountCents; batchMap.set(item.batch ?? null, t);
+      if (item.review) review.push(item);
+    }
+    if (inMonth(item.dueDate)) day(item.dueDate).due.push(item);
   }
   // feriados do mês aparecem no calendário mesmo sem eventos
   for (let d = 1; d <= daysInMonth(month); d++) { const iso = `${month}-${String(d).padStart(2, "0")}`; if (hol.has(iso)) day(iso); }
