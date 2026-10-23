@@ -20,8 +20,8 @@ describe("CanonicalHttpAdapter — limites e redirects (revisão Codex)", () => 
     await expect(mk(big as unknown as typeof fetch).a.listCustomers({})).rejects.toThrow(/grande demais/);
     const stream = vi.fn(async () => new Response(new ReadableStream({ start(c) { for (let i = 0; i < 5; i++) c.enqueue(new Uint8Array(600_000)); c.close(); } })));
     await expect(mk(stream as unknown as typeof fetch).a.listCustomers({})).rejects.toThrow(/grande demais/);
-    const many = vi.fn(async () => json({ items: Array.from({ length: 1001 }, (_, i) => ({ i })) }));
-    await expect(mk(many as unknown as typeof fetch).a.listCustomers({})).rejects.toThrow(/mais de 1000 itens/);
+    const many = vi.fn(async () => json({ items: Array.from({ length: 5001 }, (_, i) => ({ i })) }));
+    await expect(mk(many as unknown as typeof fetch).a.listCustomers({})).rejects.toThrow(/mais de 5000 itens/);
     const notJson = vi.fn(async () => new Response("<html>", { status: 200 }));
     await expect(mk(notJson as unknown as typeof fetch).a.listCustomers({})).rejects.toThrow(/JSON válido/);
   });

@@ -28,7 +28,7 @@ export interface CrmAdapter {
   listCustomers(opts: { cursor?: string; updatedSince?: string }): Promise<CrmPage>;
 }
 
-export const MAX_PAGE_ITEMS = 1000;
+export const MAX_PAGE_ITEMS = 5000;
 export const MAX_BODY_BYTES = 2_000_000;
 
 export class CrmError extends Error {

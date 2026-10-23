@@ -13,7 +13,9 @@
     "db:migrate": "drizzle-kit migrate",
     "seed": "tsx scripts/seed.ts",
     "sandbox": "bash scripts/sandbox.sh",
-    "crm:discover": "tsx scripts/crm-discover.ts"
+    "crm:discover": "tsx scripts/crm-discover.ts",
+    "crm:profile": "tsx scripts/crm-profile.ts",
+    "crm:plan": "tsx scripts/crm-plan.ts"
   },
   "dependencies": {
     "@fontsource-variable/space-grotesk": "^5.3.0",

@@ -5,8 +5,9 @@ const setCrm = async (page: Page, body: object) => { const r = await page.reques
 const dv = (b: string, w: number[]) => { const r = [...b].reduce((s, c, i) => s + +c * w[i], 0) % 11; return r < 2 ? 0 : 11 - r; };
 const cnpj = (n: number) => { const base = `${String(70000000 + n).padStart(8, "0")}0001`; const d1 = dv(base, [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]); return base + d1 + dv(base + d1, [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]); };
 const run = Date.now() % 1000;
-const A = cnpj(run * 10 + 1), B = cnpj(run * 10 + 2), C = cnpj(run * 10 + 3);
-const crmItem = (externalId: string, legalName: string, document: string, extra: object = {}) => ({ externalId, legalName, document, active: true, contacts: [], ...extra });
+const A = cnpj(run * 10 + 1), B = cnpj(run * 10 + 2), C = cnpj(run * 10 + 3), D = cnpj(run * 10 + 4);
+// formato REAL do K3G CRM: só ACTIVE é cliente; PROSPECT/CHURNED/INACTIVE não
+const crmItem = (id: string, razaoSocial: string, cnpj: string, extra: object = {}) => ({ id, name: razaoSocial, razaoSocial, cnpj, email: null, phone: null, crmStatus: "ACTIVE", isActive: true, ...extra });
 const alerta = (p: Page) => p.locator("p[role=alert]");
 
 test("E03b — CRM: ativar, prévia sem gravar, aplicar, idempotência, somente leitura, conflito, alteração/arquivamento e falha", async ({ page }) => {
@@ -52,9 +53,10 @@ test("E03b — CRM: ativar, prévia sem gravar, aplicar, idempotência, somente 
   });
 
   await setCrm(page, { items: [
-    crmItem("x1", "Rede Alfa CRM", A, { contacts: [{ name: "Ana Financeiro", email: "ana@alfa.test", isFinancial: true }] }),
+    crmItem("x1", "Rede Alfa CRM", A, { email: "ana@alfa.test" }),
     crmItem("x2", "Rede Beta CRM", B),
     crmItem("x3", "Nome do CRM Conflito", C),
+    crmItem("x4", "Prospecto Delta", D, { crmStatus: "PROSPECT" }), // prospect nunca é cliente
   ] });
 
   await test.step("prévia mostra o plano e NÃO grava (paginação de 2 em 2 incluída)", async () => {
@@ -63,6 +65,7 @@ test("E03b — CRM: ativar, prévia sem gravar, aplicar, idempotência, somente 
     const resumo = page.getByRole("status").filter({ hasText: "novos" });
     await expect(resumo).toContainText("2 novos");
     await expect(resumo).toContainText("1 conflitos");
+    await expect(resumo).toContainText("1 ignorados"); // o PROSPECT
     await expect(page.getByText("＋ Rede Alfa CRM")).toBeVisible();
     await page.goto("/clientes?q=Rede+Alfa");
     await expect(page.getByText("Nada encontrado para essa busca.")).toBeVisible();
@@ -80,7 +83,7 @@ test("E03b — CRM: ativar, prévia sem gravar, aplicar, idempotência, somente 
     await expect(page.getByRole("note")).toContainText("somente leitura");
     await expect(page.getByRole("button", { name: "Salvar" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Arquivar cadastro" })).toHaveCount(0);
-    await expect(page.locator("li", { hasText: "Ana Financeiro" })).toContainText("ana@alfa.test");
+    await expect(page.locator("li", { hasText: "Cadastro no CRM" })).toContainText("ana@alfa.test");
   });
 
   await test.step("idempotência: repetir não cria nada", async () => {
@@ -106,7 +109,7 @@ test("E03b — CRM: ativar, prévia sem gravar, aplicar, idempotência, somente 
 
   await test.step("alteração e inativação no CRM: renomeia e arquiva (sem apagar)", async () => {
     await setCrm(page, { items: [
-      crmItem("x1", "Rede Alfa Renomeada", A), crmItem("x2", "Rede Beta CRM", B, { active: false }), crmItem("x3", "Nome do CRM Conflito", C),
+      crmItem("x1", "Rede Alfa Renomeada", A, { email: "ana@alfa.test" }), crmItem("x2", "Rede Beta CRM", B, { crmStatus: "CHURNED" }), crmItem("x3", "Nome do CRM Conflito", C),
     ] });
     await page.goto("/integracoes");
     await page.getByRole("button", { name: "Revisar sincronização" }).click();
