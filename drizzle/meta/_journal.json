@@ -15,6 +15,13 @@
       "when": 1792727961311,
       "tag": "0001_shocking_night_thrasher",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792728230877,
+      "tag": "0002_lush_salo",
+      "breakpoints": true
     }
   ]
 }

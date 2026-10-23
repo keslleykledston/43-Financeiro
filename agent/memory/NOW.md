@@ -1,7 +1,7 @@
 # AGORA / Checkpoint
 **Data:** 2026-10-22
-**Estado real (verificado):** Publicado em https://financeiro.devops.k3gsolutions.com.br. E02 implementado: papéis por empresa, convites (72h, hash, uso único), remoção, auditoria, tela Ajustes. 7 testes passam no container (5 integração em DB de teste: isolamento A/B, RBAC, convite, remoção). Backup diário 03:30 (cron) + restore testado. NÃO testado: UI de Ajustes no browser, Playwright, HSTS/CSP. Revisão Codex: em andamento.
+**Estado real (verificado):** Publicado. E02 + correções dos 3 P1 do Codex (revalidação de conta, convite endurecido, rate limit no Postgres) deployadas. 9 testes passam no container. Smoke HTTPS OK. NÃO testado: UI Ajustes/convite no browser, Playwright, HSTS/CSP (P2 aberto). Residual ADR-003.
 **Entrega ativa:** E01 (login + shell + dashboard DEMO).
-**Próxima ação:** corrigir P0/P1 do Codex; usuário valida Ajustes no browser; Playwright smoke; E03 clientes.
+**Próxima ação:** usuário valida Ajustes/convite no browser; Playwright smoke 375px; E03 clientes/fornecedores.
 **Bloqueios:** nenhum.
 **Git:** branch main, sem push/tag.

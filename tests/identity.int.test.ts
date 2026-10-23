@@ -6,7 +6,9 @@ import { sql } from "drizzle-orm";
 import { databaseUrl } from "@/lib/db/url";
 import * as schema from "@/lib/db/schema";
 import type { DB } from "@/lib/db";
-import { acceptInvite, activeRole, Forbidden, Invalid, inviteMember, listMembers, removeMember, INVITE_TTL_MS } from "@/modules/identity/service";
+import { hit, loginBlocked } from "@/lib/security/rate-limit";
+import argon2 from "argon2";
+import { acceptInvite, activeRole, isUserActive, Forbidden, Invalid, inviteMember, listMembers, removeMember, INVITE_TTL_MS } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
 
 const enabled = !!process.env.POSTGRES_USER;
@@ -28,7 +30,7 @@ describe.skipIf(!enabled)("identidade: isolamento multiempresa e RBAC (DB de tes
   afterAll(async () => { await conn?.end(); await admin?.end(); });
 
   beforeEach(async () => {
-    await db.execute(sql`truncate audit_log, invitations, memberships, companies, users restart identity cascade`);
+    await db.execute(sql`truncate rate_limits, audit_log, invitations, memberships, companies, users restart identity cascade`);
     const [a, b] = await db.insert(schema.companies).values([{ name: "A" }, { name: "B" }]).returning();
     A = a.id; B = b.id;
     const mk = async (email: string) => (await db.insert(schema.users).values({ email, name: email, passwordHash: "x" }).returning())[0].id;
@@ -56,19 +58,51 @@ describe.skipIf(!enabled)("identidade: isolamento multiempresa e RBAC (DB de tes
     expect(await listMembers(db, dirA, A)).toHaveLength(2);
   });
 
-  it("convite: aceita uma vez, expira em 72h, token só como hash", async () => {
+  it("convite: aceita uma vez, expira em 72h, token só como hash, e-mail deve bater", async () => {
     const token = await inviteMember(db, dirA, A, "Novo@T.com", "gerente");
     const [inv] = await db.select().from(schema.invitations);
     expect(inv.tokenHash).not.toContain(token);
-    const uid = await acceptInvite(db, token, "Novo", "senha-bem-longa-123");
+    const SENHA = "senha-bem-longa-123";
+    await expect(acceptInvite(db, token, "outro@t.com", "Novo", SENHA)).rejects.toBeInstanceOf(Invalid);
+    const uid = await acceptInvite(db, token, "novo@t.com", "Novo", SENHA);
     expect(await activeRole(db, uid, A)).toBe("gerente");
     expect(await activeRole(db, uid, B)).toBeNull();
-    await expect(acceptInvite(db, token, "Novo", "senha-bem-longa-123")).rejects.toBeInstanceOf(Invalid);
+    await expect(acceptInvite(db, token, "novo@t.com", "Novo", SENHA)).rejects.toBeInstanceOf(Invalid);
 
     const old = await inviteMember(db, dirA, A, "velho@t.com", "assistente", new Date(Date.now() - INVITE_TTL_MS - 1000));
-    await expect(acceptInvite(db, old, "V", "senha-bem-longa-123")).rejects.toBeInstanceOf(Invalid);
-    await expect(acceptInvite(db, "token-falso", "V", "senha-bem-longa-123")).rejects.toBeInstanceOf(Invalid);
-    await expect(acceptInvite(db, token, "V", "curta")).rejects.toBeInstanceOf(Invalid);
+    await expect(acceptInvite(db, old, "velho@t.com", "V", SENHA)).rejects.toBeInstanceOf(Invalid);
+    await expect(acceptInvite(db, "token-falso", "x@t.com", "V", SENHA)).rejects.toBeInstanceOf(Invalid);
+    const t2 = await inviteMember(db, dirA, A, "curta@t.com", "assistente");
+    await expect(acceptInvite(db, t2, "curta@t.com", "V", "curta")).rejects.toBeInstanceOf(Invalid);
+  });
+
+  it("P1: convite para conta existente exige a senha atual (link não basta)", async () => {
+    const real = "senha-real-da-conta-1";
+    await db.update(schema.users).set({ passwordHash: await argon2.hash(real) }).where(sql`id = ${dirB}`);
+    const token = await inviteMember(db, dirA, A, "dir-b@t.com", "gerente");
+    await expect(acceptInvite(db, token, "dir-b@t.com", "X", "outra-senha-qualquer-9")).rejects.toBeInstanceOf(Invalid);
+    expect(await activeRole(db, dirB, A)).toBeNull();
+    await acceptInvite(db, token, "dir-b@t.com", "X", real);
+    expect(await activeRole(db, dirB, A)).toBe("gerente");
+    const [u] = await db.select().from(schema.users).where(sql`id = ${dirB}`);
+    expect(await argon2.verify(u.passwordHash, real)).toBe(true); // senha não foi trocada pelo link
+  });
+
+  it("P1: conta desabilitada deixa de ser ativa", async () => {
+    expect(await isUserActive(db, asstA)).toBe(true);
+    await db.update(schema.users).set({ disabledAt: new Date() }).where(sql`id = ${asstA}`);
+    expect(await isUserActive(db, asstA)).toBe(false);
+    expect(await isUserActive(db, "00000000-0000-0000-0000-000000000000")).toBe(false);
+  });
+
+  it("P1: rate limit compartilhado no DB; IP isolado não trava a conta de outro IP", async () => {
+    const now = new Date("2026-01-01T00:00:00Z");
+    for (let i = 0; i < 3; i++) expect(await hit(db, "k", 3, 1000, now)).toBe(false);
+    expect(await hit(db, "k", 3, 1000, now)).toBe(true);
+    expect(await hit(db, "k", 3, 1000, new Date(now.getTime() + 2000))).toBe(false); // janela expirou
+    for (let i = 0; i < 6; i++) await loginBlocked(db, "vitima@t.com", "1.1.1.1", now); // atacante, 1 IP
+    expect(await loginBlocked(db, "vitima@t.com", "1.1.1.1", now)).toBe(true);
+    expect(await loginBlocked(db, "vitima@t.com", "2.2.2.2", now)).toBe(false); // dono legítimo, outro IP
   });
 
   it("usuário removido perde acesso; não remove a si mesmo; gera auditoria", async () => {

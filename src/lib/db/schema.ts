@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb, pgEnum, integer } from "drizzle-orm/pg-core";
 
 export const roleEnum = pgEnum("role", ["admin_tecnico", "diretoria", "gerente", "assistente", "contabilidade"]);
 export const statusEnum = pgEnum("member_status", ["active", "invited", "removed"]);
@@ -50,3 +50,9 @@ export const invitations = pgTable("invitations", {
   acceptedAt: timestamp("accepted_at", { withTimezone: true }),
   invitedBy: uuid("invited_by").notNull().references(() => users.id),
 }, (t) => [uniqueIndex("invitations_token_uq").on(t.tokenHash), index("invitations_company_idx").on(t.companyId)]);
+
+export const rateLimits = pgTable("rate_limits", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull(),
+  resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+});

@@ -19,3 +19,6 @@ Next.js 15 + React 19 + TypeScript 5.9 (TS 7 incompatível com Next 15), Drizzle
 
 ## ADR-002 Tudo em Docker (2026-10-22, pedido do usuário)
 Isolamento: db (sem ports), web (127.0.0.1:3150), tools (profile, migrate/seed/test). pnpm fixado 10.29.3 (corepack latest viola política de release age). Sem Node/DB rodando direto no host.
+
+## ADR-003 Convites sem verificação de e-mail (2026-10-23)
+Sem provedor de e-mail real (EMAIL_EXTERNAL_ENABLED=false), a posse do e-mail de um usuário NOVO não é verificada: o link (256 bits, 72h, uso único, hash no DB) enviado fora de banda pelo convidante é a prova. Mitigações: e-mail digitado deve bater; conta existente exige senha atual; rate limit. Reavaliar quando houver e-mail real (E06/E09): exigir verificação antes de ativar. Aceito para fase DEMO/sem dados reais; **bloqueia entrada de dados financeiros reais?** Não, mas convidar só pessoas conhecidas e enviar o link por canal confiável.

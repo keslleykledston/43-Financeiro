@@ -18,6 +18,12 @@ export async function activeRole(db: DB, userId: string, companyId: string): Pro
   return m?.role ?? null;
 }
 
+/** Conta existe e não está desabilitada. Chamado a cada requisição (JWT não é fonte de verdade). */
+export async function isUserActive(db: DB, userId: string): Promise<boolean> {
+  const [u] = await db.select({ d: users.disabledAt }).from(users).where(eq(users.id, userId));
+  return !!u && !u.d;
+}
+
 export async function requirePerm(db: DB, userId: string, companyId: string, perm: Permission): Promise<Role> {
   const role = await activeRole(db, userId, companyId);
   if (!role || !can(role, perm)) throw new Forbidden();
@@ -45,15 +51,23 @@ export async function inviteMember(db: DB, actorId: string, companyId: string, e
   return token; // exibido uma única vez ao convidante
 }
 
-export async function acceptInvite(db: DB, token: string, name: string, password: string, now = new Date()) {
+/**
+ * Aceite de convite. O e-mail digitado deve bater com o do convite. Conta existente: exige a SENHA ATUAL
+ * (o link sozinho não concede acesso a conta de terceiro). Conta nova: cria com a senha informada.
+ * Risco residual: sem envio de e-mail, a posse do e-mail novo não é verificada (ver DECISIONS ADR-003).
+ */
+export async function acceptInvite(db: DB, token: string, email: string, name: string, password: string, now = new Date()) {
   if (password.length < 12) throw new Invalid("Senha deve ter ao menos 12 caracteres");
   const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
   return db.transaction(async (tx) => {
     const [inv] = await tx.select().from(invitations).where(eq(invitations.tokenHash, hashToken(token))).for("update");
-    if (!inv || inv.acceptedAt || inv.expiresAt < now) throw new Invalid("Convite inválido ou expirado");
+    if (!inv || inv.acceptedAt || inv.expiresAt < now || inv.email !== email.trim().toLowerCase()) throw new Invalid("Convite inválido ou expirado");
     let [u] = await tx.select().from(users).where(eq(sql`lower(${users.email})`, inv.email));
-    // usuário existente mantém a senha atual: o link não permite trocá-la
-    if (!u) [u] = await tx.insert(users).values({ email: inv.email, name: name.trim() || inv.email, passwordHash }).returning();
+    if (u) {
+      if (u.disabledAt || !(await argon2.verify(u.passwordHash, password).catch(() => false))) throw new Invalid("Convite inválido ou expirado");
+    } else {
+      [u] = await tx.insert(users).values({ email: inv.email, name: name.trim() || inv.email, passwordHash }).returning();
+    }
     await tx.insert(memberships).values({ userId: u.id, companyId: inv.companyId, role: inv.role, status: "active" })
       .onConflictDoUpdate({ target: [memberships.userId, memberships.companyId], set: { role: inv.role, status: "active", updatedAt: now } });
     await tx.update(invitations).set({ acceptedAt: now }).where(eq(invitations.id, inv.id));
