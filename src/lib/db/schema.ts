@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb, pgEnum, integer, boolean, unique, foreignKey, check } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb, pgEnum, integer, boolean, unique, foreignKey, check, numeric, date } from "drizzle-orm/pg-core";
 
 export const roleEnum = pgEnum("role", ["admin_tecnico", "diretoria", "gerente", "assistente", "contabilidade"]);
 export const statusEnum = pgEnum("member_status", ["active", "invited", "removed"]);
@@ -159,3 +159,61 @@ export const integrationConflicts = pgTable("integration_conflicts", {
   index("integration_conflicts_company_idx").on(t.companyId, t.status),
   uniqueIndex("integration_conflicts_open_uq").on(t.companyId, t.entity, t.externalId).where(sql`${t.status} = 'open'`),
 ]);
+
+// ---------- Contratos (E04): fonte de verdade AQUI (o K3G CRM não tem contratos — ADR-012) ----------
+// As colunas guardam os termos VIGENTES (aprovados). Mudanças entram como versão pendente em `contract_versions` e só valem após aprovação.
+export const contracts = pgTable("contracts", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  customerId: uuid("customer_id").notNull(),
+  description: text("description").notNull(), // serviço contratado
+  monthlyAmount: numeric("monthly_amount", { precision: 18, scale: 2 }).notNull(), // dinheiro: numeric(18,2); a aplicação usa centavos inteiros
+  startAt: date("start_at", { mode: "string" }).notNull(),
+  endAt: date("end_at", { mode: "string" }),
+  status: text("status").notNull().default("rascunho"), // rascunho | ativo | suspenso | encerrado
+  dueDay: integer("due_day").notNull(),
+  invoiceJointRequired: boolean("invoice_joint_required").notNull().default(false), // exige NF emitida junto do boleto
+  issueDayOverride: integer("issue_day_override"),
+  dueDatePolicy: text("due_date_policy").notNull().default("contratual"),
+  competenceRule: text("competence_rule").notNull().default("previous_month"),
+  fiscalPolicyStatus: text("fiscal_policy_status").notNull().default("pendente"), // pendente | definida
+  createdBy: uuid("created_by").references(() => users.id),
+}, (t) => [
+  unique("contracts_company_id_uq").on(t.companyId, t.id),
+  foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
+  index("contracts_company_status_idx").on(t.companyId, t.status),
+  index("contracts_customer_idx").on(t.companyId, t.customerId),
+  check("contracts_status_chk", sql`${t.status} in ('rascunho', 'ativo', 'suspenso', 'encerrado')`),
+  check("contracts_due_day_chk", sql`${t.dueDay} between 1 and 31`),
+  check("contracts_issue_day_chk", sql`${t.issueDayOverride} is null or ${t.issueDayOverride} between 1 and 28`),
+  check("contracts_amount_chk", sql`${t.monthlyAmount} > 0`),
+  check("contracts_dates_chk", sql`${t.endAt} is null or ${t.endAt} >= ${t.startAt}`),
+  check("contracts_fiscal_chk", sql`${t.fiscalPolicyStatus} in ('pendente', 'definida')`),
+]);
+
+export const contractVersions = pgTable("contract_versions", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  contractId: uuid("contract_id").notNull(),
+  version: integer("version").notNull(),
+  state: text("state").notNull().default("pendente"), // pendente | aprovada | rejeitada
+  terms: jsonb("terms").notNull(), // {description, monthlyAmountCents, startAt, endAt, dueDay, invoiceJointRequired, issueDayOverride}
+  reason: text("reason"),
+  requestedBy: uuid("requested_by").notNull().references(() => users.id),
+  decidedBy: uuid("decided_by").references(() => users.id),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  decisionNote: text("decision_note"),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.contractId], foreignColumns: [contracts.companyId, contracts.id] }),
+  unique("contract_versions_uq").on(t.contractId, t.version),
+  uniqueIndex("contract_versions_one_pending_uq").on(t.contractId).where(sql`${t.state} = 'pendente'`), // no máximo uma alteração pendente por contrato
+  check("contract_versions_state_chk", sql`${t.state} in ('pendente', 'aprovada', 'rejeitada')`),
+]);
+
+// Feriados municipais/estaduais por empresa (os nacionais vêm do código). Política de feriado: revisão humana (PRD §4).
+export const holidays = pgTable("holidays", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  day: date("day", { mode: "string" }).notNull(),
+  name: text("name").notNull(),
+}, (t) => [unique("holidays_company_day_uq").on(t.companyId, t.day)]);

@@ -28,7 +28,7 @@ describe.skipIf(!enabled)("CRM: isolamento, duplicidade, permissões, busca, imp
   afterAll(async () => { await conn?.end(); await admin?.end(); });
 
   beforeEach(async () => {
-    await db.execute(sql`truncate rate_limits, customer_contacts, vendor_contacts, customers, vendors, audit_log, invitations, memberships, companies, users restart identity cascade`);
+    await db.execute(sql`truncate holidays, contract_versions, contracts, rate_limits, customer_contacts, vendor_contacts, customers, vendors, audit_log, invitations, memberships, companies, users restart identity cascade`);
     const [a, b] = await db.insert(schema.companies).values([{ name: "A" }, { name: "B" }]).returning();
     A = a.id; B = b.id;
     const mk = async (e: string) => (await db.insert(schema.users).values({ email: e, name: e, passwordHash: "x" }).returning())[0].id;
