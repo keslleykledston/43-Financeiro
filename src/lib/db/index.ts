@@ -1,8 +1,15 @@
-import { drizzle } from "drizzle-orm/postgres-js";
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { databaseUrl } from "./url";
 import * as schema from "./schema";
 
-const g = globalThis as unknown as { _pg?: ReturnType<typeof postgres> };
-const client = (g._pg ??= postgres(databaseUrl(), { max: 5 }));
-export const db = drizzle(client, { schema });
+type DB = PostgresJsDatabase<typeof schema>;
+const g = globalThis as unknown as { _db?: DB };
+
+// Conexão preguiçosa: o build do Next importa módulos sem credenciais.
+function get(): DB {
+  return (g._db ??= drizzle(postgres(databaseUrl(), { max: 5 }), { schema }));
+}
+export const db = new Proxy({} as DB, {
+  get: (_t, prop) => Reflect.get(get(), prop),
+});
