@@ -33,7 +33,11 @@ services:
   web:
     build: { context: ., target: runner }
     restart: unless-stopped
-    env_file: [.env, .env.auth]
+    env_file:
+      - .env
+      - .env.auth
+      - path: .env.crm   # opcional: CRM_BASE_URL e CRM_API_TOKEN (somente leitura)
+        required: false
     environment: *app-env
     ports:
       - "127.0.0.1:3150:3150"
@@ -46,7 +50,11 @@ services:
   tools:
     profiles: [tools]
     build: { context: ., target: tools }
-    env_file: [.env, .env.auth]
+    env_file:
+      - .env
+      - .env.auth
+      - path: .env.crm   # opcional: CRM_BASE_URL e CRM_API_TOKEN (somente leitura)
+        required: false
     environment: *app-env
     depends_on:
       db: { condition: service_healthy }

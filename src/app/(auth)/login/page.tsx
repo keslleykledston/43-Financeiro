@@ -1,13 +1,28 @@
 import { LoginForm } from "./form";
+import { Logo } from "@/components/k3g/shell";
 
 export default function LoginPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
-      <div className="w-full max-w-sm rounded-3xl bg-white p-7 shadow-sm">
-        <h1 className="text-2xl font-semibold">K3G Finance</h1>
-        <p className="mb-6 mt-1 text-sm text-slate-600">Acesse com seu e-mail corporativo.</p>
-        <LoginForm />
-      </div>
+    <main className="grid min-h-screen lg:grid-cols-2">
+      <section className="hidden flex-col justify-between bg-brand-panel p-10 text-brand-panel-foreground lg:flex">
+        <span className="inline-flex items-center gap-2 font-display font-semibold">
+          <span className="flex size-8 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">K3</span>
+          <span className="text-base">K3G Finance</span>
+        </span>
+        <div>
+          <h2 className="max-w-md text-4xl leading-tight font-semibold">Cobrança recorrente, do contrato ao recebimento.</h2>
+          <p className="mt-4 max-w-md text-sm opacity-80">Clientes, contratos, lotes de faturamento e conciliação das duas empresas do grupo, com rastreabilidade e aprovação humana em cada passo.</p>
+        </div>
+        <p className="text-xs opacity-70">Área restrita à diretoria e ao time financeiro.</p>
+      </section>
+      <section className="flex items-center justify-center bg-background px-4 py-10">
+        <div className="w-full max-w-sm">
+          <div className="mb-8 lg:hidden"><Logo /></div>
+          <h1 className="text-2xl font-semibold">Acessar o painel</h1>
+          <p className="mt-1 mb-6 text-sm text-muted-foreground">Acesso somente por convite. Entre com seu e-mail corporativo.</p>
+          <LoginForm />
+        </div>
+      </section>
     </main>
   );
 }

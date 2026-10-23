@@ -1,37 +1,40 @@
+import { CalendarClock, FilePlus2, Users } from "lucide-react";
 import { requireContext } from "@/lib/security/context";
+import { PageHeader, SectionCard, StatusPill } from "@/components/k3g/primitives";
+import { AppLink } from "@/components/k3g/app-link";
+import { buttonClass } from "@/components/k3g/button";
+import { formatBRL } from "@/lib/format";
 
-// DADOS FICTÍCIOS — substituídos por consultas reais nas entregas E05–E12.
+// DADOS FICTÍCIOS (em centavos) — substituídos por consultas reais, via camada de cálculo no servidor, nas entregas E05–E12.
 const KPIS = [
-  { label: "Faturado no mês", value: "R$ 184.320,00" },
-  { label: "Recebido", value: "R$ 131.870,00" },
-  { label: "A receber", value: "R$ 52.450,00" },
-  { label: "Em atraso", value: "R$ 9.210,00" },
+  { label: "Faturado no mês", cents: 18_432_000 },
+  { label: "Recebido", cents: 13_187_000 },
+  { label: "A receber", cents: 5_245_000 },
+  { label: "Em atraso", cents: 921_000 },
 ];
+const LOTES = [["Dia 25", "Vencimentos 1–12"], ["Dia 1", "Vencimentos 13–16 e NF conjunta"], ["Dia 8", "Vencimentos 17–22"], ["Dia 15", "Vencimentos 23–30"]];
 
 export default async function Dashboard() {
   const { current } = await requireContext();
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold">Visão executiva</h1>
-        <p className="text-sm text-slate-600">{current?.name} · <span className="font-medium text-amber-700">Dados fictícios</span></p>
-      </div>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <div className="space-y-6">
+      <PageHeader title="Visão executiva" description={`${current?.name ?? ""} · Dados fictícios`}
+        actions={<AppLink href="/clientes/novo" className={buttonClass("primary")}><Users className="size-4" aria-hidden /> Novo cliente</AppLink>} />
+      <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2 lg:grid-cols-4">
         {KPIS.map((k) => (
-          <div key={k.label} className="rounded-2xl bg-white p-4 shadow-sm">
-            <p className="text-xs text-slate-500">{k.label}</p>
-            <p className="mt-1 text-lg font-semibold tabular-nums sm:text-xl">{k.value}</p>
+          <div key={k.label} className="rounded-lg border bg-card p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{k.label}</p>
+            <p className="num mt-2 text-2xl font-semibold">{formatBRL(k.cents)}</p>
+            <div className="mt-2"><StatusPill tone="neutral">exemplo</StatusPill></div>
           </div>
         ))}
       </div>
-      <section className="rounded-2xl bg-white p-5 shadow-sm">
-        <h2 className="font-semibold">Próximos lotes (exemplo)</h2>
-        <ul className="mt-3 divide-y divide-slate-100 text-sm">
-          {[["Dia 25", "Vencimentos 1–12"], ["Dia 1", "Vencimentos 13–16 e NF conjunta"], ["Dia 8", "Vencimentos 17–22"], ["Dia 15", "Vencimentos 23–30"]].map(([d, t]) => (
-            <li key={d} className="flex justify-between py-2"><span className="font-medium">{d}</span><span className="text-slate-600">{t}</span></li>
-          ))}
+      <SectionCard title="Próximos lotes (exemplo)" action={<CalendarClock className="size-4 text-muted-foreground" aria-hidden />}>
+        <ul className="divide-y divide-border text-sm">
+          {LOTES.map(([d, t]) => <li key={d} className="flex justify-between py-2"><span className="font-medium">{d}</span><span className="text-muted-foreground">{t}</span></li>)}
         </ul>
-      </section>
+        <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground"><FilePlus2 className="size-3.5" aria-hidden /> A simulação de lote chega no E05.</p>
+      </SectionCard>
     </div>
   );
 }
