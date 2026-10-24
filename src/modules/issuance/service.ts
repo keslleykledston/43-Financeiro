@@ -59,6 +59,12 @@ export async function saveIssuanceSettings(db: DB, actorId: string, companyId: s
 const ELIGIBLE = (companyId: string) => sql`c.company_id = ${companyId} and c.status = 'aprovada' and b.status = 'aprovado'
   and coalesce((select sum(p.amount) from payments p where p.company_id = c.company_id and p.charge_id = c.id and p.status = 'ativo'), 0) < c.amount`;
 
+/** Chave de idempotência por cobrança+tipo. Depois que um boleto já EMITIDO foi cancelado, a próxima emissão usa uma chave nova (geração), senão o provedor devolveria o boleto cancelado. */
+async function keyFor(x: DB, companyId: string, chargeId: string, kind: string): Promise<string> {
+  const [{ n }] = (await x.execute(sql`select count(*)::int n from issuance_requests where company_id = ${companyId} and charge_id = ${chargeId} and kind = ${kind} and status = 'cancelado' and external_ref is not null`)) as unknown as { n: number }[];
+  return n > 0 ? `${kind}:${chargeId}:g${n}` : `${kind}:${chargeId}`;
+}
+
 export async function requestIssuance(db: DB, actorId: string, companyId: string, chargeId: string, kind: string) {
   await requirePerm(db, actorId, companyId, "issuance.request");
   if (kind !== "boleto" && kind !== "nfse") throw new Invalid("Tipo de emissão inválido");
@@ -70,7 +76,7 @@ export async function requestIssuance(db: DB, actorId: string, companyId: string
     if (!ok) throw new Invalid("Cobrança não encontrada, não aprovada ou já quitada");
     const [dup] = await x.select({ id: issuanceRequests.id }).from(issuanceRequests).where(and(eq(issuanceRequests.companyId, companyId), eq(issuanceRequests.chargeId, chargeId), eq(issuanceRequests.kind, kind), sql`${issuanceRequests.status} <> 'cancelado'`));
     if (dup) throw new Invalid(`Já existe uma solicitação de ${KIND_LABEL[kind]} para esta cobrança`);
-    const [r] = await x.insert(issuanceRequests).values({ companyId, chargeId, kind, idempotencyKey: `${kind}:${chargeId}`, requestedBy: actorId }).returning({ id: issuanceRequests.id });
+    const [r] = await x.insert(issuanceRequests).values({ companyId, chargeId, kind, idempotencyKey: await keyFor(x, companyId, chargeId, kind), requestedBy: actorId }).returning({ id: issuanceRequests.id });
     await audit(x, companyId, actorId, "issuance.requested", { requestId: r.id, chargeId, kind });
     return r.id;
   });
@@ -89,7 +95,7 @@ export async function requestBatchIssuance(db: DB, actorId: string, companyId: s
     const rows = (await x.execute(sql`select c.id from charges c join billing_batches b on b.company_id = c.company_id and b.id = c.batch_id
       where c.batch_id = ${batchId} and ${ELIGIBLE(companyId)}
         and not exists (select 1 from issuance_requests r where r.company_id = c.company_id and r.charge_id = c.id and r.kind = ${kind} and r.status <> 'cancelado')`)) as unknown as Row[];
-    for (const r of rows) await x.insert(issuanceRequests).values({ companyId, chargeId: String(r.id), kind, idempotencyKey: `${kind}:${r.id}`, requestedBy: actorId });
+    for (const r of rows) await x.insert(issuanceRequests).values({ companyId, chargeId: String(r.id), kind, idempotencyKey: await keyFor(x, companyId, String(r.id), kind), requestedBy: actorId });
     await audit(x, companyId, actorId, "issuance.batch_requested", { batchId, kind, created: rows.length });
     return { created: rows.length };
   });

@@ -66,6 +66,26 @@ test("E10 — motor de emissão SIMULADO: nasce pausado, solicita, processa uma 
     await expect(page.getByText(/emissões em andamento ou concluídas/)).toBeVisible();
   });
 
+  await test.step("E20 — cancelar o boleto (diretoria): motivo e confirmação obrigatórios, fica registrado", async () => {
+    await page.goto("/contas-a-receber");
+    await page.locator('a[href^="/contas-a-receber/"]', { hasText: NOME }).first().click();
+    await expect(page.getByRole("heading", { name: "Boleto", exact: true })).toBeVisible();
+    await expect(page.getByText(/Situação da emissão: Emitido/)).toBeVisible();
+    await page.getByText("Cancelar boleto (só a diretoria)").click();
+    await page.getByLabel(/Motivo \(3 a 200/).fill("valor errado na cobrança");
+    await page.getByRole("button", { name: "Cancelar boleto", exact: true }).click();      // sem marcar a confirmação: o navegador barra
+    await expect(page.getByText(/Boleto cancelado e registrado/)).toHaveCount(0);
+    await page.getByLabel(/Confirmo o cancelamento/).check();
+    await page.getByRole("button", { name: "Cancelar boleto", exact: true }).click();
+    await expect(page.getByText(/Boleto cancelado e registrado/)).toBeVisible();
+    await expect(page.getByText("Motivo: valor errado na cobrança")).toBeVisible();
+    await expect(page.getByText("Cancelado", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/Sem boleto ativo/)).toBeVisible();
+    await expect(page.getByText("Cancelar boleto (só a diretoria)")).toHaveCount(0);        // não cancela duas vezes
+    await page.goto("/auditoria");
+    await expect(page.getByText("boleto.cancelled").first()).toBeVisible();
+  });
+
   await test.step("checklist do portão da emissão real: tudo pendente, chaves desligadas", async () => {
     await page.goto("/integracoes");
     await expect(page.getByRole("heading", { name: "Portão da emissão real (checklist)" })).toBeVisible();

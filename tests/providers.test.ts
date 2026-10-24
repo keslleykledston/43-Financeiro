@@ -27,9 +27,10 @@ describe("E09 provedores simulados (contrato)", () => {
     await expect(boleto.issue({ ...i, amountCents: 1.5 })).rejects.toThrow(RangeError);
     await expect(boleto.issue({ ...i, dueDate: "14/11/2026" })).rejects.toThrow(RangeError);
     await expect(boleto.issue({ ...i, idempotencyKey: "" })).rejects.toThrow(RangeError);
-    await expect(boleto.status("mock-boleto-inexistente")).rejects.toThrow();
+    await expect(boleto.status("inexistente")).rejects.toThrow();
     await boleto.cancel(r1.providerRef); expect(await boleto.status(r1.providerRef)).toBe("cancelado");
-    await expect(boleto.cancel("mock-boleto-inexistente")).rejects.toThrow();
+    await expect(boleto.cancel("inexistente")).rejects.toThrow();
+    expect(await boleto.status("mock-boleto-emitido-por-outra-instancia")).toBe("emitido");  // o simulador não guarda estado entre requisições do site
   });
   it("NFS-e (beta): emissão assíncrona exige reconsulta", async () => {
     const { nfse } = createMockProviders();

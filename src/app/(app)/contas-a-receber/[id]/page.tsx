@@ -10,12 +10,15 @@ import { METHODS, METHOD_LABEL, SITUATION_LABEL, type Situation } from "@/module
 import { formatBRL, formatDateTime } from "@/lib/format";
 import { Callout, Money, PageHeader, SectionCard, StatusPill, type StatusTone } from "@/components/k3g/primitives";
 import { AppLink } from "@/components/k3g/app-link";
+import { PendingButton } from "@/components/k3g/pending-button";
 import { buttonClass, inputClass, selectClass } from "@/components/k3g/button";
-import { payAction, reverseAction } from "../actions";
+import { cancelBoletoAction, payAction, recheckBoletoAction, reverseAction } from "../actions";
+import { boletoPanel, CANCEL_ERROR_LABEL, CANCEL_STATUS_LABEL } from "@/modules/issuance/cancel";
+import { STATUS_LABEL as ISSUANCE_LABEL } from "@/modules/issuance/service";
 
 const TONE: Record<Situation, StatusTone> = { quitada: "positive", parcial: "warning", vencida: "negative", a_vencer: "info" };
 const br = (d: string) => d.split("-").reverse().join("/");
-const OK: Record<string, string> = { pago: "Pagamento registrado.", quitada: "Pagamento registrado. Cobrança quitada: as mensagens da régua foram interrompidas.", estornado: "Pagamento estornado. O saldo voltou; se quiser retomar a régua, use Mensagens → Programar." };
+const OK: Record<string, string> = { pago: "Pagamento registrado.", quitada: "Pagamento registrado. Cobrança quitada: as mensagens da régua foram interrompidas.", boleto_cancelado: "Boleto cancelado e registrado. A régua de mensagens desta cobrança foi interrompida; para cobrar de novo, solicite uma nova emissão.", boleto_sem_resposta: "O provedor não respondeu de forma conclusiva. Use «Reconsultar» antes de tentar de novo.", estornado: "Pagamento estornado. O saldo voltou; se quiser retomar a régua, use Mensagens → Programar." };
 
 export default async function Cobranca({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ erro?: string; ok?: string }> }) {
   const [{ id }, sp, ctx] = await Promise.all([params, searchParams, requireContext()]);
@@ -23,7 +26,8 @@ export default async function Cobranca({ params, searchParams }: { params: Promi
   if (!ctx.current || !role || !can(role, "receivables.read")) return <Callout tone="warning">Seu papel não tem acesso às contas a receber.</Callout>;
   const r = await getReceivable(db, ctx.user.id, ctx.current.id, id);
   if (!r) notFound();
-  const pay = can(role, "receivables.pay"), reverse = can(role, "receivables.reverse");
+  const pay = can(role, "receivables.pay"), reverse = can(role, "receivables.reverse"), cancelBoletoPerm = can(role, "boletos.cancel");
+  const panel = can(role, "issuance.read") ? await boletoPanel(db, ctx.user.id, ctx.current.id, r.id) : null;
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Manaus" });
   const requestKey = randomUUID().replace(/-/g, ""); // um por exibição da página: reenviar o mesmo formulário não duplica
   const openText = (r.openCents / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -54,6 +58,36 @@ export default async function Cobranca({ params, searchParams }: { params: Promi
             <div><label htmlFor="note" className="mb-1 block text-sm font-medium">Observação (opcional)</label><input id="note" name="note" maxLength={200} className={inputClass} /></div>
             <div className="sm:col-span-2"><button className={buttonClass("primary")}>Registrar pagamento</button></div>
           </form>
+        </SectionCard>
+      )}
+
+      {panel && (panel.request || panel.history.length > 0) && (
+        <SectionCard title="Boleto">
+          {panel.request?.externalStatus === "pago" && <Callout tone="warning">O provedor informa que este boleto foi <strong>pago</strong>. Confira o recebimento e registre a baixa. As mensagens de cobrança foram interrompidas.</Callout>}
+          <p className="text-sm">{panel.request ? <>Situação da emissão: <strong>{ISSUANCE_LABEL[panel.request.status] ?? panel.request.status}</strong>{panel.request.externalStatus ? ` · no provedor: ${panel.request.externalStatus}` : ""}</> : "Sem boleto ativo (o anterior foi cancelado). Solicite uma nova emissão em Faturamento → Emissões."}</p>
+          {cancelBoletoPerm && panel.request?.status === "emitido" && r.payments.length === 0 && !panel.history.some((h) => h.status === "enviando" || h.status === "desconhecido") && (
+            <details className="mt-3"><summary className="cursor-pointer text-sm font-medium text-negative-foreground">Cancelar boleto (só a diretoria)</summary>
+              <form action={cancelBoletoAction} className="mt-2 grid max-w-xl gap-3">
+                <input type="hidden" name="id" value={r.id} />
+                <div><label htmlFor="cancel-reason" className="mb-1 block text-sm font-medium">Motivo (3 a 200 caracteres)</label><input id="cancel-reason" name="reason" required minLength={3} maxLength={200} className={inputClass} placeholder="Ex.: valor errado; vencimento a corrigir" /></div>
+                <label className="flex items-start gap-2 text-sm"><input type="checkbox" name="confirm" required className="mt-1" /> Confirmo o cancelamento deste boleto. A ação fica registrada com meu nome, data e motivo e não pode ser desfeita.</label>
+                <div><PendingButton className={buttonClass("danger")} pendingText="Cancelando…">Cancelar boleto</PendingButton></div>
+              </form></details>
+          )}
+          {cancelBoletoPerm && panel.request?.status === "emitido" && r.payments.length > 0 && <p className="mt-2 text-xs text-muted-foreground">Há pagamento registrado: estorne-o antes de cancelar o boleto.</p>}
+          {panel.history.length > 0 && (
+            <ul className="mt-3 divide-y divide-border text-sm">
+              {panel.history.map((h) => (
+                <li key={h.id} className="py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2"><p>{formatDateTime(h.createdAt)} · {h.by}</p><StatusPill tone={h.status === "cancelado" ? "positive" : h.status === "falhou" ? "negative" : "warning"}>{CANCEL_STATUS_LABEL[h.status]}</StatusPill></div>
+                  <p className="text-muted-foreground">Motivo: {h.reason}{h.attempts > 1 ? ` · ${h.attempts} tentativas` : ""}{h.lastError ? ` · ${CANCEL_ERROR_LABEL[h.lastError] ?? h.lastError}` : ""}{h.resolvedAt ? ` · decidido em ${formatDateTime(h.resolvedAt)}` : ""}</p>
+                  {cancelBoletoPerm && h.status === "desconhecido" && (
+                    <form action={recheckBoletoAction} className="mt-1"><input type="hidden" name="id" value={r.id} /><input type="hidden" name="cancellationId" value={h.id} /><PendingButton className={buttonClass("outline", "sm")} pendingText="Reconsultando…">Reconsultar</PendingButton></form>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </SectionCard>
       )}
 

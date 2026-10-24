@@ -15,6 +15,9 @@ export const ACTION_LABEL: Record<string, string> = {
   "billing.batch.generated": "Gerou lote de cobrança", "billing.batch.approved": "Aprovou lote de cobrança",
   "receivable.payment_registered": "Registrou pagamento recebido", "receivable.payment_reversed": "Estornou pagamento recebido",
   "bank.import.applied": "Aplicou extrato bancário", "bank.allocated": "Conciliou lançamento", "bank.allocation_undone": "Desfez conciliação",
+  "boleto.cancel_requested": "Pediu cancelamento de boleto", "boleto.cancelled": "Boleto cancelado", "boleto.cancel_failed": "Cancelamento de boleto recusado", "boleto.cancel_unknown": "Cancelamento de boleto sem resposta", "boleto.cancel_rechecked": "Reconsultou cancelamento de boleto", "boleto.paid_at_provider": "Provedor informou boleto pago",
+  "commission.contract_set": "Definiu comissão de parceiro no contrato", "commission.closed": "Fechou comissão do mês", "commission.paid": "Registrou pagamento de comissão", "commission.cancelled": "Cancelou fechamento de comissão",
+  "provider.credentials_saved": "Guardou credenciais de provedor", "provider.credentials_removed": "Removeu credenciais de provedor",
   "party.created": "Criou cadastro", "party.updated": "Alterou cadastro", "party.archived": "Arquivou cadastro",
 };
 

@@ -166,6 +166,9 @@ export async function recordPaymentTx(x: DB, companyId: string, actorId: string,
       const [c] = await x.select({ c: charges, bs: billingBatches.status }).from(charges).innerJoin(billingBatches, and(eq(billingBatches.id, charges.batchId), eq(billingBatches.companyId, charges.companyId)))
         .where(and(eq(charges.id, chargeId), eq(charges.companyId, companyId))).for("update", { of: charges });
       if (!c || c.c.status !== "aprovada" || c.bs !== "aprovado") throw new Invalid("Cobrança não encontrada");
+      // cancelamento de boleto em andamento (a chamada ao provedor corre fora da transação): a baixa espera o resultado, senão o boleto seria cancelado COM pagamento (E20)
+      const [inflight] = (await x.execute(sql`select 1 from boleto_cancellations where company_id = ${companyId} and charge_id = ${chargeId} and status in ('enviando', 'desconhecido') limit 1`)) as unknown as unknown[];
+      if (inflight) throw new Invalid("Há um cancelamento de boleto em andamento nesta cobrança. Aguarde o resultado (ou reconsulte) antes de registrar o pagamento");
       if (key) { // reenvio do mesmo formulário (duplo clique, recarga): devolve o que já foi gravado
         const [dup] = await x.select().from(payments).where(and(eq(payments.companyId, companyId), eq(payments.requestKey, key)));
         if (dup) { if (dup.chargeId !== chargeId) throw new Invalid("Chave de envio já usada"); return { paymentId: dup.id, duplicate: true, settled: false }; }

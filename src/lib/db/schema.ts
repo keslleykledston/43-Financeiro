@@ -747,3 +747,31 @@ export const providerCredentials = pgTable("provider_credentials", {
   check("provider_credentials_fp_chk", sql`${t.certFingerprint} ~ '^[0-9a-f]{64}$'`),
   check("provider_credentials_sealed_chk", sql`${t.clientIdEnc} like 'v1.%' and ${t.certEnc} like 'v1.%' and ${t.keyEnc} like 'v1.%'`), // nunca texto puro
 ]);
+
+// E20 — cancelamento de boleto (autorizado pelo dono em 2026-10-24; ADR-017). SOMENTE diretoria. Registro IMUTÁVEL: quem, quando, por quê, qual boleto e o resultado.
+// Mesmo padrão do motor de emissão: reservar (enviando) → chamar o provedor fora de transação → registrar. Resposta perdida = `desconhecido` (reconsulta antes de repetir).
+export const boletoCancellations = pgTable("boleto_cancellations", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  chargeId: uuid("charge_id").notNull(),
+  requestId: uuid("request_id").notNull(), // solicitação de emissão do boleto que está sendo cancelado
+  externalRef: text("external_ref").notNull(), // referência do boleto no provedor
+  mode: text("mode").notNull().default("simulado"), // única opção aceita pelo banco nesta fase
+  reason: text("reason").notNull(),
+  status: text("status").notNull().default("enviando"), // enviando | cancelado | desconhecido | falhou
+  attempts: integer("attempts").notNull().default(1),
+  lastError: text("last_error"), // código genérico, sem dados do cliente
+  requestedBy: uuid("requested_by").notNull().references(() => users.id),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.chargeId], foreignColumns: [charges.companyId, charges.id] }),
+  foreignKey({ columns: [t.companyId, t.requestId], foreignColumns: [issuanceRequests.companyId, issuanceRequests.id] }),
+  unique("boleto_cancellations_company_id_uq").on(t.companyId, t.id),
+  uniqueIndex("boleto_cancellations_one_active_uq").on(t.companyId, t.requestId).where(sql`${t.status} in ('enviando', 'cancelado', 'desconhecido')`),
+  index("boleto_cancellations_charge_idx").on(t.companyId, t.chargeId),
+  check("boleto_cancellations_mode_chk", sql`${t.mode} = 'simulado'`),
+  check("boleto_cancellations_status_chk", sql`${t.status} in ('enviando', 'cancelado', 'desconhecido', 'falhou')`),
+  check("boleto_cancellations_reason_chk", sql`char_length(${t.reason}) between 3 and 200`),
+  check("boleto_cancellations_attempts_chk", sql`${t.attempts} between 1 and 20`),
+  check("boleto_cancellations_resolved_chk", sql`(${t.status} in ('cancelado', 'falhou')) = (${t.resolvedAt} is not null)`),
+]);

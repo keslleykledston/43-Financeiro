@@ -49,3 +49,6 @@ Pagamento nunca é apagado. Diretoria e gerente usam **Estornar**, com motivo (5
 - Exportar: diretoria, gerente e contabilidade.
 
 > Observação: o pedido original prevê **anexos privados** (comprovante do pagamento). Ficam para a próxima entrega, por exigirem armazenamento de arquivos com revisão de segurança própria.
+
+## Boleto da cobrança
+O bloco **Boleto** mostra a situação da emissão e o histórico de cancelamentos. Só a diretoria cancela: `cancelar-boleto.md`.

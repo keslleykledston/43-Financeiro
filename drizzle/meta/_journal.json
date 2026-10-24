@@ -169,6 +169,13 @@
       "when": 1792862652121,
       "tag": "0023_crazy_jane_foster",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792863609345,
+      "tag": "0024_high_randall_flagg",
+      "breakpoints": true
     }
   ]
 }

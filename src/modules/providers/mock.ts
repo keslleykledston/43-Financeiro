@@ -16,6 +16,8 @@ export function createMockProviders(): Providers {
   const boletos = new Map<string, BoletoResult["status"]>();
   const byKey = new Map<string, string>(); // chave de idempotência → referência (boleto e NFS-e)
   const nfse = new Map<string, "processando" | "emitida" | "rejeitada">();
+  // O simulador não guarda estado entre requisições do site (cada chamada cria o seu): uma referência `mock-boleto-…` que esta instância não viu foi emitida por outra e conta como emitida.
+  const seen = (r: string) => boletos.get(r) ?? (r.startsWith("mock-boleto-") ? ("emitido" as const) : undefined);
   return {
     email: { mode: "mock", send: async (m) => (m.to.length === 0 ? { ok: false, retryable: false, error: "sem_destinatario" } : sendResult("email", m.to.join(","), m.idempotencyKey)) },
     whatsapp: { mode: "mock", send: async (m) => sendResult("wa", m.to, m.idempotencyKey) },
@@ -31,8 +33,8 @@ export function createMockProviders(): Providers {
         return { providerRef: r, status: boletos.get(r)!, digitableLineMasked: "00000.00000 •••••.••••• •••••.••••• 0 00000000000000" };
       },
       async find(key) { const r = byKey.get(`boleto:${key}`); return r ? { providerRef: r, status: boletos.get(r)!, digitableLineMasked: "00000.00000 •••••.••••• •••••.••••• 0 00000000000000" } : null; },
-      async status(r) { const s = boletos.get(r); if (!s) throw new Error("boleto_inexistente"); return s; },
-      async cancel(r) { const s = boletos.get(r); if (!s) throw new Error("boleto_inexistente"); if (s === "pago") throw new Error("boleto_pago"); boletos.set(r, "cancelado"); },
+      async status(r) { const s = seen(r); if (!s) throw new Error("boleto_inexistente"); return s; },
+      async cancel(r) { const s = seen(r); if (!s) throw new Error("boleto_inexistente"); if (s === "pago") throw new Error("boleto_pago"); boletos.set(r, "cancelado"); },
     },
     nfse: {
       mode: "mock",

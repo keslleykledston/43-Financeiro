@@ -4,7 +4,7 @@
 
 ## O que a integração faz e não faz
 - **Faz:** emitir boleto, consultar a situação (emitido, pago, atrasado), emitir segunda via e **cancelar boleto**.
-- **Cancelar boleto é só da diretoria**, com motivo obrigatório, e fica tudo registrado (quem, quando, por quê e o resultado). Só cancela boleto emitido e ainda sem pagamento. A tela de cancelamento chega na próxima fase (E20); hoje a permissão e o limite já existem.
+- **Cancelar boleto é só da diretoria**, com motivo obrigatório, e fica tudo registrado (quem, quando, por quê e o resultado). Só cancela boleto emitido e ainda sem pagamento. Veja `cancelar-boleto.md`.
 - **Nunca faz:** pagar contas ou boletos, transferir, enviar Pix, ler saldo ou extrato da conta. A plataforma **não movimenta dinheiro** da conta. Quem foi pago e quando vem da situação do próprio boleto.
 
 ## Cadastrar as credenciais

@@ -18,3 +18,6 @@
 
 ## O que falta para a emissão real
 Veja *Integrações → Portão da emissão real*: credenciais fora do Git, homologação, calendário fiscal aprovado e **autorização escrita da diretoria**. O roteiro completo está em `docs/E10_GOLIVE.md`.
+
+## Cancelar boleto
+A diretoria pode cancelar um boleto emitido e sem pagamento, com motivo e tudo registrado: veja `cancelar-boleto.md`.

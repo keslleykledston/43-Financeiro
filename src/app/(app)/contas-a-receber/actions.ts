@@ -5,6 +5,7 @@ import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
 import { registerPayment, reversePayment } from "@/modules/receivables/service";
+import { cancelBoleto, recheckCancellation } from "@/modules/issuance/cancel";
 
 // A empresa vem SEMPRE do contexto validado no servidor, nunca do formulário.
 async function ctx() { const c = await requireContext(); if (!c.current) throw new Forbidden(); return { userId: c.user.id, companyId: c.current.id }; }
@@ -27,4 +28,28 @@ export async function reverseAction(fd: FormData) {
   try { const c = await ctx(); await reversePayment(db, c.userId, c.companyId, String(fd.get("paymentId") ?? ""), String(fd.get("reason") ?? "")); } catch (e) { err = known(e); }
   revalidatePath("/contas-a-receber");
   back(id, err, "estornado");
+}
+
+export async function cancelBoletoAction(fd: FormData) {
+  const id = String(fd.get("id") ?? ""); let err = "", ok = "boleto_cancelado";
+  try {
+    const c = await ctx();
+    const r = await cancelBoleto(db, c.userId, c.companyId, { chargeId: id, reason: String(fd.get("reason") ?? ""), confirm: fd.get("confirm") === "on" });
+    if (r.status === "falhou") err = "O provedor não cancelou o boleto. Veja o motivo no histórico do boleto";
+    else if (r.status === "desconhecido") { ok = "boleto_sem_resposta"; }
+  } catch (e) { err = known(e); }
+  revalidatePath("/contas-a-receber"); revalidatePath("/mensagens"); revalidatePath("/faturamento/emissoes");
+  back(id, err, ok);
+}
+
+export async function recheckBoletoAction(fd: FormData) {
+  const id = String(fd.get("id") ?? ""); let err = "", ok = "boleto_cancelado";
+  try {
+    const c = await ctx();
+    const r = await recheckCancellation(db, c.userId, c.companyId, String(fd.get("cancellationId") ?? ""));
+    if (r.status === "falhou") err = "O provedor não cancelou o boleto. Veja o motivo no histórico do boleto";
+    else if (r.status === "desconhecido") ok = "boleto_sem_resposta";
+  } catch (e) { err = known(e); }
+  revalidatePath("/contas-a-receber"); revalidatePath("/mensagens"); revalidatePath("/faturamento/emissoes");
+  back(id, err, ok);
 }

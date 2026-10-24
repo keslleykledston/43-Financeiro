@@ -119,4 +119,6 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [ ] Segunda via na tela da cobrança; acompanhar "pago/atrasado" pela situação do boleto (baixa automática) quando o adaptador existir.
 
 ## E20 — Cancelar boleto pela plataforma (autorizado pelo dono em 2026-10-24, ADR-017)
-- [ ] Permissão `boletos.cancel` (só diretoria) já existe. Falta: tela/ação na cobrança, motivo obrigatório, só boleto emitido e sem pagamento, chamada ao provedor fora de transação (reservar → chamar → registrar) com idempotência, registro IMUTÁVEL (quem, quando, por quê, referência do boleto, resultado, tentativas), reemissão com nova chave de idempotência, auditoria e help. Hoje só provedor simulado.
+- [x] Só diretoria (`boletos.cancel`), motivo + confirmação, só boleto emitido e sem pagamento; reservar → chamar o provedor → registrar; `desconhecido` + reconsulta (5 tentativas); registro IMUTÁVEL em `boleto_cancellations` (migração 0024) + auditoria; nova emissão com chave de idempotência nova (`:gN`); interrompe a régua da cobrança. Provedor simulado.
+- [ ] Pedido de cancelamento por gerente/assistente com aprovação da diretoria (hoje só a diretoria cancela, como autorizado).
+- [ ] Cancelamento em lote; cancelamento no adaptador real (E10b, depois da homologação).
