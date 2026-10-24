@@ -11,7 +11,7 @@ import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass, selectClass } from "@/components/k3g/button";
 import { formatDate } from "@/lib/format";
 
-const TONE: Record<AlertKind, StatusTone> = { vigencia_encerrada: "negative", reajuste_atrasado: "warning", vigencia_proxima: "warning", reajuste_proximo: "info" };
+const TONE: Record<AlertKind, StatusTone> = { vigencia_encerrada: "negative", reajuste_atrasado: "warning", vigencia_proxima: "warning", renovacao_proxima: "info", reajuste_proximo: "info" };
 const plural = (n: number) => `${n} dia${n === 1 ? "" : "s"}`;
 
 export default async function Alertas({ searchParams }: { searchParams: Promise<{ janela?: string }> }) {
@@ -22,8 +22,9 @@ export default async function Alertas({ searchParams }: { searchParams: Promise<
   const { alerts, checked } = await listContractAlerts(db, ctx.user.id, ctx.current.id, todayManaus(), janela);
   const detail = (a: (typeof alerts)[number]) => {
     switch (a.kind) {
-      case "vigencia_encerrada": return `Terminou em ${formatDate(a.date)} (há ${plural(a.days)}) e o contrato continua ativo: já não gera cobrança.`;
-      case "vigencia_proxima": return `Termina em ${formatDate(a.date)} (em ${plural(a.days)}).`;
+      case "vigencia_encerrada": return `A data final informada (${formatDate(a.date)}, há ${plural(a.days)}) já passou e o contrato continua ativo: já não gera cobrança. Encerre o contrato ou remova a data final se ele segue renovando.`;
+      case "vigencia_proxima": return `Data final informada: ${formatDate(a.date)} (em ${plural(a.days)}). Depois dela o contrato deixa de renovar e de cobrar.`;
+      case "renovacao_proxima": return `Renova sozinho em ${formatDate(a.date)} (${a.days === 0 ? "hoje" : `em ${plural(a.days)}`}) por mais 12 meses, se o cliente não se manifestar.${a.withAdjustment ? " É também o momento do reajuste: ainda sem novo valor aprovado." : ""}`;
       case "reajuste_atrasado": return `Fez 12 meses em ${formatDate(a.date)} (há ${plural(a.days)}) desde ${formatDate(a.since!)}, sem novo valor aprovado.`;
       case "reajuste_proximo": return `Faz 12 meses em ${formatDate(a.date)} (em ${plural(a.days)}), contando de ${formatDate(a.since!)}.`;
     }
@@ -38,7 +39,7 @@ export default async function Alertas({ searchParams }: { searchParams: Promise<
         <button className={buttonClass("outline")}>Aplicar</button>
       </form>
       {alerts.length === 0 ? (
-        <EmptyState icon={BellRing} title="Nenhum alerta" description={`Nenhum contrato termina ou faz 12 meses nos próximos ${janela} dias.`} />
+        <EmptyState icon={BellRing} title="Nenhum alerta" description={`Nenhum contrato renova, termina ou faz 12 meses nos próximos ${janela} dias.`} />
       ) : (
         <ul className="divide-y divide-border rounded-lg border bg-card">
           {alerts.map((a) => (
@@ -51,7 +52,7 @@ export default async function Alertas({ searchParams }: { searchParams: Promise<
           ))}
         </ul>
       )}
-      <p className="text-xs text-muted-foreground">O reajuste conta 12 meses desde o início da vigência ou desde a última aprovação que mudou o valor. Para reajustar, abra o contrato e proponha o novo valor (a alteração passa por aprovação).</p>
+      <p className="text-xs text-muted-foreground">Todo contrato vale 12 meses e renova sozinho se o cliente não se manifestar; só tem data final quando o cliente (ou a K3G) encerra. O reajuste conta 12 meses desde o início da vigência ou desde a última aprovação que mudou o valor. Para reajustar, abra o contrato e proponha o novo valor (a alteração passa por aprovação).</p>
     </div>
   );
 }

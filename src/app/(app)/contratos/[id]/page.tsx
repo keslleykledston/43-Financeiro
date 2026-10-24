@@ -3,6 +3,7 @@ import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
+import { nextRenewal } from "@/modules/contracts/alerts";
 import { getContract, STATUS_LABEL, type ContractStatus, type Terms } from "@/modules/contracts/service";
 import { billingSchedule, WARNING_LABEL } from "@/modules/billing/calendar";
 import { formatBRL, formatDate, formatDateTime } from "@/lib/format";
@@ -27,7 +28,7 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
   const nextComp = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Manaus" }).slice(0, 7);
   const sched = billingSchedule({ competenceMonth: nextComp, dueDay: c.dueDay, jointInvoice: c.invoiceJointRequired, issueDayOverride: c.issueDayOverride });
   const status = c.status as ContractStatus;
-  const t = (v: Terms) => `${formatBRL(v.monthlyAmountCents)} · vence dia ${v.dueDay} · ${v.invoiceJointRequired ? "NF junto" : "NF separada"} · ${formatDate(v.startAt)}${v.endAt ? ` a ${formatDate(v.endAt)}` : " (sem fim)"}`;
+  const t = (v: Terms) => `${formatBRL(v.monthlyAmountCents)} · vence dia ${v.dueDay} · ${v.invoiceJointRequired ? "NF junto" : "NF separada"} · ${formatDate(v.startAt)}${v.endAt ? ` a ${formatDate(v.endAt)}` : " (renova sozinho)"}`;
   return (
     <div className="max-w-3xl space-y-5">
       <AppLink href="/contratos" className="text-sm text-primary">← Voltar</AppLink>
@@ -41,7 +42,7 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
           <div><dt className="text-muted-foreground">Valor mensal</dt><dd className="font-semibold"><Money cents={c.amountCents} /></dd></div>
           <div><dt className="text-muted-foreground">Vencimento</dt><dd>dia {c.dueDay} (competência M, vence em M+1)</dd></div>
           {c.commissionPartner && <div><dt className="text-muted-foreground">Parceiro com comissão</dt><dd>{c.commissionPartner}</dd></div>}
-          <div><dt className="text-muted-foreground">Vigência</dt><dd>{formatDate(c.startAt)}{c.endAt ? ` a ${formatDate(c.endAt)}` : " · sem data final"}</dd></div>
+          <div><dt className="text-muted-foreground">Vigência</dt><dd>{formatDate(c.startAt)}{c.endAt ? ` a ${formatDate(c.endAt)}` : " · renova sozinho a cada 12 meses"}{!c.endAt && status === "ativo" ? ` (próxima: ${formatDate(nextRenewal(c.startAt, new Date().toLocaleDateString("sv-SE", { timeZone: "America/Manaus" })))})` : ""}</dd></div>
           <div><dt className="text-muted-foreground">Nota fiscal</dt><dd>{c.invoiceJointRequired ? "Emitida junto do boleto" : "Regra fiscal a definir (separada)"}</dd></div>
         </dl>
         {status === "ativo" && (

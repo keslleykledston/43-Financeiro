@@ -104,5 +104,6 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 
 ## E17 — Alertas de contratos (2026-10-24)
 - [x] `/contratos/alertas`: vigência terminada / termina em breve e reajuste em atraso / próximo (janela 30/60/90 dias); aviso no topo de `/contratos`. Só leitura, sem migração.
+- [x] Regra do dono: contrato vale 12 meses e renova sozinho; sem data final = renovação automática (alerta `renovacao_proxima`, junto do reajuste quando coincidem).
 - [x] Regra de reajuste: 12 meses desde o início ou desde a última versão aprovada que mudou o valor.
 - [ ] Índice (IPCA/IGP-M) e percentual de reajuste por contrato; "adiar/ignorar alerta"; aviso por e-mail à diretoria (depende de E10b).

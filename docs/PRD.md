@@ -36,6 +36,7 @@ Competência M: serviço prestado no mês M. Vencimento: mês M+1. Datas padrão
 - Fim de semana/feriado e horários/cutoff: política pendente, usar calendário configurável e flag de revisão.
 - Serviço de competência M cobrado no dia 25 de M pode ser emitido antes do fechamento da competência: destacar no lote e validar situações com alteração de consumo/serviço e implicação fiscal.
 - NF de outros casos: regras específicas de emissão/tributação NÃO definidas, dependem da contabilidade e do e-NF. Não inferir que NF sempre é emitida no mesmo dia do boleto.
+- **Vigência (regra do dono, 2026-10-24):** todo contrato vale 12 meses e RENOVA AUTOMATICAMENTE por mais 12 se o cliente não se manifestar. `end_at` nulo = renovação automática; `end_at` só quando o cliente/K3G encerra. A cobrança não muda (continua enquanto não houver data final vencida). O sistema avisa a renovação e o reajuste em `/contratos/alertas`.
 - Reajuste, suspensão, proporcionalidade, descontos: regras configuráveis, revisão humana enquanto não confirmadas.
 - Duplicidades bloqueadas por (`company_id`, `contract_id`, `competence_month`, `charge_kind`, `sequence` quando parcelas).
 - Importante separar `competence_month`, `scheduled_issue_at`, `issued_at`, `due_date`, `paid_at`, `bank_settled_at`.

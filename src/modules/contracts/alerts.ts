@@ -5,12 +5,14 @@ import { centsFromNumeric } from "@/lib/money";
 import { requirePerm } from "@/modules/identity/service";
 
 /**
- * Alertas de contrato (E17): vigência (fim próximo ou já passado) e reajuste (12 meses desde o início ou desde a última
+ * Alertas de contrato (E17): regra de negócio — todo contrato vale 12 meses e RENOVA SOZINHO a cada 12 meses se o cliente não se
+ * manifestar. Logo, "sem data final" = renovação automática; uma data final só existe quando o cliente (ou a K3G) encerrou.
+ * Alertas: fim informado (próximo ou já passado), renovação automática próxima e reajuste (12 meses desde o início ou desde a última
  * mudança de valor aprovada). Só leitura: nada é alterado nem enviado; quem decide é a pessoa, pelo fluxo de alteração de contrato.
  */
-export type AlertKind = "vigencia_encerrada" | "vigencia_proxima" | "reajuste_atrasado" | "reajuste_proximo";
+export type AlertKind = "vigencia_encerrada" | "vigencia_proxima" | "renovacao_proxima" | "reajuste_atrasado" | "reajuste_proximo";
 export const ALERT_LABEL: Record<AlertKind, string> = {
-  vigencia_encerrada: "Vigência terminou", vigencia_proxima: "Vigência termina em breve", reajuste_atrasado: "Reajuste em atraso", reajuste_proximo: "Reajuste se aproxima",
+  vigencia_encerrada: "Fim informado já passou", vigencia_proxima: "Fim informado se aproxima", renovacao_proxima: "Renovação automática", reajuste_atrasado: "Reajuste em atraso", reajuste_proximo: "Reajuste se aproxima",
 };
 export const WINDOWS = [30, 60, 90] as const;
 export const DEFAULT_WINDOW = 60;
@@ -20,7 +22,7 @@ export type AlertInput = {
   /** valores mensais das versões APROVADAS, da mais antiga à mais nova, com a data (YYYY-MM-DD) da aprovação */
   approved: { cents: number; on: string }[];
 };
-export type ContractAlert = { contractId: string; customerName: string; kind: AlertKind; date: string; days: number; amountCents: number; since?: string };
+export type ContractAlert = { contractId: string; customerName: string; kind: AlertKind; date: string; days: number; amountCents: number; since?: string; withAdjustment?: boolean };
 
 const ms = (d: string) => Date.parse(`${d}T00:00:00Z`);
 export const daysBetween = (from: string, to: string) => Math.round((ms(to) - ms(from)) / 86400000);
@@ -30,6 +32,20 @@ export function plusYear(d: string): string {
   const [y, m, day] = d.split("-").map(Number);
   const last = new Date(Date.UTC(y + 1, m, 0)).getUTCDate();
   return `${y + 1}-${String(m).padStart(2, "0")}-${String(Math.min(day, last)).padStart(2, "0")}`;
+}
+
+/** Mesma data N anos depois (a partir da data original, para 29/02 voltar a 29/02 em ano bissexto). */
+export function plusYears(d: string, n: number): string {
+  const [y, m, day] = d.split("-").map(Number);
+  const last = new Date(Date.UTC(y + n, m, 0)).getUTCDate();
+  return `${y + n}-${String(m).padStart(2, "0")}-${String(Math.min(day, last)).padStart(2, "0")}`;
+}
+
+/** Próxima renovação automática: o primeiro aniversário do início (12, 24, 36… meses) que cai hoje ou depois. */
+export function nextRenewal(startAt: string, today: string): string {
+  let n = 1;
+  while (plusYears(startAt, n) < today) n++;
+  return plusYears(startAt, n);
 }
 
 /** Data de referência do reajuste: última aprovação que MUDOU o valor mensal; sem mudança, o início da vigência. */
@@ -48,14 +64,20 @@ export function contractAlerts(items: AlertInput[], today: string, windowDays: n
       if (left < 0) out.push({ contractId: c.id, customerName: c.customerName, kind: "vigencia_encerrada", date: c.endAt, days: Math.abs(left), amountCents: c.amountCents });
       else if (left <= windowDays) out.push({ contractId: c.id, customerName: c.customerName, kind: "vigencia_proxima", date: c.endAt, days: left, amountCents: c.amountCents });
     }
-    if (c.status !== "ativo") continue;
+    // renovação automática: só existe enquanto não há data final até ela (suspenso também renova: a suspensão não encerra o contrato)
+    const renewal = nextRenewal(c.startAt, today), rLeft = daysBetween(today, renewal);
+    const renews = !c.endAt || c.endAt > renewal;
+    // reajuste: só contrato ativo (suspenso não cobra) e que ainda exista depois do aniversário
     const since = adjustmentReference(c), due = plusYear(since), left = daysBetween(today, due);
-    if (c.endAt && c.endAt < due) continue; // o contrato acaba antes do aniversário: não há o que reajustar
+    const adjustable = c.status === "ativo" && (!c.endAt || c.endAt > due);
+    const mergedAdjust = adjustable && renews && due === renewal && left <= windowDays; // reajuste e renovação no mesmo dia (inclusive hoje): um aviso só
+    if (renews && rLeft <= windowDays) out.push({ contractId: c.id, customerName: c.customerName, kind: "renovacao_proxima", date: renewal, days: rLeft, amountCents: c.amountCents, since, withAdjustment: mergedAdjust });
+    if (!adjustable || mergedAdjust) continue;
     if (left <= 0) out.push({ contractId: c.id, customerName: c.customerName, kind: "reajuste_atrasado", date: due, days: Math.abs(left), amountCents: c.amountCents, since });
     else if (left <= windowDays) out.push({ contractId: c.id, customerName: c.customerName, kind: "reajuste_proximo", date: due, days: left, amountCents: c.amountCents, since });
   }
-  const rank: Record<AlertKind, number> = { vigencia_encerrada: 0, reajuste_atrasado: 1, vigencia_proxima: 2, reajuste_proximo: 3 };
-  return out.sort((a, b) => rank[a.kind] - rank[b.kind] || (a.kind.endsWith("proxima") || a.kind.endsWith("proximo") ? a.days - b.days : b.days - a.days) || a.customerName.localeCompare(b.customerName, "pt-BR"));
+  const rank: Record<AlertKind, number> = { vigencia_encerrada: 0, reajuste_atrasado: 1, vigencia_proxima: 2, renovacao_proxima: 3, reajuste_proximo: 4 };
+  return out.sort((a, b) => rank[a.kind] - rank[b.kind] || (/proxim[ao]$/.test(a.kind) ? a.days - b.days : b.days - a.days) || a.customerName.localeCompare(b.customerName, "pt-BR"));
 }
 
 const manausDay = (d: Date | null) => (d ?? new Date()).toLocaleDateString("sv-SE", { timeZone: "America/Manaus" });
