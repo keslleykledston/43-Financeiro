@@ -121,6 +121,11 @@ export function readWorkbook(sheets: Sheet[], year: number): Entry[] {
   return sheets.flatMap((s) => readSheet(s, year));
 }
 
+/** Célula com vários e-mails ("a@x.com; b@x.com"): vale o primeiro válido; sem nenhum válido, vazio (o e-mail não bloqueia o contrato). */
+export function firstEmail(v: string): string {
+  return v.split(/[;,\s]+/).find((p) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p)) ?? "";
+}
+
 export type Consolidated = {
   block: Block; name: string; documentRaw: string; document: string | null; // document = normalizado quando válido
   description: string; monthlyCents: number; dueDay: number; startAt: string; endAt: string | null;
@@ -161,7 +166,7 @@ export function consolidate(entries: Entry[]): Consolidated[] {
       block: last.block, name: last.name, documentRaw: last.documentRaw, document: doc ? doc.digits : null,
       description: description.slice(0, 200), monthlyCents: value(latestWithValue)!, dueDay, startAt: `${first.month}-01`,
       endAt: last.month < lastSheetMonth ? lastDayOf(last.month) : null, // sumiu das abas mais recentes: vigência termina no último mês cobrado
-      email: [...list].reverse().find((e) => e.email)?.email ?? "", contact: [...list].reverse().find((e) => e.contact)?.contact ?? "",
+      email: [...list].reverse().map((e) => firstEmail(e.email)).find(Boolean) ?? "", contact: [...list].reverse().find((e) => e.contact)?.contact ?? "",
       commissionPartner: list.some((e) => /MEDINA/.test(norm(e.obs))) ? "Medina" : "",
       months: list.length, distinctValues: new Set(list.map(value).filter((v) => v !== null)).size, lastMonth: last.month, hasExcedente,
     });

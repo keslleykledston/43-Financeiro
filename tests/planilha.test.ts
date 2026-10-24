@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
 import readXlsxFile from "read-excel-file/node";
-import { brl, cents, consolidate, emptyLaterTabs, dayOf, monthOfSheet, readWorkbook, toContractCsv, type Cell, type Sheet } from "@/modules/contracts/planilha";
+import { brl, cents, firstEmail, consolidate, emptyLaterTabs, dayOf, monthOfSheet, readWorkbook, toContractCsv, type Cell, type Sheet } from "@/modules/contracts/planilha";
 import { parseCsv } from "@/lib/csv";
 
 // fixtures/planilha-ficticia.xlsx: planilha INVENTADA no mesmo formato da real (abas JAN–MAR + uma aba ignorada)
@@ -27,6 +27,9 @@ describe("planilha de boletos → contratos (dados fictícios)", () => {
     expect(monthOfSheet("Boletos", 2026)).toBeNull();
     expect(brl(120000)).toBe("1.200,00");
     expect(brl(5)).toBe("0,05");
+    expect(firstEmail("a@x.com; b@x.com")).toBe("a@x.com");
+    expect(firstEmail("sem arroba; ok@x.com.br")).toBe("ok@x.com.br");
+    expect(firstEmail("sem arroba")).toBe("");
   });
 
   it("lê as abas do arquivo .xlsx, separa os blocos e ignora TOTAL e abas sem mês", async () => {
