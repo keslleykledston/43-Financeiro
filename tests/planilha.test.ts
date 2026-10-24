@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
 import readXlsxFile from "read-excel-file/node";
-import { brl, cents, consolidate, dayOf, monthOfSheet, readWorkbook, toContractCsv, type Cell, type Sheet } from "@/modules/contracts/planilha";
+import { brl, cents, consolidate, emptyLaterTabs, dayOf, monthOfSheet, readWorkbook, toContractCsv, type Cell, type Sheet } from "@/modules/contracts/planilha";
 import { parseCsv } from "@/lib/csv";
 
 // fixtures/planilha-ficticia.xlsx: planilha INVENTADA no mesmo formato da real (abas JAN–MAR + uma aba ignorada)
@@ -68,5 +68,13 @@ describe("planilha de boletos → contratos (dados fictícios)", () => {
     ];
     const e = readWorkbook([{ name: "JAN", rows }], 2026);
     expect(e.map((x) => [x.block, x.name, x.dueDay])).toEqual([["solutions", "UM", 7], ["call", "DOIS", null]]);
+  });
+
+  it("aba de mês posterior sem linhas é apontada, mas não encerra ninguém", async () => {
+    const sheets = await load();
+    const withEmpty = [...sheets, { name: "ABR", rows: [] as Cell[][] }, { name: "RESUMO", rows: [] as Cell[][] }];
+    const entries = readWorkbook(withEmpty, 2026);
+    expect(emptyLaterTabs(withEmpty, entries, 2026)).toEqual(["ABR"]);
+    expect(consolidate(entries).find((c) => c.name === "BETA TELECOM SA")!.endAt).toBeNull();
   });
 });

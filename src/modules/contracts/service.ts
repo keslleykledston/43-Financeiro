@@ -64,6 +64,7 @@ export async function createContract(db: DB, actorId: string, companyId: string,
   try {
     return await db.transaction(async (tx) => {
       const x = tx as unknown as DB;
+      await x.execute(sql`select pg_advisory_xact_lock_shared(hashtext(${"contract-import:" + companyId}))`); // importação em lote toma a exclusiva: nunca se cruzam
       const [cu] = await x.select().from(customers).where(and(eq(customers.id, customerId), eq(customers.companyId, companyId)));
       if (!cu || cu.archivedAt) throw new Invalid("Cliente não encontrado ou arquivado nesta empresa");
       return insertDraft(x, actorId, companyId, customerId, t, reason ?? "Contrato inicial");
@@ -109,6 +110,9 @@ export async function decideVersion(db: DB, actorId: string, companyId: string, 
   const role = await activeRole(db, actorId, companyId);
   await db.transaction(async (tx) => {
     const x = tx as unknown as DB;
+    const [v0] = await x.select({ contractId: contractVersions.contractId }).from(contractVersions).where(and(eq(contractVersions.id, versionId), eq(contractVersions.companyId, companyId)));
+    if (!v0) throw new Invalid("Versão não encontrada ou já decidida");
+    await x.select({ id: contracts.id }).from(contracts).where(and(eq(contracts.id, v0.contractId), eq(contracts.companyId, companyId))).for("update"); // ordem de travas: contrato → versão
     const [v] = await x.select().from(contractVersions).where(and(eq(contractVersions.id, versionId), eq(contractVersions.companyId, companyId))).for("update");
     if (!v || v.state !== "pendente") throw new Invalid("Versão não encontrada ou já decidida");
     if (v.requestedBy === actorId && role !== "diretoria") throw new Forbidden("Quem solicitou a alteração não pode aprová-la (exige outro gerente ou a diretoria)");

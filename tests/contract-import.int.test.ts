@@ -8,6 +8,7 @@ import * as schema from "@/lib/db/schema";
 import type { DB } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
 import { createParty } from "@/modules/crm/service";
+import { createContract, proposeChange } from "@/modules/contracts/service";
 import { decideImport, getImport, importContracts, listImports, previewContractImport } from "@/modules/contracts/import";
 
 const enabled = !!process.env.POSTGRES_USER;
@@ -154,5 +155,21 @@ describe.skipIf(!enabled)("importação de contratos da planilha (DB de teste)",
     await expect(db.execute(sql`update contracts set company_id = ${B}::uuid where id = ${c.id}::uuid`)).rejects.toThrow(); // FK composta (cliente/lote da empresa A)
     await expect(db.execute(sql`update contracts set commission_partner = 'x' where id = ${c.id}::uuid`)).rejects.toThrow(); // CHECK 2–60
     expect(r.contracts).toBe(1);
+  });
+
+  it("corridas: criar contrato à mão durante a importação e editar durante a aprovação em lote não travam nem duplicam em silêncio", async () => {
+    const cli = await createParty(db, dirA, A, { kind: "cliente", legalName: "Cliente Corrida", document: D1 });
+    const manual = { description: "Manual", monthlyAmount: "100,00", startAt: "2026-01-01", endAt: "", dueDay: "10", invoiceJointRequired: false, issueDayOverride: "" };
+    const res = await Promise.allSettled([importContracts(db, gerA, A, csv(row())), createContract(db, asstA, A, cli.id, manual)]);
+    const imp = res[0];
+    // ou a importação vê o contrato manual e recusa, ou o contrato manual entra depois dela; nunca erro de banco/deadlock
+    if (imp.status === "rejected") expect(String(imp.reason)).toMatch(/ganhou contrato|Nenhuma linha válida/);
+    expect(res[1].status).toBe("fulfilled");
+
+    await db.execute(sql`truncate contracts, contract_versions, contract_imports cascade`);
+    const r = await importContracts(db, gerA, A, csv(row()));
+    const c = (await db.select().from(schema.contracts))[0];
+    const out = await Promise.allSettled([decideImport(db, ger2A, A, r.importId, "aprovar"), proposeChange(db, gerA, A, c.id, { ...manual, description: "Editado" })]);
+    for (const o of out) if (o.status === "rejected") expect(String(o.reason)).not.toMatch(/deadlock/i);
   });
 });

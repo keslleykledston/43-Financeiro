@@ -174,3 +174,10 @@ export const brl = (c: number) => `${Math.floor(c / 100).toString().replace(/\B(
 export function toContractCsv(list: Consolidated[]): string {
   return toCsv([[...CONTRACT_CSV_HEADERS], ...list.map((c) => [c.name, c.document ?? c.documentRaw, c.description, brl(c.monthlyCents), String(c.dueDay), c.startAt, c.endAt ?? "", c.email, c.contact, c.commissionPartner])]).replace(/^﻿/, "");
 }
+
+/** Abas com nome de mês POSTERIORES à última aba com linhas e sem nenhuma linha: o conversor não encerra contratos por causa delas
+ *  (pode ser só um modelo em branco), mas o operador precisa conferir. */
+export function emptyLaterTabs(sheets: Sheet[], entries: Entry[], year: number): string[] {
+  const last = entries.reduce((m, e) => (e.month > m ? e.month : m), "");
+  return sheets.map((s) => ({ name: s.name, month: monthOfSheet(s.name, year) })).filter((s) => s.month && s.month > last).map((s) => s.name);
+}

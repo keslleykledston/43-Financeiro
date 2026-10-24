@@ -139,9 +139,11 @@ export async function decideImport(db: DB, actorId: string, companyId: string, i
     await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"contract-import:" + companyId}))`);
     const [imp] = await x.select().from(contractImports).where(and(eq(contractImports.id, importId), eq(contractImports.companyId, companyId)));
     if (!imp) throw new Invalid("Lote não encontrado");
-    const pend = await x.select({ v: contractVersions, c: contracts }).from(contractVersions)
+    // ordem de travas: contratos → versões (a mesma de proposeChange/decideVersion), sempre por id
+    const locked = await x.select({ id: contracts.id }).from(contracts).where(and(eq(contracts.companyId, companyId), eq(contracts.importId, importId), eq(contracts.status, "rascunho"))).orderBy(contracts.id).for("update");
+    const pend = locked.length ? await x.select({ v: contractVersions, c: contracts }).from(contractVersions)
       .innerJoin(contracts, and(eq(contracts.id, contractVersions.contractId), eq(contracts.companyId, contractVersions.companyId)))
-      .where(and(eq(contracts.companyId, companyId), eq(contracts.importId, importId), eq(contractVersions.state, "pendente"), eq(contracts.status, "rascunho"))).for("update");
+      .where(and(eq(contracts.companyId, companyId), inArray(contracts.id, locked.map((l) => l.id)), eq(contractVersions.state, "pendente"))).orderBy(contractVersions.id).for("update", { of: contractVersions }) : [];
     if (!pend.length) throw new Invalid("Nada pendente neste lote");
     if (decision === "aprovar" && role !== "diretoria" && pend.some(({ v }) => v.requestedBy === actorId)) throw new Forbidden("Quem importou ou editou estes contratos não pode aprová-los (exige outro gerente ou a diretoria)");
     const now = new Date();
