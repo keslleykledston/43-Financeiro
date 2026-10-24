@@ -8,3 +8,6 @@
 - Diretoria não pode criar Admin técnico. Ninguém remove o próprio acesso.
 - **Remover:** o usuário perde o acesso à empresa imediatamente. O histórico fica na auditoria.
 - Para trocar de empresa, use o seletor no topo.
+
+## Senha e sessões
+Trocar a senha (Minha conta) encerra todas as sessões abertas dessa pessoa, inclusive a atual: entre de novo. Em **Minha conta → Sair em todos os dispositivos** você faz o mesmo sem trocar a senha. Veja também o [Registro de atividades](registro-de-atividades.md).

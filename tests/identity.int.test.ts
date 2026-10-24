@@ -8,7 +8,8 @@ import * as schema from "@/lib/db/schema";
 import type { DB } from "@/lib/db";
 import { hit, loginBlocked } from "@/lib/security/rate-limit";
 import argon2 from "argon2";
-import { acceptInvite, activeRole, changePassword, isUserActive, Forbidden, Invalid, inviteMember, listMembers, removeMember, INVITE_TTL_MS } from "@/modules/identity/service";
+import { acceptInvite, activeRole, changePassword, isSessionValid, isUserActive, revokeSessions, Forbidden, Invalid, inviteMember, listMembers, removeMember, INVITE_TTL_MS } from "@/modules/identity/service";
+import { listAudit, summarizeDetail, AUDIT_PAGE_SIZE } from "@/modules/identity/audit";
 import { can } from "@/modules/identity/permissions";
 
 const enabled = !!process.env.POSTGRES_USER;
@@ -108,6 +109,62 @@ describe.skipIf(!enabled)("identidade: isolamento multiempresa e RBAC (DB de tes
     // outro usuário não é afetado pelo bloqueio
     await db.update(schema.users).set({ passwordHash: await argon2.hash(atual) }).where(sql`id = ${dirA}`);
     await changePassword(db, dirA, atual, nova);
+  });
+
+  it("sessões: trocar a senha ou encerrar tudo invalida os JWTs emitidos antes; token sem versão vale como 0", async () => {
+    const [u0] = await db.select().from(schema.users).where(sql`id = ${dirB}`);
+    expect(u0.sessionVersion).toBe(0);
+    expect(await isSessionValid(db, dirB, 0)).toBe(true);
+    expect(await isSessionValid(db, dirB, undefined)).toBe(true); // sessão aberta antes da migração
+    await revokeSessions(db, dirB);
+    expect(await isSessionValid(db, dirB, 0)).toBe(false);
+    expect(await isSessionValid(db, dirB, undefined)).toBe(false);
+    expect(await isSessionValid(db, dirB, 1)).toBe(true); // login novo carrega a versão atual
+    expect(await isSessionValid(db, dirB, 2)).toBe(false);
+    const aud = await db.select().from(schema.auditLog).where(sql`actor_id = ${dirB} and action = 'auth.sessions_revoked'`);
+    expect(aud).toHaveLength(1);
+    expect(await isSessionValid(db, "00000000-0000-0000-0000-000000000000", 0)).toBe(false);
+    // troca de senha também derruba as sessões abertas
+    await db.update(schema.users).set({ passwordHash: await argon2.hash("senha-atual-do-usuario-1") }).where(sql`id = ${dirA}`);
+    expect(await isSessionValid(db, dirA, 0)).toBe(true);
+    await changePassword(db, dirA, "senha-atual-do-usuario-1", "senha-nova-do-usuario-22");
+    expect(await isSessionValid(db, dirA, 0)).toBe(false);
+    expect(await isSessionValid(db, dirA, 1)).toBe(true);
+    // desabilitada: nunca vale, mesmo com a versão certa
+    await db.update(schema.users).set({ disabledAt: new Date() }).where(sql`id = ${dirB}`);
+    expect(await isSessionValid(db, dirB, 1)).toBe(false);
+    await db.update(schema.users).set({ disabledAt: null }).where(sql`id = ${dirB}`);
+  });
+
+  it("registro de atividades: só quem tem audit.read; isola empresas; eventos de conta só de membros; filtros e paginação", async () => {
+    const row = (companyId: string | null, actorId: string | null, action: string, detail?: object, at = new Date()) => ({ companyId, actorId, action, detail, createdAt: at });
+    await db.insert(schema.auditLog).values([
+      row(A, dirA, "contract.created", { contractId: "c1" }), row(B, dirB, "contract.created", { contractId: "segredo-de-B" }),
+      row(null, dirA, "auth.login.ok"), row(null, dirB, "auth.login.ok"), // conta sem empresa: só aparece para quem é membro da empresa vista
+      row(A, dirA, "member.invited", { password: "abc123", token: "t", email: "pessoa@x.com", count: 2, nested: { x: 1 } }, new Date("2026-01-05T12:00:00Z")),
+    ]);
+    await expect(listAudit(db, asstA, A)).rejects.toThrow(); // assistente não tem audit.read
+    await expect(listAudit(db, dirA, B)).rejects.toThrow(); // diretoria de A não lê B
+    const a = await listAudit(db, dirA, A);
+    const txt = JSON.stringify(a.rows);
+    expect(txt).not.toContain("segredo-de-B");
+    expect(a.rows.filter((r) => r.action === "auth.login.ok")).toHaveLength(1); // só o login de dirA; o de dirB é de outra empresa
+    expect(a.rows.find((r) => r.action === "contract.created")!.label).toBe("Criou contrato");
+    const inv = a.rows.find((r) => r.action === "member.invited")!;
+    expect(inv.summary).toContain("password: ••••"); expect(inv.summary).toContain("token: ••••"); expect(inv.summary).not.toContain("abc123"); expect(inv.summary).toContain("email: ••••"); expect(inv.summary).not.toContain("pessoa@x.com");
+    expect(inv.summary).toContain("count: 2"); expect(inv.summary).toContain("nested: …");
+    expect((await listAudit(db, dirA, A, { action: "contract" })).rows.map((r) => r.action)).toEqual(["contract.created"]);
+    expect((await listAudit(db, dirA, A, { action: "%" })).rows).toHaveLength(0); // curinga é literal, não "tudo"
+    expect((await listAudit(db, dirA, A, { from: "2026-01-05", to: "2026-01-05" })).rows.map((r) => r.action)).toEqual(["member.invited"]);
+    expect((await listAudit(db, dirA, A, { actorId: dirB })).rows).toHaveLength(0);
+    await expect(listAudit(db, dirA, A, { from: "ontem" })).rejects.toThrow(/Data inválida/);
+    // paginação: 60 eventos → 2 páginas, sem repetir linha
+    await db.insert(schema.auditLog).values(Array.from({ length: 60 }, (_, i) => row(A, dirA, "bulk.test", { i }, new Date(Date.now() - 60_000 - i))));
+    const p1 = await listAudit(db, dirA, A, { action: "bulk" }), p2 = await listAudit(db, dirA, A, { action: "bulk", page: 2 });
+    expect(p1.rows).toHaveLength(AUDIT_PAGE_SIZE); expect(p1.hasNext).toBe(true);
+    expect(p2.rows).toHaveLength(10); expect(p2.hasNext).toBe(false);
+    expect(new Set([...p1.rows, ...p2.rows].map((r) => r.id)).size).toBe(60);
+    expect(summarizeDetail(null)).toBe(""); expect(summarizeDetail("x")).toBe(""); expect(summarizeDetail({ a: "x".repeat(300) }).length).toBeLessThanOrEqual(160);
   });
 
   it("P1: conta desabilitada deixa de ser ativa", async () => {

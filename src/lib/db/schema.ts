@@ -16,6 +16,8 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   passwordHash: text("password_hash").notNull(),
   disabledAt: timestamp("disabled_at", { withTimezone: true }),
+  // sobe a cada troca de senha / "encerrar todas as sessões": o JWT carrega o valor do login e deixa de valer se divergir
+  sessionVersion: integer("session_version").notNull().default(0),
 }, (t) => [uniqueIndex("users_email_uq").on(sql`lower(${t.email})`)]);
 
 export const companies = pgTable("companies", {

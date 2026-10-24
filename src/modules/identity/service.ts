@@ -25,6 +25,20 @@ export async function isUserActive(db: DB, userId: string): Promise<boolean> {
   return !!u && !u.d;
 }
 
+/** Sessão (JWT) ainda vale: conta ativa e versão de sessão igual à do login. Token antigo, sem versão, vale como 0. */
+export async function isSessionValid(db: DB, userId: string, sessionVersion: number | undefined): Promise<boolean> {
+  const [u] = await db.select({ d: users.disabledAt, v: users.sessionVersion }).from(users).where(eq(users.id, userId));
+  return !!u && !u.d && u.v === (sessionVersion ?? 0);
+}
+
+/** Encerra TODAS as sessões do usuário (inclusive a atual): sobe a versão; os JWTs emitidos antes deixam de valer. */
+export async function revokeSessions(db: DB, userId: string) {
+  await db.transaction(async (tx) => {
+    await tx.update(users).set({ sessionVersion: sql`${users.sessionVersion} + 1`, updatedAt: new Date() }).where(eq(users.id, userId));
+    await tx.insert(auditLog).values({ actorId: userId, action: "auth.sessions_revoked" });
+  });
+}
+
 export async function requirePerm(db: DB, userId: string, companyId: string, perm: Permission): Promise<Role> {
   const role = await activeRole(db, userId, companyId);
   if (!role || !can(role, perm)) throw new Forbidden();
@@ -106,7 +120,7 @@ export async function changePassword(db: DB, userId: string, current: string, ne
   }
   const passwordHash = await argon2.hash(next, { type: argon2.argon2id });
   await db.transaction(async (tx) => {
-    await tx.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, userId));
+    await tx.update(users).set({ passwordHash, sessionVersion: sql`${users.sessionVersion} + 1`, updatedAt: new Date() }).where(eq(users.id, userId)); // sessões abertas (inclusive roubadas) caem
     await tx.insert(auditLog).values({ actorId: userId, action: "auth.password_changed" });
   });
   await clear(db, `pwchange:${userId}`);

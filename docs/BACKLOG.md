@@ -90,3 +90,10 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - NÃO FEITO: execução com os dados reais (exige autorização expressa e o reenvio do `.xlsx`, que não ficou no servidor); carga histórica 2026 (cobranças/baixas fechadas, validada contra os totais da planilha); edição da marca de comissão depois da importação; cálculo/relatório de comissões.
 
 **Importação real (2026-10-24):** autorizada por escrito; 66 contratos em rascunho (Solutions 47, Call 19; 19 clientes locais da Call criados), 29 linhas pendentes (CNPJ ausente/inválido ou fora do CRM). Células com vários e-mails: vale o primeiro válido. Script operacional `scripts/ops-import-contracts.ts` (prévia por padrão; `OPS_CONFIRM=1` grava; auditado). Falta: dono aprovar os lotes; corrigir pendências no CRM e reimportar; carga histórica 2026 (nova autorização).
+
+## E15 — Segurança operacional (2026-10-24)
+- [x] Revogação de sessões: troca de senha e "Sair em todos os dispositivos" (users.session_version, migração 0021).
+- [x] Registro de atividades `/auditoria` (audit.read; isolado por empresa; filtros; paginação; dados pessoais mascarados).
+- [x] Restore do backup validado manualmente (`scripts/restore-test.sh`).
+- [ ] 2FA (TOTP) para diretoria/admin.
+- [ ] Agendar restore-test periódico (cron semanal) — decisão do dono, altera o crontab do host.

@@ -31,13 +31,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
         await loginOk(db, email, ip);
         await db.insert(auditLog).values({ actorId: u.id, action: "auth.login.ok" });
-        return { id: u.id, name: u.name, email: u.email };
+        return { id: u.id, name: u.name, email: u.email, sv: u.sessionVersion };
       },
     }),
   ],
   callbacks: {
     ...authConfig.callbacks,
-    jwt({ token, user }) { if (user?.id) token.uid = user.id; return token; },
-    session({ session, token }) { if (token.uid) session.user.id = token.uid as string; return session; },
+    jwt({ token, user }) { if (user?.id) { token.uid = user.id; token.sv = (user as { sv?: number }).sv ?? 0; } return token; },
+    session({ session, token }) { if (token.uid) session.user.id = token.uid as string; session.sv = typeof token.sv === "number" ? token.sv : 0; return session; },
   },
 });

@@ -159,7 +159,7 @@ describe.skipIf(!enabled)("E07 contas a receber: baixa manual, saldo, estorno, i
     await expect(db.execute(sql`update payments set interest_amount = 5`)).rejects.toThrow();
     await expect(db.execute(sql`update payments set discount_amount = 5`)).rejects.toThrow();
     const logs = await db.select().from(schema.auditLog).where(sql`${schema.auditLog.action} = 'receivable.payment_registered'`);
-    expect(JSON.stringify(logs.map((l) => l.detail))).not.toMatch(/2500|2\.500|30/);
+    expect(JSON.stringify(logs.map((l) => l.detail)).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "")).not.toMatch(/2500|2\.500|30/); // sem os UUIDs (aleatórios, podem conter "30")
   });
 
   it("banco: trigger barra soma acima do valor e pagamento em cobrança não aprovada, mesmo sem passar pelo serviço", async () => {

@@ -22,7 +22,7 @@ export function PasswordForm() {
         <input id="confirm" name="confirm" type="password" autoComplete="new-password" required minLength={12} className={inputClass} />
       </div>
       {state?.error && <p role="alert" className="text-sm text-negative-foreground">{state.error}</p>}
-      {state?.ok && <Callout tone="positive" role="status">Senha alterada. Use a nova senha no próximo acesso.</Callout>}
+      {state?.ok && <Callout tone="positive" role="status">Senha alterada. Por segurança, todas as sessões foram encerradas: entre de novo com a nova senha.</Callout>}
       <button disabled={pending} className={buttonClass("primary")}>{pending ? "Salvando…" : "Alterar senha"}</button>
     </form>
   );

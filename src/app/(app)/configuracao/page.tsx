@@ -2,6 +2,8 @@ import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { activeRole, listMembers } from "@/modules/identity/service";
 import { can, canGrant, ROLE_LABEL, type Role } from "@/modules/identity/permissions";
+import { AppLink } from "@/components/k3g/app-link";
+import { buttonClass } from "@/components/k3g/button";
 import { InviteForm } from "./invite-form";
 import { removeAction } from "./actions";
 
@@ -17,7 +19,10 @@ export default async function Ajustes() {
   const grantable = ALL.filter((r) => canGrant(role, r));
   return (
     <div className="space-y-5">
-      <div><h1 className="text-2xl font-semibold">Usuários e acessos</h1><p className="text-sm text-muted-foreground">{ctx.current.name} · seu papel: {ROLE_LABEL[role]}</p></div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><h1 className="text-2xl font-semibold">Usuários e acessos</h1><p className="text-sm text-muted-foreground">{ctx.current.name} · seu papel: {ROLE_LABEL[role]}</p></div>
+        {can(role, "audit.read") && <AppLink href="/auditoria" className={buttonClass("outline", "sm")}>Registro de atividades</AppLink>}
+      </div>
       {can(role, "members.invite") && (
         <section className="rounded-lg border bg-card p-5"><h2 className="mb-3 font-semibold">Convidar usuário</h2><InviteForm roles={grantable} /></section>
       )}

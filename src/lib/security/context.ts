@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { companies, memberships } from "@/lib/db/schema";
-import { isUserActive } from "@/modules/identity/service";
+import { isSessionValid } from "@/modules/identity/service";
 
 export const COMPANY_COOKIE = "k3g_company";
 
@@ -12,8 +12,8 @@ export const COMPANY_COOKIE = "k3g_company";
 export async function requireContext() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
-  // conta desabilitada/removida: encerra a sessão (JWT sozinho não vale)
-  if (!(await isUserActive(db, session.user.id))) redirect("/sair");
+  // conta desabilitada/removida ou sessão revogada (troca de senha): encerra a sessão (JWT sozinho não vale)
+  if (!(await isSessionValid(db, session.user.id, session.sv))) redirect("/sair");
   const list = await db
     .select({ id: companies.id, name: companies.name, role: memberships.role })
     .from(memberships)

@@ -51,6 +51,9 @@ test("Minha conta — trocar a própria senha ponta a ponta", async ({ page, bro
   await expect(u.locator("p[role=alert]")).toContainText("confirmação não confere");
   await enviar(ANTIGA, NOVA, NOVA);
   await expect(u.getByText("Senha alterada")).toBeVisible();
+  // a sessão que trocou a senha também cai: a próxima navegação pede login de novo
+  await u.goto("/contratos");
+  await expect(u).toHaveURL(/\/login/);
   await ctx.close();
 
   // senha antiga deixa de valer; a nova entra
@@ -60,4 +63,36 @@ test("Minha conta — trocar a própria senha ponta a ponta", async ({ page, bro
   const nova = await entrar(browser, email, NOVA);
   await expect(nova.page.getByRole("heading", { name: "Visão executiva" })).toBeVisible();
   await nova.ctx.close();
+});
+
+test("Minha conta — 'Sair em todos os dispositivos' derruba a sessão (usuário convidado, não o admin compartilhado)", async ({ page, browser }) => {
+  const email = `sessoes-${Date.now()}@sandbox.test`;
+  await page.goto("/configuracao");
+  await page.getByLabel("E-mail").fill(email);
+  await page.getByLabel("Papel").selectOption({ label: "Assistente" });
+  await page.getByRole("button", { name: "Convidar" }).click();
+  const code = page.getByRole("status").filter({ hasText: "Convite criado" }).locator("code");
+  const path = new URL((await code.innerText()).trim()).pathname;
+  const guest = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+  const g = await guest.newPage();
+  await g.goto(path);
+  await g.getByLabel("E-mail convidado").fill(email);
+  await g.getByLabel("Nome").fill("Usuária Sessões");
+  await g.getByLabel(/^Senha/).fill(ANTIGA);
+  await g.getByRole("button", { name: "Criar acesso" }).click();
+  await expect(g).toHaveURL(/\/login/);
+  await guest.close();
+
+  // dois "aparelhos" com a mesma conta
+  const a = await entrar(browser, email, ANTIGA), b = await entrar(browser, email, ANTIGA);
+  await expect(a.page.getByRole("heading", { name: "Visão executiva" })).toBeVisible();
+  await expect(b.page.getByRole("heading", { name: "Visão executiva" })).toBeVisible();
+  await a.page.goto("/conta");
+  await a.page.getByRole("button", { name: "Sair em todos os dispositivos" }).click();
+  await expect(a.page).toHaveURL(/\/login/);
+  await b.page.goto("/contratos");
+  await expect(b.page).toHaveURL(/\/login/);
+  const c = await entrar(browser, email, ANTIGA); // login novo funciona
+  await expect(c.page.getByRole("heading", { name: "Visão executiva" })).toBeVisible();
+  await a.ctx.close(); await b.ctx.close(); await c.ctx.close();
 });
