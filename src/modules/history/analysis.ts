@@ -9,17 +9,17 @@ export type StageRow = {
   dueOn: string | null; paidOn: string | null;
 };
 
-export type DivKind = "vencimento_fora_da_aba" | "vencimento_ausente" | "pagamento_muito_tardio" | "pagamento_futuro" | "sem_documento" | "documento_invalido" | "fora_do_cadastro" | "duplicado_no_mes" | "pago_sem_liquido" | "liquido_diferente";
+export type DivKind = "vencimento_fora_da_aba" | "vencimento_ausente" | "pagamento_muito_tardio" | "pagamento_futuro" | "sem_documento" | "documento_invalido" | "fora_do_cadastro" | "duplicado_no_mes" | "varias_cobrancas_no_mes" | "pago_sem_liquido" | "liquido_diferente";
 export const DIV_LABEL: Record<DivKind, string> = {
   vencimento_fora_da_aba: "Vencimento fora do mês da aba (regra: o mês da aba manda)", vencimento_ausente: "Sem data de vencimento",
   pagamento_muito_tardio: "Pago mais de 120 dias depois do vencimento", pagamento_futuro: "Data de pagamento no futuro",
   sem_documento: "Cliente sem CNPJ/CPF", documento_invalido: "CNPJ/CPF inválido", fora_do_cadastro: "CNPJ/CPF que não está no cadastro de clientes da empresa",
-  duplicado_no_mes: "Mesmo cliente duas vezes na mesma aba", pago_sem_liquido: "Pago, mas sem valor líquido (fica como estimativa, fora do recebido)", liquido_diferente: "Líquido diferente do valor (juros, multa ou desconto)",
+  duplicado_no_mes: "Possível duplicidade: mesmo cliente, mesmo valor e mesmo vencimento na aba", varias_cobrancas_no_mes: "Cliente com mais de uma cobrança na mesma aba (valores ou vencimentos diferentes)", pago_sem_liquido: "Pago, mas sem valor líquido (fica como estimativa, fora do recebido)", liquido_diferente: "Líquido diferente do valor (juros, multa ou desconto)",
 };
 /** `revisar` = precisa de olho humano antes de qualquer carga; `info` = esperado/explicável (ex.: juros). */
 export const DIV_SEVERITY: Record<DivKind, "revisar" | "info"> = {
   vencimento_fora_da_aba: "revisar", vencimento_ausente: "revisar", pagamento_muito_tardio: "revisar", pagamento_futuro: "revisar", sem_documento: "revisar", documento_invalido: "revisar", fora_do_cadastro: "revisar",
-  duplicado_no_mes: "revisar", pago_sem_liquido: "info", liquido_diferente: "info",
+  duplicado_no_mes: "revisar", varias_cobrancas_no_mes: "info", pago_sem_liquido: "info", liquido_diferente: "info",
 };
 export const DIV_ORDER = Object.keys(DIV_LABEL) as DivKind[];
 export const LATE_DAYS = 120;
@@ -67,7 +67,15 @@ export function analyze(rows: StageRow[], knownDocuments: ReadonlySet<string>, t
     const key = `${r.month}|${r.document ?? `nome:${r.name.toUpperCase()}`}`;
     (seen.get(key) ?? seen.set(key, []).get(key)!).push(r);
   }
-  for (const list of seen.values()) if (list.length > 1) for (const r of list) add(r, "duplicado_no_mes", `${list.length} linhas deste cliente na aba (linhas ${list.map((x) => x.row).join(", ")})`);
+  for (const list of seen.values()) {
+    if (list.length < 2) continue;
+    const sig = (r: StageRow) => `${r.amountCents}|${r.dueOn ?? ""}`;
+    const exact = new Set([...new Set(list.map(sig))].filter((g) => list.filter((r) => sig(r) === g).length > 1)); // mesmo valor e mesmo vencimento
+    for (const r of list) {
+      if (exact.has(sig(r))) add(r, "duplicado_no_mes", `linhas ${list.filter((x) => sig(x) === sig(r)).map((x) => x.row).join(", ")} têm o mesmo valor e vencimento`);
+      else add(r, "varias_cobrancas_no_mes", `${list.length} linhas deste cliente na aba (linhas ${list.map((x) => x.row).join(", ")})`);
+    }
+  }
   const counts = Object.fromEntries(DIV_ORDER.map((k) => [k, 0])) as Record<DivKind, number>;
   for (const d of divs) counts[d.kind]++;
   divs.sort((a, b) => DIV_ORDER.indexOf(a.kind) - DIV_ORDER.indexOf(b.kind) || a.month.localeCompare(b.month) || a.row - b.row);

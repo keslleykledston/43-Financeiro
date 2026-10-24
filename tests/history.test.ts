@@ -37,10 +37,12 @@ describe("H1 — análise do histórico da planilha (pura)", () => {
     expect(kinds([row({ document: "99999999000191", documentRaw: "99.999.999/0001-91" })])).toEqual(["fora_do_cadastro"]);
   });
 
-  it("duplicado na mesma aba (por documento; sem documento, por nome); em outra aba não conta", () => {
+  it("duplicidade: mesmo valor e vencimento = revisar; mesmo cliente com valores/vencimentos diferentes = só informativo; outra aba não conta", () => {
     expect(kinds([row(), row({ row: 9 })])).toEqual(["duplicado_no_mes", "duplicado_no_mes"]);
-    expect(kinds([row({ documentRaw: "", document: null, name: "Sem Doc" }), row({ row: 9, documentRaw: "", document: null, name: "SEM DOC" })])).toEqual(["sem_documento", "sem_documento", "duplicado_no_mes", "duplicado_no_mes"]);
+    expect(kinds([row(), row({ row: 9, amountCents: 50000, netCents: 50000 })])).toEqual(["varias_cobrancas_no_mes", "varias_cobrancas_no_mes"]);
+    expect(kinds([row({ documentRaw: "", document: null, name: "Sem Doc" }), row({ row: 9, documentRaw: "", document: null, name: "SEM DOC", dueOn: "2026-01-20" })])).toEqual(["sem_documento", "sem_documento", "varias_cobrancas_no_mes", "varias_cobrancas_no_mes"]);
     expect(kinds([row(), row({ row: 9, month: "2026-02", dueOn: "2026-02-10", paidOn: "2026-02-11" })])).toEqual([]);
+    const r = analyze([row(), row({ row: 9 })], KNOWN, TODAY); expect(r.toReview).toBe(2); expect(analyze([row(), row({ row: 9, amountCents: 1, netCents: 1 })], KNOWN, TODAY).toReview).toBe(0);
   });
 
   it("em aberto: vencido e sem pagamento; a vencer não conta", () => {

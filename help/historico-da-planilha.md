@@ -13,8 +13,8 @@ Cada linha de cobrança da planilha (cliente, CNPJ/CPF, valores, vencimento, dat
 - **Por aba (mês do vencimento):** linhas, total cobrado, total recebido (líquido) e o que está em aberto (vencido sem data de pagamento). A aba é o mês do **vencimento**; a competência do serviço é o mês anterior.
 - **Caixa por mês de pagamento:** quanto entrou em cada mês, pelas datas de pagamento da planilha. Vale como estimativa até conferir com o extrato do banco.
 - **Divergências**, em lista e em **CSV**:
-  - para **revisar**: vencimento fora do mês da aba (regra: o mês da aba manda) ou ausente; pago mais de 120 dias depois do vencimento; pagamento com data futura; cliente sem CNPJ/CPF, ou inválido, ou que não está no cadastro da empresa; mesmo cliente duas vezes na mesma aba;
-  - **informativas**: líquido diferente do valor (juros, multa ou desconto) e pago sem valor líquido.
+  - para **revisar**: vencimento fora do mês da aba (regra: o mês da aba manda) ou ausente; pago mais de 120 dias depois do vencimento; pagamento com data futura; cliente sem CNPJ/CPF, ou inválido, ou que não está no cadastro da empresa; possível duplicidade (mesmo cliente, mesmo valor e mesmo vencimento na mesma aba);
+  - **informativas**: cliente com mais de uma cobrança na mesma aba (valores ou vencimentos diferentes, normal quando há mais de um serviço), líquido diferente do valor (juros, multa ou desconto) e pago sem valor líquido (aparece como estimativa, fora do total recebido).
 
 ## O que isto NÃO faz (ainda)
 Não gera cobranças nem baixas históricas, não muda o início da vigência dos contratos e não cria a linha do tempo dos clientes. Esses passos (H2 e H3) dependem de revisar as divergências e de **nova autorização escrita** da diretoria para a carga histórica.
