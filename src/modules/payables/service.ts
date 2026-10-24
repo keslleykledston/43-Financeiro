@@ -18,7 +18,7 @@ const audit = (x: DB, companyId: string, actorId: string, action: string, detail
 const uuidOk = (s: string) => /^[0-9a-f-]{36}$/i.test(s);
 type Row = Record<string, unknown>;
 const rows = (r: unknown) => r as Row[];
-const clean = (s: string | undefined, max: number) => (s ?? "").replace(/[\r\n\t]+/g, " ").trim().slice(0, max);
+const clean = (s: string | undefined, max: number) => (s ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 
 export type PayablesSettings = { managerLimitCents: number; directorSelfApproval: boolean };
 export async function getPayablesSettings(db: DB, actorId: string, companyId: string): Promise<PayablesSettings> {
@@ -55,6 +55,9 @@ function validate(i: PayableInput) {
   return { description, cents, documentNumber, category };
 }
 
+/** Serializa lançamentos do MESMO fornecedor: a checagem de duplicidade provável (valor + vencimento) não tem índice, então precisa de lock. */
+const lockVendor = (x: DB, companyId: string, vendorId: string) => x.execute(sql`select pg_advisory_xact_lock(hashtext(${`payable-vendor:${companyId}:${vendorId}`}))`);
+
 async function assertVendor(x: DB, companyId: string, vendorId: string) {
   const [v] = await x.select({ s: vendors.status, archived: vendors.archivedAt }).from(vendors).where(and(eq(vendors.id, vendorId), eq(vendors.companyId, companyId)));
   if (!v || v.archived) throw new Invalid("Fornecedor não encontrado");
@@ -79,6 +82,7 @@ export async function createPayable(db: DB, actorId: string, companyId: string, 
   try {
     return await db.transaction(async (tx) => {
       const x = tx as unknown as DB;
+      await lockVendor(x, companyId, i.vendorId);
       await assertVendor(x, companyId, i.vendorId);
       if (!i.force && (await checkDuplicate(x, companyId, i.vendorId, v.cents, i.dueDate))) throw new Invalid("POSSIVEL_DUPLICIDADE: já há uma conta deste fornecedor com o mesmo valor e vencimento. Confirme que não é a mesma");
       const [p] = await x.insert(payables).values({ companyId, vendorId: i.vendorId, description: v.description, documentNumber: v.documentNumber, amount: numericFromCents(v.cents), dueDate: i.dueDate, category: v.category, createdBy: actorId }).returning({ id: payables.id });
@@ -106,6 +110,7 @@ export async function updatePayable(db: DB, actorId: string, companyId: string, 
       const p = await lockPayable(x, companyId, id);
       if (p.status !== "rascunho") throw new Invalid("Só é possível editar um rascunho");
       if (p.createdBy !== actorId && role !== "diretoria" && role !== "gerente") throw new Forbidden("Só quem criou o rascunho (ou a gerência) pode editá-lo");
+      await lockVendor(x, companyId, i.vendorId);
       await assertVendor(x, companyId, i.vendorId);
       if (!i.force && (await checkDuplicate(x, companyId, i.vendorId, v.cents, i.dueDate, id))) throw new Invalid("POSSIVEL_DUPLICIDADE: já há uma conta deste fornecedor com o mesmo valor e vencimento. Confirme que não é a mesma");
       await x.update(payables).set({ vendorId: i.vendorId, description: v.description, documentNumber: v.documentNumber, amount: numericFromCents(v.cents), dueDate: i.dueDate, category: v.category, updatedAt: new Date() }).where(eq(payables.id, id));

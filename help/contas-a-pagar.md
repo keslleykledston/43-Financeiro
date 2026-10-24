@@ -17,7 +17,7 @@ Menu **A pagar**. Fornecedores são cadastrados em *Clientes e fornecedores* (ti
 6. **Estorno** da baixa (diretoria e gerente, com motivo): o histórico fica e o saldo volta.
 
 ## Proteções
-- **Duplicidade:** o mesmo número de documento para o mesmo fornecedor é **bloqueado**. Mesmo valor e vencimento para o mesmo fornecedor pede **confirmação** explícita ("não é a mesma conta").
+- **Duplicidade:** o mesmo número de documento para o mesmo fornecedor é **bloqueado** (sem diferenciar maiúsculas/minúsculas nem espaços sobrando). Mesmo valor e vencimento para o mesmo fornecedor pede **confirmação** explícita ("não é a mesma conta").
 - Conta **paga** é calculada pelas baixas, nunca marcada à mão.
 - Conta com baixa registrada (mesmo estornada) **não pode ser cancelada**: o histórico precisa existir.
 - Rejeitadas e canceladas liberam o número do documento para um novo lançamento correto.

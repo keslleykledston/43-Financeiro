@@ -87,6 +87,9 @@ describe.skipIf(!enabled)("E11 contas a pagar: fluxo, alçada, duplicidade, baix
     await expect(createPayable(db, asstA, A, base({ documentNumber: "NF-101" }))).rejects.toThrow(/POSSIVEL_DUPLICIDADE/); // mesmo valor e vencimento
     const forced = await createPayable(db, asstA, A, base({ documentNumber: "NF-101", force: true }));
     expect(forced).not.toBe(id);
+    // o nº do documento não diferencia caixa nem espaços
+    await expect(createPayable(db, asstA, A, base({ documentNumber: " nf-100 ", amount: "7,00", dueDate: "2026-11-02" }))).rejects.toThrow(/número de documento/);
+    await expect(createPayable(db, asstA, A, base({ documentNumber: "NF   -100", amount: "8,00", dueDate: "2026-11-03" }))).resolves.toBeTruthy(); // espaço no meio normaliza para "NF -100": outro documento
     // outro fornecedor com o mesmo nº de documento é permitido
     const v2 = (await createParty(db, dirA, A, { kind: "fornecedor", legalName: "Fornecedor Gama", document: CNPJ1 })).id;
     await createPayable(db, asstA, A, base({ vendorId: v2 }));
@@ -97,6 +100,13 @@ describe.skipIf(!enabled)("E11 contas a pagar: fluxo, alçada, duplicidade, baix
     await db.execute(sql`update vendors set status = 'suspenso' where id = ${v2}`);
     await expect(createPayable(db, asstA, A, base({ vendorId: v2, documentNumber: "Z", amount: "7,00" }))).rejects.toThrow(/inativo/);
     expect((await listActiveVendors(db, contA, A)).map((v) => v.name)).toEqual(["Fornecedor Alfa"]);
+  });
+
+  it("duplicidade provável simultânea: dois lançamentos iguais ao mesmo tempo → só um passa sem confirmação", async () => {
+    const mk = (doc: string) => createPayable(db, asstA, A, base({ documentNumber: doc, amount: "321,00", dueDate: "2026-11-09" }));
+    const r = await Promise.allSettled([mk("D-1"), mk("D-2"), mk("D-3")]);
+    expect(r.filter((x) => x.status === "fulfilled")).toHaveLength(1);
+    expect(r.filter((x) => x.status === "rejected").every((x) => /POSSIVEL_DUPLICIDADE/.test((x as PromiseRejectedResult).reason.message))).toBe(true);
   });
 
   it("rascunho: edita quem criou (ou a gerência); depois de enviar é imutável", async () => {

@@ -1,5 +1,5 @@
 {
-  "id": "5dda7331-ac1e-4f06-a180-6b85c4eba308",
+  "id": "ee89689b-77de-4d17-a5e8-6ed73a269759",
   "prevId": "38e97512-85b4-4b8c-81d5-03efb3c679d2",
   "version": "7",
   "dialect": "postgresql",
@@ -4727,9 +4727,9 @@
               "nulls": "last"
             },
             {
-              "expression": "document_number",
-              "isExpression": false,
+              "expression": "lower(\"document_number\")",
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],

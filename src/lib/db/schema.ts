@@ -575,7 +575,7 @@ export const payables = pgTable("payables", {
 }, (t) => [
   foreignKey({ columns: [t.companyId, t.vendorId], foreignColumns: [vendors.companyId, vendors.id] }),
   unique("payables_company_id_uq").on(t.companyId, t.id),
-  uniqueIndex("payables_doc_uq").on(t.companyId, t.vendorId, t.documentNumber).where(sql`${t.documentNumber} is not null and ${t.status} not in ('cancelado', 'rejeitado')`),
+  uniqueIndex("payables_doc_uq").on(t.companyId, t.vendorId, sql`lower(${t.documentNumber})`).where(sql`${t.documentNumber} is not null and ${t.status} not in ('cancelado', 'rejeitado')`),
   index("payables_due_idx").on(t.companyId, t.status, t.dueDate),
   check("payables_status_chk", sql`${t.status} in ('rascunho', 'aguardando_aprovacao', 'aprovado', 'rejeitado', 'cancelado')`),
   check("payables_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),

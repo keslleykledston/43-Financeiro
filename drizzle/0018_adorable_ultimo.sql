@@ -77,7 +77,7 @@ ALTER TABLE "payables_settings" ADD CONSTRAINT "payables_settings_company_id_com
 ALTER TABLE "payables_settings" ADD CONSTRAINT "payables_settings_updated_by_users_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "payable_payments_request_key_uq" ON "payable_payments" USING btree ("company_id","request_key") WHERE "payable_payments"."request_key" is not null;--> statement-breakpoint
 CREATE INDEX "payable_payments_payable_idx" ON "payable_payments" USING btree ("company_id","payable_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "payables_doc_uq" ON "payables" USING btree ("company_id","vendor_id","document_number") WHERE "payables"."document_number" is not null and "payables"."status" not in ('cancelado', 'rejeitado');--> statement-breakpoint
+CREATE UNIQUE INDEX "payables_doc_uq" ON "payables" USING btree ("company_id","vendor_id",lower("document_number")) WHERE "payables"."document_number" is not null and "payables"."status" not in ('cancelado', 'rejeitado');--> statement-breakpoint
 CREATE INDEX "payables_due_idx" ON "payables" USING btree ("company_id","status","due_date");
 --> statement-breakpoint
 -- Defesa em profundidade das contas a pagar (além do serviço): máquina de estados, imutabilidade após o rascunho, nada se apaga.
