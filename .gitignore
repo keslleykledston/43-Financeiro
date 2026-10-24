@@ -22,3 +22,5 @@ test-results/
 e2e-results
 test-results
 playwright-report
+*.swp
+*.swo

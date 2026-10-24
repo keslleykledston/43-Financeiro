@@ -26,9 +26,14 @@ export const companies = pgTable("companies", {
   cnpj: text("cnpj"), // sem CNPJ real pré-preenchido
   // de onde vêm os CLIENTES desta empresa: "local" (cadastro/CSV aqui) ou "crm" (importados do CRM, somente leitura)
   customerMode: text("customer_mode").notNull().default("local"),
+  // E21 — dados cadastrais da própria empresa (edição pela diretoria; `name` é o nome de exibição)
+  legalName: text("legal_name"),
+  financeEmail: text("finance_email"),
+  address: text("address"),
 }, (t) => [
   uniqueIndex("companies_cnpj_uq").on(t.cnpj).where(sql`${t.cnpj} is not null`),
   check("companies_customer_mode_chk", sql`${t.customerMode} in ('local', 'crm')`),
+  check("companies_profile_chk", sql`char_length(${t.legalName}) <= 200 and char_length(${t.financeEmail}) <= 200 and char_length(${t.address}) <= 300`),
 ]);
 
 export const memberships = pgTable("memberships", {
@@ -215,6 +220,10 @@ export const contractVersions = pgTable("contract_versions", {
   state: text("state").notNull().default("pendente"), // pendente | aprovada | rejeitada | substituida (rascunho reenviado)
   terms: jsonb("terms").notNull(), // {description, monthlyAmountCents, startAt, endAt, dueDay, invoiceJointRequired, issueDayOverride}
   reason: text("reason"),
+  // E21 — aditivo: tipo, data em que passa a valer e referência do documento assinado
+  kind: text("kind").notNull().default("alteracao"),
+  effectiveOn: date("effective_on", { mode: "string" }),
+  reference: text("reference"),
   requestedBy: uuid("requested_by").notNull().references(() => users.id),
   decidedBy: uuid("decided_by").references(() => users.id),
   decidedAt: timestamp("decided_at", { withTimezone: true }),
@@ -224,6 +233,25 @@ export const contractVersions = pgTable("contract_versions", {
   unique("contract_versions_uq").on(t.contractId, t.version),
   uniqueIndex("contract_versions_one_pending_uq").on(t.contractId).where(sql`${t.state} = 'pendente'`), // no máximo uma alteração pendente por contrato
   check("contract_versions_state_chk", sql`${t.state} in ('pendente', 'aprovada', 'rejeitada', 'substituida')`),
+  check("contract_versions_kind_chk", sql`${t.kind} in ('alteracao', 'reajuste', 'valor', 'prorrogacao', 'outros')`),
+  check("contract_versions_reference_chk", sql`char_length(${t.reference}) <= 200`),
+]);
+
+// E21 — comentários (só de acréscimo; o banco recusa editar e apagar). Pertencem a um contrato OU a um cliente.
+export const notes = pgTable("notes", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  contractId: uuid("contract_id"),
+  customerId: uuid("customer_id"),
+  body: text("body").notNull(),
+  authorId: uuid("author_id").notNull().references(() => users.id),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.contractId], foreignColumns: [contracts.companyId, contracts.id] }),
+  foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
+  index("notes_contract_idx").on(t.companyId, t.contractId, t.createdAt),
+  index("notes_customer_idx").on(t.companyId, t.customerId, t.createdAt),
+  check("notes_one_target_chk", sql`num_nonnulls(${t.contractId}, ${t.customerId}) = 1`),
+  check("notes_body_chk", sql`char_length(btrim(${t.body})) between 1 and 2000`),
 ]);
 
 // Feriados municipais/estaduais por empresa (os nacionais vêm do código). Política de feriado: revisão humana (PRD §4).

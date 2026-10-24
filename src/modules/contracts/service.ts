@@ -33,6 +33,25 @@ export function parseTerms(input: unknown): Terms {
   return { description: p.data.description, monthlyAmountCents: cents, startAt: p.data.startAt, endAt: p.data.endAt, dueDay: p.data.dueDay, invoiceJointRequired: p.data.invoiceJointRequired, issueDayOverride: p.data.issueDayOverride };
 }
 
+/** Aditivo (E21): tipo, data em que passa a valer e referência do documento assinado. Tudo opcional para a alteração simples. */
+export const AMENDMENT_KINDS = ["alteracao", "reajuste", "valor", "prorrogacao", "outros"] as const;
+export type AmendmentKind = (typeof AMENDMENT_KINDS)[number];
+export const KIND_LABEL: Record<AmendmentKind, string> = { alteracao: "Alteração", reajuste: "Reajuste", valor: "Ajuste de valor", prorrogacao: "Prorrogação", outros: "Outros" };
+export type Amendment = { kind: AmendmentKind; effectiveOn: string | null; reference: string | null };
+const amendmentSchema = z.object({
+  kind: z.preprocess((v) => (v === "" || v === undefined || v === null ? "alteracao" : v), z.enum(AMENDMENT_KINDS, { message: "Tipo de aditivo inválido" })),
+  effectiveOn: z.preprocess((v) => (v === "" || v === undefined ? null : v), iso.nullable()),
+  reference: z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? null : v), z.string().trim().max(200, "Referência muito longa (máximo 200)").nullable().optional()),
+});
+const todayManaus = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Manaus" });
+export function parseAmendment(input: unknown): Amendment {
+  const p = amendmentSchema.safeParse(input ?? {});
+  if (!p.success) throw new Invalid(p.error.issues[0]?.message ?? "Dados do aditivo inválidos");
+  // as cobranças usam o valor vigente no momento da prévia do lote; por isso o aditivo não pode ficar agendado para o futuro
+  if (p.data.effectiveOn && p.data.effectiveOn > todayManaus()) throw new Invalid("A data de efeito não pode ser futura: registre o aditivo quando ele passar a valer");
+  return { kind: p.data.kind, effectiveOn: p.data.effectiveOn, reference: p.data.reference ?? null };
+}
+
 type Row = typeof contracts.$inferSelect;
 export const termsOf = (c: Row): Terms => ({ description: c.description, monthlyAmountCents: centsFromNumeric(c.monthlyAmount), startAt: c.startAt, endAt: c.endAt, dueDay: c.dueDay, invoiceJointRequired: c.invoiceJointRequired, issueDayOverride: c.issueDayOverride });
 const sameTerms = (a: Terms, b: Terms) => JSON.stringify(a) === JSON.stringify(b);
@@ -73,9 +92,11 @@ export async function createContract(db: DB, actorId: string, companyId: string,
 }
 
 /** Propor alteração: nada vigora até a aprovação. Em rascunho, reenvia a versão inicial. */
-export async function proposeChange(db: DB, actorId: string, companyId: string, contractId: string, input: unknown, reason?: string) {
+export async function proposeChange(db: DB, actorId: string, companyId: string, contractId: string, input: unknown, reason?: string, amendmentInput?: unknown) {
   await requirePerm(db, actorId, companyId, "contracts.write");
   const t = parseTerms(input);
+  const am = parseAmendment(amendmentInput);
+  const meta = { kind: am.kind, effectiveOn: am.effectiveOn, reference: am.reference };
   return db.transaction(async (tx) => {
     const x = tx as unknown as DB;
     const [c] = await x.select().from(contracts).where(and(eq(contracts.id, contractId), eq(contracts.companyId, companyId))).for("update");
@@ -87,7 +108,7 @@ export async function proposeChange(db: DB, actorId: string, companyId: string, 
       if (pending) { // ainda não aprovado: a versão anterior fica no histórico (imutável) como "substituida"
         await x.update(contractVersions).set({ state: "substituida", decidedBy: actorId, decidedAt: new Date(), decisionNote: "Substituída por nova edição do rascunho", updatedAt: new Date() }).where(eq(contractVersions.id, pending.id));
         const version = (vs[0]?.version ?? 0) + 1;
-        await x.insert(contractVersions).values({ companyId, contractId, version, state: "pendente", terms: t, reason: reason ?? pending.reason, requestedBy: actorId });
+        await x.insert(contractVersions).values({ companyId, contractId, version, state: "pendente", terms: t, reason: reason ?? pending.reason, ...meta, requestedBy: actorId });
         await x.update(contracts).set({ ...columns(t), updatedAt: new Date() }).where(eq(contracts.id, c.id));
         await audit(x, companyId, actorId, "contract.draft_updated", { contractId, version, replaced: pending.version });
         return version;
@@ -95,13 +116,31 @@ export async function proposeChange(db: DB, actorId: string, companyId: string, 
     } else {
       if (pending) throw new Invalid("Já existe uma alteração pendente de aprovação para este contrato");
       if (sameTerms(t, termsOf(c))) throw new Invalid("Nenhuma alteração em relação aos termos vigentes");
+      if ((am.kind === "reajuste" || am.kind === "valor") && t.monthlyAmountCents === centsFromNumeric(c.monthlyAmount)) throw new Invalid("Este tipo de aditivo muda o valor mensal, mas o valor informado é igual ao vigente");
+      if (am.kind === "prorrogacao" && t.endAt === c.endAt) throw new Invalid("Prorrogação muda o fim da vigência, mas a data informada é igual à vigente");
     }
     const version = (vs[0]?.version ?? 0) + 1;
-    await x.insert(contractVersions).values({ companyId, contractId, version, state: "pendente", terms: t, reason: reason ?? null, requestedBy: actorId });
+    await x.insert(contractVersions).values({ companyId, contractId, version, state: "pendente", terms: t, reason: reason ?? null, ...meta, requestedBy: actorId });
     if (c.status === "rascunho") await x.update(contracts).set({ ...columns(t), updatedAt: new Date() }).where(eq(contracts.id, c.id)); // rascunho reenviado após rejeição
-    await audit(x, companyId, actorId, "contract.change_proposed", { contractId, version });
+    await audit(x, companyId, actorId, "contract.change_proposed", { contractId, version, kind: am.kind });
     return version;
   });
+}
+
+/** Atalho da DIRETORIA: propõe e aprova na hora (o aditivo fica registrado igual: versão, quem pediu, quem aprovou). Dois passos, dois eventos no registro. */
+export async function proposeAndApprove(db: DB, actorId: string, companyId: string, contractId: string, input: unknown, reason?: string, amendmentInput?: unknown) {
+  const role = await requirePerm(db, actorId, companyId, "contracts.approve");
+  if (role !== "diretoria") throw new Forbidden("Aprovar na hora é exclusivo da diretoria");
+  // propor + aprovar na MESMA transação: se a aprovação falhar, a proposta não fica pendente para outra pessoa aprovar depois
+  const version = await db.transaction(async (tx) => {
+    const x = tx as unknown as DB;
+    const n = await proposeChange(x, actorId, companyId, contractId, input, reason, amendmentInput);
+    const [v] = await x.select({ id: contractVersions.id }).from(contractVersions).where(and(eq(contractVersions.contractId, contractId), eq(contractVersions.companyId, companyId), eq(contractVersions.version, n), eq(contractVersions.state, "pendente")));
+    if (!v) throw new Invalid("A versão proposta não está mais pendente");
+    await decideVersion(x, actorId, companyId, v.id, "aprovar", "Aprovado na hora pela diretoria");
+    return n;
+  });
+  return version;
 }
 
 /** Aprovar/rejeitar. Aprovador ≠ solicitante (exceto diretoria). A aprovação da v1 ativa o contrato. */

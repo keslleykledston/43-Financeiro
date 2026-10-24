@@ -87,13 +87,13 @@ export async function listContractAlerts(db: DB, actorId: string, companyId: str
   const rows = await db.select({ c: contracts, name: customers.legalName }).from(contracts)
     .innerJoin(customers, and(eq(customers.id, contracts.customerId), eq(customers.companyId, contracts.companyId)))
     .where(and(eq(contracts.companyId, companyId), inArray(contracts.status, ["ativo", "suspenso"]))).orderBy(asc(customers.legalName));
-  const versions = rows.length ? await db.select({ contractId: contractVersions.contractId, terms: contractVersions.terms, decidedAt: contractVersions.decidedAt }).from(contractVersions)
+  const versions = rows.length ? await db.select({ contractId: contractVersions.contractId, terms: contractVersions.terms, decidedAt: contractVersions.decidedAt, effectiveOn: contractVersions.effectiveOn }).from(contractVersions)
     .where(and(eq(contractVersions.companyId, companyId), eq(contractVersions.state, "aprovada"), inArray(contractVersions.contractId, rows.map((r) => r.c.id)))).orderBy(asc(contractVersions.contractId), asc(contractVersions.version)) : [];
   const byContract = new Map<string, AlertInput["approved"]>();
   for (const v of versions) {
     const cents = (v.terms as { monthlyAmountCents?: number }).monthlyAmountCents;
     if (typeof cents !== "number") continue;
-    (byContract.get(v.contractId) ?? byContract.set(v.contractId, []).get(v.contractId)!).push({ cents, on: manausDay(v.decidedAt) });
+    (byContract.get(v.contractId) ?? byContract.set(v.contractId, []).get(v.contractId)!).push({ cents, on: v.effectiveOn ?? manausDay(v.decidedAt) }); // data de efeito do aditivo, se informada
   }
   const alerts = contractAlerts(rows.map((r) => ({ id: r.c.id, customerName: r.name, status: r.c.status, startAt: r.c.startAt, endAt: r.c.endAt, amountCents: centsFromNumeric(r.c.monthlyAmount), approved: byContract.get(r.c.id) ?? [] })), today, windowDays);
   return { alerts, checked: rows.length };

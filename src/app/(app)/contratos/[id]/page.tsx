@@ -4,27 +4,30 @@ import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
 import { nextRenewal } from "@/modules/contracts/alerts";
-import { getContract, STATUS_LABEL, type ContractStatus, type Terms } from "@/modules/contracts/service";
+import { getContract, KIND_LABEL, STATUS_LABEL, type AmendmentKind, type ContractStatus, type Terms } from "@/modules/contracts/service";
+import { listNotes } from "@/modules/notes/service";
+import { NotesBlock } from "@/components/k3g/notes-block";
 import { billingSchedule, WARNING_LABEL } from "@/modules/billing/calendar";
 import { formatBRL, formatDate, formatDateTime } from "@/lib/format";
 import { Callout, Money, PageHeader, SectionCard, StatusPill, type StatusTone } from "@/components/k3g/primitives";
 import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass, inputClass } from "@/components/k3g/button";
 import { ContractForm } from "../contract-form";
-import { commissionAction, decideAction, proposeAction, statusAction } from "../actions";
+import { commissionAction, decideAction, noteAction, proposeAction, statusAction } from "../actions";
 import { percentLabel } from "@/modules/commissions/calc";
 
 const TONE: Record<ContractStatus, StatusTone> = { rascunho: "info", ativo: "positive", suspenso: "warning", encerrado: "neutral" };
 const VTONE = { pendente: "info", aprovada: "positive", rejeitada: "negative", substituida: "neutral" } as const;
 const brMoney = (c: number) => (c / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); // 250000 → "2.500,00" (aceito pelo parser estrito)
 
-export default async function Detalhe({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ erro?: string; proposta?: string; comissao?: string }> }) {
+export default async function Detalhe({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ erro?: string; proposta?: string; comissao?: string; aprovado?: string; comentario?: string }> }) {
   const [{ id }, sp, ctx] = await Promise.all([params, searchParams, requireContext()]);
   const role = ctx.current ? await activeRole(db, ctx.user.id, ctx.current.id) : null;
   if (!ctx.current || !role || !can(role, "contracts.read")) return <Callout tone="warning">Seu papel não tem acesso a contratos.</Callout>;
   const c = await getContract(db, ctx.user.id, ctx.current.id, id);
   if (!c) notFound();
   const write = can(role, "contracts.write"), approve = can(role, "contracts.approve"), commRead = can(role, "commissions.read"), commManage = can(role, "commissions.manage");
+  const notes = await listNotes(db, ctx.user.id, ctx.current.id, { contractId: id });
   const pending = c.versions.find((v) => v.state === "pendente");
   const nextComp = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Manaus" }).slice(0, 7);
   const sched = billingSchedule({ competenceMonth: nextComp, dueDay: c.dueDay, jointInvoice: c.invoiceJointRequired, issueDayOverride: c.issueDayOverride });
@@ -35,6 +38,8 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
       <AppLink href="/contratos" className="text-sm text-primary">← Voltar</AppLink>
       <PageHeader title={c.customer.legalName} description={`${c.description}`} actions={<StatusPill tone={TONE[status]}>{STATUS_LABEL[status]}</StatusPill>} />
       {sp.erro && <Callout tone="negative" role="alert">{sp.erro}</Callout>}
+      {sp.aprovado && <Callout tone="positive" role="status">Aditivo aprovado e já em vigor. Cobranças já geradas não mudam; as próximas prévias de lote usam os novos termos.</Callout>}
+      {sp.comentario && <Callout tone="positive" role="status">Comentário registrado.</Callout>}
       {sp.proposta && <Callout tone="positive" role="status">Alteração enviada para aprovação. Os termos vigentes continuam os mesmos até lá.</Callout>}
       {c.customer.status !== "ativo" && <Callout tone="warning">Cliente <strong>{c.customer.status}</strong>: este contrato não gera cobrança enquanto o cliente não voltar a ser ativo.</Callout>}
 
@@ -86,9 +91,9 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
       )}
 
       {write && status !== "encerrado" && (!pending || status === "rascunho") && (
-        <SectionCard title={status === "rascunho" ? "Corrigir o contrato" : "Propor alteração"}>
+        <SectionCard title={status === "rascunho" ? "Corrigir o contrato" : "Aditivo ou ajuste de valor"}>
           <p className="mb-3 text-sm text-muted-foreground">{status === "rascunho" ? "Ajuste os dados antes da aprovação." : "A alteração só passa a valer depois de aprovada; os termos atuais continuam até lá."}</p>
-          <ContractForm action={proposeAction.bind(null, c.id)} withReason submit={status === "rascunho" ? "Salvar correção" : "Enviar para aprovação"}
+          <ContractForm action={proposeAction.bind(null, c.id)} withReason amendment={status !== "rascunho"} approveNow={status !== "rascunho" && role === "diretoria"} submit={status === "rascunho" ? "Salvar correção" : "Enviar para aprovação"}
             defaults={{ description: c.description, monthlyAmount: brMoney(c.amountCents), startAt: c.startAt, endAt: c.endAt, dueDay: c.dueDay, invoiceJointRequired: c.invoiceJointRequired, issueDayOverride: c.issueDayOverride }} />
         </SectionCard>
       )}
@@ -109,14 +114,17 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
         <ul className="space-y-3">
           {c.versions.map((v) => (
             <li key={v.id} className="text-sm">
-              <div className="flex flex-wrap items-center gap-2"><strong>v{v.version}</strong><StatusPill tone={VTONE[v.state as keyof typeof VTONE]}>{v.state}</StatusPill><span className="text-muted-foreground">{formatDateTime(v.createdAt)}</span></div>
+              <div className="flex flex-wrap items-center gap-2"><strong>v{v.version}</strong><StatusPill tone={VTONE[v.state as keyof typeof VTONE]}>{v.state}</StatusPill>{v.version > 1 && <StatusPill tone="neutral">{KIND_LABEL[v.kind as AmendmentKind] ?? v.kind}</StatusPill>}<span className="text-muted-foreground">{formatDateTime(v.createdAt)}</span></div>
               <p>{t(v.terms)}</p>
               {v.reason && <p className="text-muted-foreground">Motivo: {v.reason}</p>}
+              {(v.effectiveOn || v.reference) && <p className="text-muted-foreground">{v.effectiveOn ? `Vale a partir de ${formatDate(v.effectiveOn)}` : ""}{v.effectiveOn && v.reference ? " · " : ""}{v.reference ? `Documento: ${v.reference}` : ""}</p>}
               {v.decidedAt && <p className="text-muted-foreground">Decidida em {formatDateTime(v.decidedAt)}{v.decisionNote ? ` — ${v.decisionNote}` : ""}</p>}
             </li>
           ))}
         </ul>
       </SectionCard>
+
+      <NotesBlock notes={notes} action={noteAction} hidden={{ contractId: c.id }} canWrite={write} />
     </div>
   );
 }

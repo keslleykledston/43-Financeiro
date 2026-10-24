@@ -7,14 +7,16 @@ import { can } from "@/modules/identity/permissions";
 import { getCustomerMode, getParty, history, STATUS_LABEL, type Status } from "@/modules/crm/service";
 import { PartyForm } from "../party-form";
 import { ContactForm } from "../contact-form";
-import { archiveAction, removeContactAction, updateAction } from "../actions";
+import { archiveAction, noteAction, removeContactAction, updateAction } from "../actions";
+import { listNotes } from "@/modules/notes/service";
+import { NotesBlock } from "@/components/k3g/notes-block";
 
 const LABEL: Record<string, string> = {
   "party.created": "Cadastro criado", "party.updated": "Dados alterados", "party.archived": "Arquivado", "party.restored": "Restaurado",
   "party.contact_added": "Contato adicionado", "party.contact_removed": "Contato removido",
 };
 
-export default async function Detalhe({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ salvo?: string }> }) {
+export default async function Detalhe({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ salvo?: string; erro?: string }> }) {
   const [{ id }, sp, ctx] = await Promise.all([params, searchParams, requireContext()]);
   if (!ctx.current || !/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const role = await activeRole(db, ctx.user.id, ctx.current.id);
@@ -24,6 +26,7 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
   const write = can(role, "crm.write");
   const crmMode = (await getCustomerMode(db, ctx.user.id, ctx.current.id)) === "crm";
   const crmOwned = p.source === "crm" && crmMode; // somente leitura só no modo CRM
+  const notes = p.kind === "cliente" ? await listNotes(db, ctx.user.id, ctx.current.id, { customerId: id }) : [];
   const log = await history(db, ctx.user.id, ctx.current.id, id);
   return (
     <div className="max-w-2xl space-y-5">
@@ -33,6 +36,7 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
         <p className="text-sm text-muted-foreground">{p.kind === "cliente" ? "Cliente" : "Fornecedor"} · {p.docType.toUpperCase()} {p.documentFormatted}{p.archivedAt && <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs">Arquivado</span>}{p.kind === "cliente" && <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${p.status === "ativo" ? "bg-positive-soft text-positive-foreground" : p.status === "cancelado" ? "bg-negative-soft text-negative-foreground" : "bg-warning-soft text-warning-foreground"}`}>{STATUS_LABEL[p.status as Status]}</span>}</p>
       </div>
       {p.kind === "cliente" && p.status !== "ativo" && <p role="note" className="rounded-md bg-warning-soft p-3 text-sm text-warning-foreground">Cliente <strong>{p.status}</strong>: continua cadastrado (pode ter dívidas antigas a receber), mas <strong>não gera nova cobrança</strong>.</p>}
+      {sp.erro && <p role="alert" className="rounded-md bg-negative-soft p-3 text-sm text-negative-foreground">{sp.erro}</p>}
       {sp.salvo && <p role="status" className="rounded-md bg-positive-soft p-3 text-sm text-positive-foreground">Alterações salvas.</p>}
       {crmOwned && <p role="note" className="rounded-md bg-info-soft p-3 text-sm text-info-foreground">Cadastro sincronizado do CRM (somente leitura). Para alterar dados ou arquivar, edite no CRM. Contatos adicionais locais são permitidos.</p>}
       {p.source === "crm" && !crmMode && <p role="note" className="rounded-md bg-warning-soft p-3 text-sm text-warning-foreground">Este cadastro veio do CRM, mas a empresa está no modo Local, então ele é editável. Se voltar ao modo CRM, os dados do CRM sobrescrevem suas edições.</p>}
@@ -53,6 +57,7 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
         </ul>
         {write && !p.archivedAt && <div className="mt-4 border-t border-border pt-4"><ContactForm partyId={id} /></div>}
       </section>
+      {p.kind === "cliente" && <NotesBlock notes={notes} action={noteAction} hidden={{ partyId: id }} canWrite={write} />}
       <section className="rounded-lg border bg-card p-5">
         <h2 className="mb-3 font-semibold">Histórico</h2>
         <ul className="space-y-1 text-sm text-muted-foreground">

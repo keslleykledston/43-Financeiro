@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
+import { addNote } from "@/modules/notes/service";
 import { addContact, createParty, importParties, previewImport, removeContact, setArchived, updateParty, type ImportRow } from "@/modules/crm/service";
 
 export type FormState = { error?: string; values?: Record<string, string> } | undefined;
@@ -76,4 +77,12 @@ export async function importAction(_: ImportState, fd: FormData): Promise<Import
     revalidatePath("/clientes");
     return r;
   } catch (e) { return { error: msg(e) }; }
+}
+
+export async function noteAction(fd: FormData) {
+  const partyId = String(fd.get("partyId") ?? "");
+  let err = "";
+  try { const c = await ctx(); await addNote(db, c.userId, c.companyId, { customerId: partyId }, String(fd.get("body") ?? "")); } catch (e) { err = msg(e); }
+  revalidatePath(`/clientes/${partyId}`);
+  redirect(`/clientes/${partyId}${err ? `?erro=${encodeURIComponent(err)}` : ""}#comentarios`);
 }

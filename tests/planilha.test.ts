@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
 import readXlsxFile from "read-excel-file/node";
-import { brl, cents, firstEmail, consolidate, emptyLaterTabs, dayOf, monthOfSheet, readWorkbook, toContractCsv, type Cell, type Sheet } from "@/modules/contracts/planilha";
+import { brl, cents, firstEmail, isoDateOf, consolidate, emptyLaterTabs, dayOf, monthOfSheet, readWorkbook, toContractCsv, type Cell, type Sheet } from "@/modules/contracts/planilha";
 import { parseCsv } from "@/lib/csv";
 
 // fixtures/planilha-ficticia.xlsx: planilha INVENTADA no mesmo formato da real (abas JAN–MAR + uma aba ignorada)
@@ -25,6 +25,11 @@ describe("planilha de boletos → contratos (dados fictícios)", () => {
     expect(monthOfSheet("Boletos JAN 2026", 2026)).toBe("2026-01");
     expect(monthOfSheet("Boletos OUT 2026", 2026)).toBe("2026-10");
     expect(monthOfSheet("Boletos", 2026)).toBeNull();
+    expect(isoDateOf(new Date(Date.UTC(2026, 0, 14)))).toBe("2026-01-14");
+    expect(isoDateOf(46036)).toBe("2026-01-14");
+    expect(isoDateOf("14/01/2026")).toBe("2026-01-14");
+    expect(isoDateOf("2026-01-14T00:00:00Z")).toBe("2026-01-14");
+    expect(isoDateOf("pago")).toBeNull(); expect(isoDateOf("")).toBeNull(); expect(isoDateOf(null)).toBeNull(); expect(isoDateOf(5)).toBeNull(); expect(isoDateOf("01/01/1900")).toBeNull();
     expect(brl(120000)).toBe("1.200,00");
     expect(brl(5)).toBe("0,05");
     expect(firstEmail("a@x.com; b@x.com")).toBe("a@x.com");
@@ -97,6 +102,7 @@ describe("planilha de boletos → contratos (dados fictícios)", () => {
     ];
     const e = readWorkbook([{ name: "Boletos JAN 2026", rows }], 2026);
     expect(e.map((x) => [x.block, x.month, x.name, x.dueDay])).toEqual([["solutions", "2026-01", "UM", 10], ["call", "2026-01", "DOIS", 5]]);
-    expect(e[1]).toMatchObject({ planoCents: 5000, excedenteCents: 500, netCents: 5500 });
+    expect(e[1]).toMatchObject({ planoCents: 5000, excedenteCents: 500, netCents: 5500, dueOn: "2026-01-05", paidOn: null });
+    expect(e[0]).toMatchObject({ dueOn: "2026-01-10", paidOn: null });
   });
 });

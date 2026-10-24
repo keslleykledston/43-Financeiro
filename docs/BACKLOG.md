@@ -122,3 +122,12 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [x] Só diretoria (`boletos.cancel`), motivo + confirmação, só boleto emitido e sem pagamento; reservar → chamar o provedor → registrar; `desconhecido` + reconsulta (5 tentativas); registro IMUTÁVEL em `boleto_cancellations` (migração 0024) + auditoria; nova emissão com chave de idempotência nova (`:gN`); interrompe a régua da cobrança. Provedor simulado.
 - [ ] Pedido de cancelamento por gerente/assistente com aprovação da diretoria (hoje só a diretoria cancela, como autorizado).
 - [ ] Cancelamento em lote; cancelamento no adaptador real (E10b, depois da homologação).
+
+## E21 — Aditivos, comentários e dados da empresa (pedido do dono, 2026-10-24)
+- [x] Aditivo = versão do contrato com tipo (alteração, reajuste, ajuste de valor, prorrogação, outros), data de efeito (não futura), referência do documento e motivo; aprovação pelo fluxo atual; diretoria pode "Aprovar agora" (registra quem pediu e quem aprovou); alerta de reajuste conta a partir da data de efeito (migração 0025).
+- [x] Comentários só de acréscimo em contrato e cliente (trigger recusa editar/apagar; texto fora do registro de atividades).
+- [x] Dados da empresa (nome, razão social, CNPJ validado e único, e-mail financeiro, endereço): só diretoria, auditado (só nomes dos campos).
+- [ ] Aditivo agendado (data futura aplicada sozinha na data) — hoje a data de efeito não pode ser futura.
+- [ ] Cliente do CRM: correção de nome/CNPJ continua no CRM (somente leitura aqui); aguardando o dono dizer o que está errado em "19.534.417 LTDA".
+- [ ] H1 (histórico a partir das abas da planilha) — aguarda "pode seguir" e respostas (docs/HISTORICO_E_CAIXA.md §6).
+- [ ] Endurecer o papel de banco da aplicação (sem TRUNCATE/DDL; papel de migração separado) — protege as tabelas só-de-acréscimo (notes, commission_*, boleto_cancellations). Ver review E21 #2.

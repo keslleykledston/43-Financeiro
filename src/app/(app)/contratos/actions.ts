@@ -5,7 +5,8 @@ import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
 import { setContractCommission } from "@/modules/commissions/service";
-import { createContract, decideVersion, proposeChange, setStatus, type ContractStatus } from "@/modules/contracts/service";
+import { createContract, decideVersion, proposeAndApprove, proposeChange, setStatus, type ContractStatus } from "@/modules/contracts/service";
+import { addNote } from "@/modules/notes/service";
 
 export type FormState = { error?: string; values?: Record<string, string> } | undefined;
 
@@ -27,10 +28,16 @@ export async function createAction(_: FormState, fd: FormData): Promise<FormStat
 }
 
 export async function proposeAction(contractId: string, _: FormState, fd: FormData): Promise<FormState> {
-  try { const c = await ctx(); await proposeChange(db, c.userId, c.companyId, contractId, termsInput(fd), String(fd.get("reason") ?? "") || undefined); }
+  const am = { kind: fd.get("kind"), effectiveOn: fd.get("effectiveOn"), reference: fd.get("reference") };
+  const now = fd.get("approveNow") === "on";
+  try {
+    const c = await ctx(); const reason = String(fd.get("reason") ?? "") || undefined;
+    if (now) await proposeAndApprove(db, c.userId, c.companyId, contractId, termsInput(fd), reason, am);
+    else await proposeChange(db, c.userId, c.companyId, contractId, termsInput(fd), reason, am);
+  }
   catch (e) { return { error: msg(e), values: keep(fd) }; }
-  revalidatePath(`/contratos/${contractId}`); revalidatePath("/contratos");
-  redirect(`/contratos/${contractId}?proposta=1`);
+  revalidatePath(`/contratos/${contractId}`); revalidatePath("/contratos"); revalidatePath("/faturamento"); revalidatePath("/contratos/alertas");
+  redirect(`/contratos/${contractId}?${now ? "aprovado=1" : "proposta=1"}`);
 }
 
 export async function decideAction(fd: FormData) {
@@ -56,4 +63,12 @@ export async function commissionAction(fd: FormData) {
   try { const c = await ctx(); await setContractCommission(db, c.userId, c.companyId, contractId, { partner: String(fd.get("partner") ?? ""), percent: String(fd.get("percent") ?? "") }); } catch (e) { err = msg(e); }
   revalidatePath(`/contratos/${contractId}`); revalidatePath("/contratos"); revalidatePath("/comissoes");
   redirect(`/contratos/${contractId}${err ? `?erro=${encodeURIComponent(err)}` : "?comissao=1"}`);
+}
+
+export async function noteAction(fd: FormData) {
+  const contractId = String(fd.get("contractId") ?? "");
+  let err = "";
+  try { const c = await ctx(); await addNote(db, c.userId, c.companyId, { contractId }, String(fd.get("body") ?? "")); } catch (e) { err = msg(e); }
+  revalidatePath(`/contratos/${contractId}`);
+  redirect(`/contratos/${contractId}${err ? `?erro=${encodeURIComponent(err)}` : "?comentario=1"}#comentarios`);
 }

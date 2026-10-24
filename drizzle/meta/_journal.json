@@ -176,6 +176,13 @@
       "when": 1792863609345,
       "tag": "0024_high_randall_flagg",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792873069340,
+      "tag": "0025_natural_nehzno",
+      "breakpoints": true
     }
   ]
 }

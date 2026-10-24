@@ -16,6 +16,7 @@ export type Entry = {
   block: Block; month: string; // YYYY-MM da aba
   name: string; documentRaw: string; grossCents: number | null; netCents: number | null; planoCents: number | null; excedenteCents: number | null;
   dueDay: number | null; service: string; obs: string; email: string; contact: string;
+  dueOn: string | null; paidOn: string | null; // datas completas (AAAA-MM-DD) do vencimento e do pagamento, quando a célula tem data; servem ao histórico
 };
 
 const MONTHS: Record<string, string> = { JAN: "01", FEV: "02", MAR: "03", ABR: "04", MAI: "05", JUN: "06", JUL: "07", AGO: "08", SET: "09", OUT: "10", NOV: "11", DEZ: "12" };
@@ -71,6 +72,21 @@ export function dayOf(v: Cell): number | null {
   return null;
 }
 
+/** Data completa (AAAA-MM-DD) de uma célula: Date, número de série do Excel, "dd/mm/aaaa" ou "aaaa-mm-dd". Qualquer outra coisa → null. */
+export function isoDateOf(v: Cell): string | null {
+  let d: Date | null = null;
+  if (v instanceof Date && !Number.isNaN(v.getTime())) d = v;
+  else if (typeof v === "number" && v > 20000 && v < 80000) d = new Date(Math.round((v - 25569) * 86400000));
+  else if (typeof v === "string") {
+    const a = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v.trim()), b = /^(\d{4})-(\d{2})-(\d{2})/.exec(v.trim());
+    if (a) d = new Date(Date.UTC(Number(a[3]), Number(a[2]) - 1, Number(a[1])));
+    else if (b) d = new Date(Date.UTC(Number(b[1]), Number(b[2]) - 1, Number(b[3])));
+  }
+  if (!d) return null;
+  const y = d.getUTCFullYear();
+  return y >= 2000 && y <= 2100 ? d.toISOString().slice(0, 10) : null;
+}
+
 export function readSheet(sheet: Sheet, year: number): Entry[] {
   const month = monthOfSheet(sheet.name, year);
   if (!month) return [];
@@ -110,6 +126,7 @@ export function readSheet(sheet: Sheet, year: number): Entry[] {
         out.push({
           block, month, name, documentRaw: text(get("doc")), grossCents: gross, netCents: net, planoCents: plano, excedenteCents: cents(get("excedente")),
           dueDay: dayOf(get("due")), service: text(get("service")), obs: text(get("obs")), email: text(get("email")), contact: text(get("contact")),
+          dueOn: isoDateOf(get("due")), paidOn: isoDateOf(get("paid")),
         });
       }
     });

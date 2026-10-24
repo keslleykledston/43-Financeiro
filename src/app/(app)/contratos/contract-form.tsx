@@ -8,7 +8,9 @@ type Opt = { id: string; name: string; status: string };
 
 const L = ({ id, children }: { id: string; children: React.ReactNode }) => <label htmlFor={id} className="mb-1 block text-sm font-medium">{children}</label>;
 
-export function ContractForm({ action, defaults, customers, submit, withReason }: { action: (s: FormState, fd: FormData) => Promise<FormState>; defaults?: Defaults; customers?: Opt[]; submit: string; withReason?: boolean }) {
+const KINDS: [string, string][] = [["alteracao", "Alteração"], ["reajuste", "Reajuste (muda o valor)"], ["valor", "Ajuste de valor"], ["prorrogacao", "Prorrogação (muda o fim)"], ["outros", "Outros"]];
+
+export function ContractForm({ action, defaults, customers, submit, withReason, amendment, approveNow }: { action: (s: FormState, fd: FormData) => Promise<FormState>; defaults?: Defaults; customers?: Opt[]; submit: string; withReason?: boolean; amendment?: boolean; approveNow?: boolean }) {
   const [state, act, pending] = useActionState(action, undefined);
   const v = state?.values ?? {};
   const d = (k: keyof Defaults, fb = "") => v[k] ?? (defaults?.[k] !== undefined && defaults?.[k] !== null ? String(defaults[k]) : fb);
@@ -34,6 +36,15 @@ export function ContractForm({ action, defaults, customers, submit, withReason }
         <label className="flex items-center gap-2 self-end pb-2 text-sm"><input type="checkbox" name="invoiceJointRequired" defaultChecked={v.invoiceJointRequired ? v.invoiceJointRequired === "on" : !!defaults?.invoiceJointRequired} /> Cliente exige NF emitida junto do boleto</label>
       </div>
       {withReason && <div><L id="reason">Motivo da alteração</L><input id="reason" name="reason" maxLength={200} defaultValue={d("reason" as keyof Defaults)} placeholder="Ex.: reajuste anual" className={inputClass} /></div>}
+      {amendment && (
+        <fieldset className="grid gap-4 rounded-md border bg-muted/30 p-3 sm:grid-cols-2">
+          <legend className="px-1 text-sm font-medium">Aditivo</legend>
+          <div><L id="kind">Tipo</L><select id="kind" name="kind" defaultValue={v.kind ?? "alteracao"} className={inputClass}>{KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
+          <div><L id="effectiveOn">Vale a partir de (opcional)</L><input id="effectiveOn" name="effectiveOn" type="date" defaultValue={v.effectiveOn ?? ""} className={inputClass} /><p className="mt-1 text-xs text-muted-foreground">Não pode ser futura. Cobranças já geradas não mudam.</p></div>
+          <div className="sm:col-span-2"><L id="reference">Referência do documento (opcional)</L><input id="reference" name="reference" maxLength={200} defaultValue={v.reference ?? ""} placeholder="Ex.: 2º aditivo assinado em 10/10/2026, pasta Contratos/2026" className={inputClass} /></div>
+        </fieldset>
+      )}
+      {approveNow && <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="approveNow" defaultChecked={v.approveNow === "on"} /> Aprovar agora (diretoria): o aditivo passa a valer já, e fica registrado quem pediu e quem aprovou</label>}
       {state?.error && <p role="alert" className="text-sm text-negative-foreground">{state.error}</p>}
       <button disabled={pending} className={buttonClass("primary")}>{pending ? "Enviando…" : submit}</button>
     </form>

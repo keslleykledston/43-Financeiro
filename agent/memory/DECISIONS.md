@@ -83,3 +83,12 @@ Calendário (`src/modules/billing/calendar.ts`, funções puras testadas contra 
 - Escopo permitido (`CORA_SCOPE`): emitir, consultar situação, segunda via e **cancelar (somente diretoria, com motivo, tudo registrado)**. Proibido, estruturalmente (interfaces, testes): pagar, transferir, Pix enviado, saldo/extrato. A conciliação não usa a API da Cora.
 - Credenciais (client id, certificado e chave) em Integrações → Cora: cifradas (AES-256-GCM, chave `K3G_CREDENTIALS_KEY` em `.env.credentials`), escrita apenas, só diretoria, auditadas. Guardar não liga a emissão real (E10b segue BLOQUEADA até homologação + autorização escrita). Migração 0023.
 - Cancelamento de boleto: fluxo próprio na fase E20 (registro imutável de quem, quando, por quê e resultado; só diretoria).
+
+## ADR-018 Aditivos, comentários e dados da empresa (2026-10-24, pedido do dono) — E21
+- Pedido: "o administrador possa editar os dados das empresas e contratos, assim como fazer aditivos ou comentários, e ajuste de valores". "Administrador" = diretoria (admin técnico não lê dados financeiros).
+- Aditivo reaproveita o fluxo de versões do contrato (proposta → aprovação). Acrescenta tipo, data de efeito, referência do documento. A data de efeito **não pode ser futura**: a cobrança lê o valor vigente do contrato na prévia do lote, então um aditivo agendado exigiria aplicação automática na data (fica no backlog). Cobranças já geradas nunca mudam.
+- Diretoria ganhou "Aprovar agora" (propõe+aprova, dois eventos no registro): coerente com a exceção já existente em `decideVersion`. Gerente e assistente seguem o fluxo de dois olhos.
+- Comentários: tabela `notes` só de acréscimo (trigger). Permissão = quem escreve no cadastro (contracts.write / crm.write). Texto não vai para o registro de atividades.
+- Dados da empresa: permissão nova `company.manage` (só diretoria); CNPJ validado (inclui alfanumérico) e único; auditoria grava só os nomes dos campos alterados.
+- Cliente do CRM continua somente leitura (a sincronização sobrescreveria). Correção de nome/CNPJ vai no CRM.
+
