@@ -5,7 +5,7 @@ Análise de 2026-10-24 sobre `Boletos__2026.xlsx` (10 abas, JAN–OUT). Só leit
 ## 1. O que a planilha realmente contém (fatos medidos)
 | Fato | Valor |
 |---|---|
-| Linhas de cobrança | 655 (Solutions 449, Call 206…), 95 clientes distintos (chave por CNPJ) |
+| Linhas de cobrança | 655 (Solutions 499, Call 156), 95 clientes distintos (chave por CNPJ) |
 | Crescimento | 58 linhas em janeiro → 87 em outubro; base mensal ≈ R$ 112 mil → R$ 152 mil |
 | **A aba é o mês do VENCIMENTO**, não da competência | 634 de 655 vencimentos caem no mês da aba. A competência do serviço é o mês anterior (regra M / M+1) |
 | Datas de pagamento (`DATA PG`) | preenchidas em ~90% das linhas (582 com vencimento e pagamento): **dá para reconstruir o caixa realizado por mês** |
