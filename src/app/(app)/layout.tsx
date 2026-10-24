@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
 import { BottomNav, SideNav } from "@/components/k3g/nav-client";
 import { DemoBanner, Logo, PageContainer, UserMenu } from "@/components/k3g/shell";
+import { HelpLink } from "@/components/k3g/help-link";
 import { ThemeToggle } from "@/components/k3g/theme-toggle";
 import { FullPageMessage } from "@/components/k3g/states";
 import { buttonClass, selectClass } from "@/components/k3g/button";
@@ -38,6 +39,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               </select>
               <button className={buttonClass("outline", "md")}>Trocar</button>
             </form>
+            <HelpLink />
             <ThemeToggle />
             <UserMenu name={ctx.user.name ?? ctx.user.email ?? "Usuário"} email={ctx.user.email ?? ""} role={role ? ROLE_LABEL[role] : "—"} logout={logout} />
           </header>

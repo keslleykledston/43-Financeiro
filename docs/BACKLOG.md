@@ -97,3 +97,7 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [x] Restore do backup validado manualmente (`scripts/restore-test.sh`).
 - [ ] 2FA (TOTP) para diretoria/admin.
 - [ ] Agendar restore-test periódico (cron semanal) — decisão do dono, altera o crontab do host.
+
+## E16 — Central de ajuda (2026-10-24)
+- [x] `/ajuda` (lista) e `/ajuda/<artigo>` renderizando `help/*.md`; botão "?" no cabeçalho abre o artigo da tela.
+- [ ] Busca dentro da ajuda; capturas de tela ilustrativas sem dados reais.
