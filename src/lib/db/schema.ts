@@ -90,7 +90,12 @@ const partyColumns = () => ({
   externalSyncedAt: timestamp("external_synced_at", { withTimezone: true }),
 });
 
-export const customers = pgTable("customers", partyColumns(), (t) => [
+export const customers = pgTable("customers", {
+  ...partyColumns(),
+  // Nome para MOSTRAR (E25, pedido do dono): quando a razão social é só o número do CNPJ (ex.: "19.534.417 LTDA") e há nome fantasia, mostra o fantasia.
+  // A razão social segue intacta em `legal_name` e é a usada em boleto/NFS-e. Coluna gerada: não se grava, só se lê.
+  displayName: text("display_name").generatedAlwaysAs(sql`CASE WHEN legal_name ~* '^[0-9]{2}[.]?[0-9]{3}[.]?[0-9]{3}([/]?[0-9]{4}[-]?[0-9]{2})?( (ltda|s/?a|s[.]a[.]?|me|epp|eireli|slu))?[.]?$' AND coalesce(btrim(trade_name), '') <> '' THEN btrim(trade_name) ELSE legal_name END`).notNull(),
+}, (t) => [
   uniqueIndex("customers_company_doc_uq").on(t.companyId, t.document).where(sql`${t.archivedAt} is null`),
   uniqueIndex("customers_company_source_ext_uq").on(t.companyId, t.source, t.externalId).where(sql`${t.externalId} is not null`),
   index("customers_company_name_idx").on(t.companyId, t.legalName),
@@ -940,13 +945,31 @@ export const legacyBillingRows = pgTable("legacy_billing_rows", {
   netAmount: numeric("net_amount", { precision: 18, scale: 2 }), // LÍQUIDO (o que entrou, com juros/descontos)
   dueOn: date("due_on", { mode: "string" }),
   paidOn: date("paid_on", { mode: "string" }),
+  paidRaw: text("paid_raw"), // texto da célula de pagamento quando não é data (ex.: dois pagamentos "24/03;14/04")
 }, (t) => [
   foreignKey({ columns: [t.companyId, t.importId], foreignColumns: [legacyImports.companyId, legacyImports.id] }).onDelete("cascade"),
   foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
   uniqueIndex("legacy_rows_pos_uq").on(t.importId, t.sheet, t.rowNumber),
   index("legacy_rows_company_month_idx").on(t.companyId, t.month),
   check("legacy_rows_month_chk", sql`${t.month} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+  check("legacy_rows_paidraw_chk", sql`char_length(${t.paidRaw}) <= 40`),
   check("legacy_rows_block_chk", sql`${t.block} in ('solutions', 'call') and ${t.amount} >= 0`),
   check("legacy_rows_amounts_chk", sql`coalesce(${t.grossAmount}, 0) >= 0 and coalesce(${t.planAmount}, 0) >= 0 and coalesce(${t.excessAmount}, 0) >= 0 and coalesce(${t.netAmount}, 0) >= 0`),
+]);
+
+// H1 — correções de CNPJ/CPF pedidas pela diretoria/gerência sobre o histórico (ex.: "…-60" digitado errado na planilha). O staging NÃO muda: a correção vale por NOME do
+// cliente na análise e nos próximos passos (H2/H3). Não altera cadastro de cliente. Cada correção é auditada (sem nome nem documento).
+export const legacyDocumentFixes = pgTable("legacy_document_fixes", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  nameKey: text("name_key").notNull(), // nome do cliente normalizado (maiúsculas, sem acento, espaços únicos)
+  customerName: text("customer_name").notNull(), // como aparece na planilha (para mostrar)
+  document: text("document").notNull(), // CPF/CNPJ validado, só dígitos/letras
+  note: text("note"),
+  fixedBy: uuid("fixed_by").notNull().references(() => users.id),
+}, (t) => [
+  uniqueIndex("legacy_doc_fix_name_uq").on(t.companyId, t.nameKey),
+  check("legacy_doc_fix_doc_chk", sql`${t.document} ~ '^[0-9A-Z]{11,14}$'`),
+  check("legacy_doc_fix_len_chk", sql`char_length(${t.nameKey}) between 1 and 200 and char_length(${t.note}) <= 200`),
 ]);
 

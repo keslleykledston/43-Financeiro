@@ -8,13 +8,13 @@ import * as schema from "@/lib/db/schema";
 import type { DB } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
 import { createParty } from "@/modules/crm/service";
-import { exportDivergencesCsv, getHistoryReport, importLegacy, removeLegacyImport, sha256 } from "@/modules/history/service";
+import { exportDivergencesCsv, getHistoryReport, importLegacy, removeDocumentFix, removeLegacyImport, saveDocumentFix, sha256 } from "@/modules/history/service";
 import type { Entry } from "@/modules/contracts/planilha";
 
 const enabled = !!process.env.POSTGRES_USER;
 const SHA = sha256("arquivo de teste"), SHA2 = sha256("outro arquivo");
 const why = (e: unknown) => String((e as { cause?: { message?: string } })?.cause?.message ?? (e as Error)?.message ?? e);
-const entry = (o: Partial<Entry> = {}): Entry => ({ block: "solutions", month: "2026-01", name: "ALFA REDES LTDA", documentRaw: "11.222.333/0001-81", grossCents: 100000, netCents: 100000, planoCents: null, excedenteCents: null, dueDay: 10, service: "Link", obs: "medina", email: "fin@alfa.example", contact: "Ana", sheet: "Boletos JAN 2026", row: 5, dueOn: "2026-01-10", paidOn: "2026-01-11", ...o });
+const entry = (o: Partial<Entry> = {}): Entry => ({ block: "solutions", month: "2026-01", name: "ALFA REDES LTDA", documentRaw: "11.222.333/0001-81", grossCents: 100000, netCents: 100000, planoCents: null, excedenteCents: null, dueDay: 10, service: "Link", obs: "medina", email: "fin@alfa.example", contact: "Ana", paidRaw: null, sheet: "Boletos JAN 2026", row: 5, dueOn: "2026-01-10", paidOn: "2026-01-11", ...o });
 
 describe.skipIf(!enabled)("H1 — staging do histórico (DB de teste)", () => {
   let admin: ReturnType<typeof postgres>, conn: ReturnType<typeof postgres>, db: DB;
@@ -29,7 +29,7 @@ describe.skipIf(!enabled)("H1 — staging do histórico (DB de teste)", () => {
   });
   afterAll(async () => { await conn?.end(); await admin?.end(); });
   beforeEach(async () => {
-    await db.execute(sql`truncate legacy_billing_rows, legacy_imports, customer_contacts, customers, audit_log, memberships, companies, users restart identity cascade`);
+    await db.execute(sql`truncate legacy_document_fixes, legacy_billing_rows, legacy_imports, customer_contacts, customers, audit_log, memberships, companies, users restart identity cascade`);
     const [a, b] = await db.insert(schema.companies).values([{ name: "Empresa A" }, { name: "Empresa B" }]).returning();
     A = a.id; B = b.id;
     const mk = async (e: string) => (await db.insert(schema.users).values({ email: e, name: e, passwordHash: "x" }).returning())[0].id;
@@ -126,4 +126,49 @@ describe.skipIf(!enabled)("H1 — staging do histórico (DB de teste)", () => {
     await expect(f(sql`insert into legacy_billing_rows (company_id, import_id, sheet, row_number, month, customer_name, document_raw, block, amount) select company_id, id, 'x', 1, '2026-13', 'n', '', 'solutions', 1 from legacy_imports`)).rejects.toThrow(/month_chk/);
     await expect(f(sql`insert into legacy_billing_rows (company_id, import_id, sheet, row_number, month, customer_name, document_raw, block, amount) select company_id, id, 'Boletos JAN 2026', 5, '2026-01', 'n', '', 'solutions', 1 from legacy_imports`)).rejects.toThrow(/legacy_rows_pos_uq/);
   });
+
+  it("corrigir CNPJ/CPF (ex.: DB Supermercados …-60 → …-06): valida, só gerência/diretoria, não toca no staging nem no cadastro, audita sem dados", async () => {
+    const DB = [entry({ row: 20, name: "DB SUPERMERCADOS", documentRaw: "22.991.939/0001-60" }), entry({ row: 21, name: "DB SUPERMERCADOS", documentRaw: "22.991.939/0001-60", dueOn: "2026-01-12", paidOn: "2026-01-13", grossCents: 50000, netCents: 50000 }), entry({ row: 22, month: "2026-02", sheet: "Boletos FEV 2026", name: "DB Supermercados", documentRaw: "22.991.939/0001-06", dueOn: "2026-02-10", paidOn: "2026-02-11" })];
+    await importLegacy(db, dirA, A, { fileSha256: SHA, fileLabel: "x", year: 2026, entries: DB });
+    const before = await getHistoryReport(db, dirA, A, "2026-10-24");
+    expect(before.report!.counts.documento_invalido).toBe(2); expect(before.report!.toFix[0]).toMatchObject({ name: "DB SUPERMERCADOS", rows: 2 });
+    expect(before.report!.toFix[0].suggestions.map((s) => s.formatted)).toEqual(["22.991.939/0001-06"]);
+    for (const u of [asstA, contA, techA]) await expect(saveDocumentFix(db, u, A, { name: "DB SUPERMERCADOS", document: "22.991.939/0001-06" })).rejects.toBeInstanceOf(Forbidden);
+    await expect(saveDocumentFix(db, dirB, A, { name: "DB SUPERMERCADOS", document: "22.991.939/0001-06" })).rejects.toBeInstanceOf(Forbidden);
+    await expect(saveDocumentFix(db, gerA, A, { name: "DB SUPERMERCADOS", document: "22.991.939/0001-60" })).rejects.toThrow(/não conferem.*Será que é 22\.991\.939\/0001-06/);
+    await expect(saveDocumentFix(db, gerA, A, { name: "DB SUPERMERCADOS", document: "" })).rejects.toThrow(/Informe/);
+    await expect(saveDocumentFix(db, gerA, A, { name: "DB SUPERMERCADOS", document: "22.991" })).rejects.toThrow(/incompleto/);
+    await expect(saveDocumentFix(db, gerA, A, { name: "NOME QUE NAO EXISTE", document: "22.991.939/0001-06" })).rejects.toThrow(/não encontrado no histórico/);
+    const f = await saveDocumentFix(db, gerA, A, { name: "  db  supermercados ", document: "22.991.939/0001-06", note: "conferido no cartão CNPJ" });
+    expect(f.formatted).toBe("22.991.939/0001-06");
+    const after = await getHistoryReport(db, dirA, A, "2026-10-24");
+    expect(after.report!.counts.documento_invalido).toBe(0); expect(after.report!.counts.documento_corrigido).toBe(2); expect(after.report!.toFix).toEqual([]);
+    expect(after.fixes).toMatchObject([{ name: "DB SUPERMERCADOS", formatted: "22.991.939/0001-06", note: "conferido no cartão CNPJ" }]);
+    // staging intacto (imutável) e nenhum cadastro criado/alterado
+    const raw = await db.select({ d: schema.legacyBillingRows.document, r: schema.legacyBillingRows.documentRaw }).from(schema.legacyBillingRows).where(eq(schema.legacyBillingRows.rowNumber, 20));
+    expect(raw).toEqual([{ d: null, r: "22.991.939/0001-60" }]);
+    expect(Number((await db.execute(sql`select count(*)::int n from customers`))[0].n)).toBe(1);
+    const log = await db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "history.fix_saved"));
+    expect(log).toHaveLength(1); expect(JSON.stringify(log)).not.toMatch(/SUPERMERC|22991939|22\.991/);
+    // trocar a correção, isolar por empresa e desfazer
+    await saveDocumentFix(db, dirA, A, { name: "DB SUPERMERCADOS", document: "529.982.247-25" });
+    expect(Number((await db.execute(sql`select count(*)::int n from legacy_document_fixes`))[0].n)).toBe(1);
+    expect((await getHistoryReport(db, dirB, B, "2026-10-24")).fixes).toEqual([]);
+    const id = (await getHistoryReport(db, dirA, A, "2026-10-24")).fixes[0].id;
+    await expect(removeDocumentFix(db, asstA, A, id)).rejects.toBeInstanceOf(Forbidden);
+    await expect(removeDocumentFix(db, dirB, B, id)).rejects.toThrow(/não encontrada/);
+    await expect(saveDocumentFix(db, dirA, A, { name: "DB SUPERMERCADOS", document: "22.991.939/0001-06", expected: "" })).rejects.toThrow(/Outra pessoa acabou de corrigir/); // concorrência: viu "sem correção", já existe
+    await saveDocumentFix(db, dirA, A, { name: "DB SUPERMERCADOS", document: "22.991.939/0001-06", expected: "52998224725" }); // viu o atual: ok
+    await saveDocumentFix(db, dirA, A, { name: "DB SUPERMERCADOS", document: "529.982.247-25" });
+    await removeDocumentFix(db, gerA, A, id);
+    expect((await getHistoryReport(db, dirA, A, "2026-10-24")).report!.toFix).toHaveLength(1);
+  });
+
+  it("a correção só vale onde o documento falta: não sobrescreve documento válido de linha de nome parecido (Codex P2)", async () => {
+    await importLegacy(db, dirA, A, { fileSha256: SHA, fileLabel: "x", year: 2026, entries: [entry({ row: 30, name: "Padaria Pão", documentRaw: "" }), entry({ row: 31, name: "PADARIA PAO", documentRaw: "11.222.333/0001-81" })] });
+    await saveDocumentFix(db, dirA, A, { name: "padaria pao", document: "529.982.247-25" });
+    const r = (await getHistoryReport(db, dirA, A, "2026-10-24")).report!;
+    expect(r.counts.documento_corrigido).toBe(1); expect(r.counts.sem_documento).toBe(0); // só a linha sem documento foi corrigida; a outra manteve o CNPJ válido
+  });
 });
+

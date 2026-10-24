@@ -130,9 +130,9 @@ export async function getBatch(db: DB, actorId: string, companyId: string, id: s
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
   const [b] = await db.select().from(billingBatches).where(and(eq(billingBatches.id, id), eq(billingBatches.companyId, companyId)));
   if (!b) return null;
-  const rows = await db.select({ c: charges, customerName: customers.legalName }).from(charges)
+  const rows = await db.select({ c: charges, customerName: customers.displayName }).from(charges)
     .innerJoin(customers, and(eq(customers.id, charges.customerId), eq(customers.companyId, charges.companyId)))
-    .where(and(eq(charges.companyId, companyId), eq(charges.batchId, b.id))).orderBy(asc(customers.legalName));
+    .where(and(eq(charges.companyId, companyId), eq(charges.batchId, b.id))).orderBy(asc(customers.displayName));
   const cs = rows.map((r) => r.c);
   const live = b.status === "cancelado" ? { items: [], exceptions: [] } : await eligible(db, companyId, b.issueDate);
   const d = diff(cs, live.items);

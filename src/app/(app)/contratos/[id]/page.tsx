@@ -36,7 +36,7 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
   return (
     <div className="max-w-3xl space-y-5">
       <AppLink href="/contratos" className="text-sm text-primary">← Voltar</AppLink>
-      <PageHeader title={c.customer.legalName} description={`${c.description}`} actions={<StatusPill tone={TONE[status]}>{STATUS_LABEL[status]}</StatusPill>} />
+      <PageHeader title={c.customer.displayName} description={c.customer.displayName !== c.customer.legalName ? `${c.description} · razão social: ${c.customer.legalName}` : c.description} actions={<StatusPill tone={TONE[status]}>{STATUS_LABEL[status]}</StatusPill>} />
       {sp.erro && <Callout tone="negative" role="alert">{sp.erro}</Callout>}
       {sp.aprovado && <Callout tone="positive" role="status">Aditivo aprovado e já em vigor. Cobranças já geradas não mudam; as próximas prévias de lote usam os novos termos.</Callout>}
       {sp.comentario && <Callout tone="positive" role="status">Comentário registrado.</Callout>}

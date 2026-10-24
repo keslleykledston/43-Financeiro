@@ -103,6 +103,6 @@ describe("planilha de boletos → contratos (dados fictícios)", () => {
     const e = readWorkbook([{ name: "Boletos JAN 2026", rows }], 2026);
     expect(e.map((x) => [x.block, x.month, x.name, x.dueDay])).toEqual([["solutions", "2026-01", "UM", 10], ["call", "2026-01", "DOIS", 5]]);
     expect(e[1]).toMatchObject({ planoCents: 5000, excedenteCents: 500, netCents: 5500, dueOn: "2026-01-05", paidOn: null });
-    expect(e[0]).toMatchObject({ dueOn: "2026-01-10", paidOn: null });
+    expect(e[0]).toMatchObject({ dueOn: "2026-01-10", paidOn: null, paidRaw: null });
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDocument, parseDocument, validateCnpj, validateCpf } from "@/lib/validators/document";
+import { checkDocument, formatDocument, parseDocument, validateCnpj, validateCpf } from "@/lib/validators/document";
 
 describe("CPF", () => {
   it("aceita válido, com ou sem máscara", () => {
@@ -43,3 +43,28 @@ describe("parseDocument/formatDocument", () => {
     expect(formatDocument("cnpj", "12ABC34501DE35")).toBe("12.ABC.345/01DE-35");
   });
 });
+
+describe("checkDocument (validador ao vivo com sugestão)", () => {
+  it("vazio, incompleto e válido (com ou sem máscara)", () => {
+    expect(checkDocument("")).toEqual({ state: "vazio" }); expect(checkDocument("  ")).toEqual({ state: "vazio" });
+    expect(checkDocument("22.991.939/0001")).toEqual({ state: "incompleto", digits: 12 });
+    expect(checkDocument("22.991.939/0001-06")).toMatchObject({ state: "valido", type: "cnpj", digits: "22991939000106", formatted: "22.991.939/0001-06" });
+    expect(checkDocument("529.982.247-25")).toMatchObject({ state: "valido", type: "cpf", formatted: "529.982.247-25" });
+    expect(checkDocument("12.ABC.345/01DE-35")).toMatchObject({ state: "valido", type: "cnpj" }); // CNPJ alfanumérico
+  });
+  it("CNPJ com dígitos verificadores trocados (o caso real de final -60): sugere o certo", () => {
+    const c = checkDocument("22.991.939/0001-60");
+    expect(c).toMatchObject({ state: "invalido" });
+    if (c.state === "invalido") { expect(c.message).toMatch(/dígitos verificadores do CNPJ não conferem/); expect(c.suggestions[0]).toMatchObject({ digits: "22991939000106", formatted: "22.991.939/0001-06", why: expect.stringContaining("trocados") }); }
+  });
+  it("outros erros: recalcula os dígitos; CPF; repetidos; sem sugestão quando nada ajuda", () => {
+    const c = checkDocument("22.991.939/0001-99");
+    expect(c.state === "invalido" && c.suggestions.map((s) => s.formatted)).toEqual(["22.991.939/0001-06"]);
+    const p = checkDocument("529.982.247-52");
+    expect(p.state === "invalido" && p.suggestions.map((s) => s.formatted)).toEqual(["529.982.247-25"]);
+    const r = checkDocument("11.111.111/1111-11");
+    expect(r).toMatchObject({ state: "invalido", message: "CNPJ com todos os dígitos iguais não existe" });
+    expect(checkDocument("11111111111")).toMatchObject({ state: "invalido", message: "CPF com todos os dígitos iguais não existe" });
+  });
+});
+

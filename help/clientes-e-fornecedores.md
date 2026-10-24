@@ -31,3 +31,7 @@ Busque por nome, nome fantasia ou documento (com ou sem pontuação). Use as aba
 | Assistente | ✔ | ✔ | — |
 | Contabilidade | ✔ | — | ✔ |
 | Admin técnico | — | — | — |
+
+## Validador de CPF/CNPJ
+Ao digitar o documento no cadastro, o sistema confere os **dígitos verificadores** na hora: verde = válido (mostra o formato certo); vermelho = não confere. Quando o erro parece digitação (por exemplo, dois dígitos finais trocados), aparece a **sugestão** com um clique. O servidor confere de novo ao salvar. CNPJ alfanumérico também é aceito. Clientes que vêm do CRM continuam somente leitura aqui (a correção é no CRM); para o histórico da planilha use *Histórico → Corrigir CNPJ/CPF*.
+

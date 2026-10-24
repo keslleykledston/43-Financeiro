@@ -56,7 +56,7 @@ export default async function Clientes({ searchParams }: { searchParams: Promise
         <ul className="divide-y divide-border rounded-lg border bg-card">
           {r.items.map((p) => (
             <li key={p.id}><Link href={`/clientes/${p.id}`} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-accent">
-              <div className="min-w-0"><p className="truncate font-medium">{p.legalName}</p><p className="truncate text-sm text-muted-foreground">{p.docType.toUpperCase()} {p.documentFormatted}</p></div>
+              <div className="min-w-0"><p className="truncate font-medium">{p.displayName}</p><p className="truncate text-sm text-muted-foreground">{p.docType.toUpperCase()} {p.documentFormatted}{p.displayName !== p.legalName ? ` · razão social: ${p.legalName}` : ""}</p></div>
               <span className="flex shrink-0 gap-1.5"><span className="rounded-full bg-muted px-2.5 py-1 text-xs">{p.kind === "cliente" ? "Cliente" : "Fornecedor"}</span>{p.kind === "cliente" && p.status !== "ativo" && <span className={`rounded-full px-2.5 py-1 text-xs ${p.status === "cancelado" ? "bg-negative-soft text-negative-foreground" : "bg-warning-soft text-warning-foreground"}`}>{STATUS_LABEL[p.status as Status]}</span>}{p.source === "crm" && <span className="rounded-full bg-info-soft px-2.5 py-1 text-xs text-info-foreground">CRM</span>}</span>
             </Link></li>
           ))}

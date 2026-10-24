@@ -30,7 +30,7 @@ function where(companyId: string, f: ListFilters, today: string) {
   if (st === "parciais") parts.push(sql`coalesce(p.paid, 0) > 0 and coalesce(p.paid, 0) < c.amount`);
   if (st === "quitadas") parts.push(sql`coalesce(p.paid, 0) >= c.amount`);
   const q = (f.q ?? "").trim().slice(0, 80);
-  if (q) parts.push(sql`cu.legal_name ilike ${"%" + q.replace(/[\\%_]/g, "\\$&") + "%"}`);
+  if (q) parts.push(sql`(cu.display_name ilike ${"%" + q.replace(/[\\%_]/g, "\\$&") + "%"} or cu.legal_name ilike ${"%" + q.replace(/[\\%_]/g, "\\$&") + "%"})`);
   if (f.dueFrom && isoDate(f.dueFrom)) parts.push(sql`c.due_date >= ${f.dueFrom}::date`);
   if (f.dueTo && isoDate(f.dueTo)) parts.push(sql`c.due_date <= ${f.dueTo}::date`);
   if (f.competence && /^\d{4}-(0[1-9]|1[0-2])$/.test(f.competence)) parts.push(sql`c.competence_month = ${f.competence + "-01"}::date`);
@@ -49,13 +49,13 @@ export type ReceivableRow = {
 const toRow = (r: Row, today: string): ReceivableRow => {
   const amountCents = centsFromNumeric(String(r.amount)), paidCents = centsFromNumeric(String(r.paid));
   const s = situationOf({ amountCents, paidCents, dueDate: String(r.due_date), today });
-  return { id: String(r.id), customerId: String(r.customer_id), customerName: String(r.legal_name), description: String(r.description), competenceMonth: String(r.competence_month), issueDate: String(r.issue_date), dueDate: String(r.due_date), amountCents, paidCents, interestCents: centsFromNumeric(String(r.interest ?? 0)), discountCents: centsFromNumeric(String(r.discount ?? 0)), openCents: s.openCents, situation: s.situation, overdueDays: s.overdueDays };
+  return { id: String(r.id), customerId: String(r.customer_id), customerName: String(r.display_name), description: String(r.description), competenceMonth: String(r.competence_month), issueDate: String(r.issue_date), dueDate: String(r.due_date), amountCents, paidCents, interestCents: centsFromNumeric(String(r.interest ?? 0)), discountCents: centsFromNumeric(String(r.discount ?? 0)), openCents: s.openCents, situation: s.situation, overdueDays: s.overdueDays };
 };
 
 export async function listReceivables(db: DB, actorId: string, companyId: string, f: ListFilters = {}, today = todayManaus()) {
   await requirePerm(db, actorId, companyId, "receivables.read");
-  const rows = await db.execute(sql`select c.id, c.customer_id, cu.legal_name, c.description, c.competence_month::text, c.issue_date::text, c.due_date::text, c.amount::text, coalesce(p.paid, 0)::text paid, coalesce(p.interest, 0)::text interest, coalesce(p.discount, 0)::text discount
-    ${FROM(companyId)} where ${where(companyId, f, today)} order by c.due_date asc, cu.legal_name asc, c.id asc limit 500`);
+  const rows = await db.execute(sql`select c.id, c.customer_id, cu.display_name, c.description, c.competence_month::text, c.issue_date::text, c.due_date::text, c.amount::text, coalesce(p.paid, 0)::text paid, coalesce(p.interest, 0)::text interest, coalesce(p.discount, 0)::text discount
+    ${FROM(companyId)} where ${where(companyId, f, today)} order by c.due_date asc, cu.display_name asc, c.id asc limit 500`);
   return (rows as unknown as Row[]).map((r) => toRow(r, today));
 }
 
@@ -74,12 +74,12 @@ export async function receivablesSummary(db: DB, actorId: string, companyId: str
   const aging = (await db.execute(sql`select (${today}::date - c.due_date) days, (c.amount - coalesce(p.paid, 0))::text open ${base} and coalesce(p.paid, 0) < c.amount and c.due_date < ${today}::date`)) as unknown as Row[];
   const buckets = AGING.map((b) => ({ key: b.key, label: b.label, cents: 0, count: 0 }));
   for (const a of aging) { const d = Number(a.days); const k = buckets.find((_, i) => d >= AGING[i].min && d <= AGING[i].max); if (k) { k.cents += centsFromNumeric(String(a.open)); k.count++; } }
-  const debtors = (await db.execute(sql`select cu.id, cu.legal_name, sum(c.amount - coalesce(p.paid, 0))::text open, max(${today}::date - c.due_date) oldest, count(*)::int n
-    ${base} and coalesce(p.paid, 0) < c.amount and c.due_date < ${today}::date group by cu.id, cu.legal_name order by sum(c.amount - coalesce(p.paid, 0)) desc, cu.legal_name limit 10`)) as unknown as Row[];
+  const debtors = (await db.execute(sql`select cu.id, cu.display_name, sum(c.amount - coalesce(p.paid, 0))::text open, max(${today}::date - c.due_date) oldest, count(*)::int n
+    ${base} and coalesce(p.paid, 0) < c.amount and c.due_date < ${today}::date group by cu.id, cu.display_name order by sum(c.amount - coalesce(p.paid, 0)) desc, cu.display_name limit 10`)) as unknown as Row[];
   return {
     openCents: centsFromNumeric(String(tot.open)), openCount: Number(tot.open_n), overdueCents: centsFromNumeric(String(tot.overdue)), overdueCount: Number(tot.overdue_n),
     receivedMonthCents: centsFromNumeric(String(rec.s)), receivedMonthCount: Number(rec.n), aging: buckets,
-    topDebtors: debtors.map((d) => ({ customerId: String(d.id), name: String(d.legal_name), overdueCents: centsFromNumeric(String(d.open)), oldestDays: Number(d.oldest), count: Number(d.n) })),
+    topDebtors: debtors.map((d) => ({ customerId: String(d.id), name: String(d.display_name), overdueCents: centsFromNumeric(String(d.open)), oldestDays: Number(d.oldest), count: Number(d.n) })),
   };
 }
 
@@ -88,7 +88,7 @@ export type TimelineEvent = { at: Date; kind: "aprovada" | "pagamento" | "estorn
 export async function getReceivable(db: DB, actorId: string, companyId: string, id: string, today = todayManaus()) {
   await requirePerm(db, actorId, companyId, "receivables.read");
   if (!uuidOk(id)) return null;
-  const [r] = (await db.execute(sql`select c.id, c.customer_id, cu.legal_name, c.description, c.competence_month::text, c.issue_date::text, c.due_date::text, c.amount::text, coalesce(p.paid, 0)::text paid, coalesce(p.interest, 0)::text interest, coalesce(p.discount, 0)::text discount, c.batch_id, c.contract_id, b.approved_at
+  const [r] = (await db.execute(sql`select c.id, c.customer_id, cu.display_name, c.description, c.competence_month::text, c.issue_date::text, c.due_date::text, c.amount::text, coalesce(p.paid, 0)::text paid, coalesce(p.interest, 0)::text interest, coalesce(p.discount, 0)::text discount, c.batch_id, c.contract_id, b.approved_at
     ${FROM(companyId)} where c.company_id = ${companyId} and c.id = ${id} and c.status = 'aprovada' and b.status = 'aprovado'`)) as unknown as Row[];
   if (!r) return null;
   const row = toRow(r, today);

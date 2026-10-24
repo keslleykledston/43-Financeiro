@@ -50,7 +50,7 @@ export async function loadScheduledMany(db: DB, companyId: string, months: strin
         const competence = addMonths(dueMonth, -1);
         if (!isContractBillable(c, cu, competence)) continue;
         const r = billingSchedule({ competenceMonth: competence, dueDay: c.dueDay, jointInvoice: c.invoiceJointRequired, issueDayOverride: c.issueDayOverride }, extra);
-        entries.push({ dueMonth, item: { contractId: c.id, customerId: cu.id, customerName: cu.legalName, description: c.description, amountCents: centsFromNumeric(c.monthlyAmount), jointInvoice: c.invoiceJointRequired,
+        entries.push({ dueMonth, item: { contractId: c.id, customerId: cu.id, customerName: cu.displayName, description: c.description, amountCents: centsFromNumeric(c.monthlyAmount), jointInvoice: c.invoiceJointRequired,
           competenceMonth: competence, dueDate: r.dueDate, issueDate: r.issueDate, batch: r.batch, review: r.review, reason: r.reason, warnings: r.warnings } });
       }
     }

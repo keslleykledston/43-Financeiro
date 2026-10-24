@@ -123,8 +123,8 @@ export async function getImport(db: DB, actorId: string, companyId: string, id: 
   if (!z.string().uuid().safeParse(id).success) return null;
   const [imp] = await db.select().from(contractImports).where(and(eq(contractImports.id, id), eq(contractImports.companyId, companyId)));
   if (!imp) return null;
-  const items = await db.select({ c: contracts, customerName: customers.legalName, version: sql<string | null>`(select v.state from contract_versions v where v.contract_id = ${contracts.id} order by v.version desc limit 1)` }).from(contracts)
-    .innerJoin(customers, and(eq(customers.id, contracts.customerId), eq(customers.companyId, contracts.companyId))).where(and(eq(contracts.companyId, companyId), eq(contracts.importId, id))).orderBy(customers.legalName);
+  const items = await db.select({ c: contracts, customerName: customers.displayName, version: sql<string | null>`(select v.state from contract_versions v where v.contract_id = ${contracts.id} order by v.version desc limit 1)` }).from(contracts)
+    .innerJoin(customers, and(eq(customers.id, contracts.customerId), eq(customers.companyId, contracts.companyId))).where(and(eq(contracts.companyId, companyId), eq(contracts.importId, id))).orderBy(customers.displayName);
   return { id: imp.id, createdAt: imp.createdAt, createdBy: imp.createdBy, summary: imp.summary as { contracts: number; customersCreated: number; skipped: number },
     items: items.map((r) => ({ id: r.c.id, customerName: r.customerName, description: r.c.description, amountCents: centsFromNumeric(r.c.monthlyAmount), dueDay: r.c.dueDay, startAt: r.c.startAt, endAt: r.c.endAt, status: r.c.status, commissionPartner: r.c.commissionPartner, lastVersionState: r.version })) };
 }

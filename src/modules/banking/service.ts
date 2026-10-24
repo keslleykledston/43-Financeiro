@@ -240,14 +240,14 @@ type OpenCharge = { id: string; customerId: string; customerName: string; doc: s
 
 async function openCharges(x: DB, companyId: string): Promise<OpenCharge[]> {
   const rows = rowsOf(await x.execute(sql`
-    select c.id, c.customer_id, cu.legal_name, cu.document, c.description, c.due_date::text, c.competence_month::text, (c.amount - coalesce(p.paid, 0))::text open
+    select c.id, c.customer_id, cu.display_name, cu.document, c.description, c.due_date::text, c.competence_month::text, (c.amount - coalesce(p.paid, 0))::text open
     from charges c
     join billing_batches b on b.company_id = c.company_id and b.id = c.batch_id
     join customers cu on cu.company_id = c.company_id and cu.id = c.customer_id
     left join (select charge_id, sum(amount) paid from payments where company_id = ${companyId} and status = 'ativo' group by charge_id) p on p.charge_id = c.id
     where c.company_id = ${companyId} and c.status = 'aprovada' and b.status = 'aprovado' and coalesce(p.paid, 0) < c.amount
-    order by c.due_date, cu.legal_name limit 3000`));
-  return rows.map((r) => ({ id: String(r.id), customerId: String(r.customer_id), customerName: String(r.legal_name), doc: alnum(String(r.document ?? "")), description: String(r.description), dueDate: String(r.due_date), openCents: centsFromNumeric(String(r.open)), competence: String(r.competence_month).slice(0, 7) }));
+    order by c.due_date, cu.display_name limit 3000`));
+  return rows.map((r) => ({ id: String(r.id), customerId: String(r.customer_id), customerName: String(r.display_name), doc: alnum(String(r.document ?? "")), description: String(r.description), dueDate: String(r.due_date), openCents: centsFromNumeric(String(r.open)), competence: String(r.competence_month).slice(0, 7) }));
 }
 
 /** O documento só vale se não estiver colado a outros dígitos (um CPF dentro de um CNPJ, ou parte de um número maior, não conta). */
@@ -312,7 +312,7 @@ export async function getTransaction(db: DB, actorId: string, companyId: string,
   const [t] = await db.select().from(bankTransactions).where(and(eq(bankTransactions.id, txId), eq(bankTransactions.companyId, companyId)));
   if (!t) return null;
   const acc = await loadAccount(db, companyId, t.accountId);
-  const als = rowsOf(await db.execute(sql`select a.id, a.charge_id, a.amount::text, a.status, a.undo_reason, a.created_at, cu.legal_name, c.description
+  const als = rowsOf(await db.execute(sql`select a.id, a.charge_id, a.amount::text, a.status, a.undo_reason, a.created_at, cu.display_name, c.description
     from bank_allocations a join charges c on c.company_id = a.company_id and c.id = a.charge_id join customers cu on cu.company_id = c.company_id and cu.id = c.customer_id
     where a.company_id = ${companyId} and a.transaction_id = ${txId} order by a.created_at`));
   const [mk] = await db.select().from(bankTransactionMarks).where(and(eq(bankTransactionMarks.companyId, companyId), eq(bankTransactionMarks.transactionId, txId)));
@@ -331,7 +331,7 @@ export async function getTransaction(db: DB, actorId: string, companyId: string,
   return {
     tx: { id: t.id, accountId: t.accountId, accountName: acc.name, postedAt: t.postedAt, amountCents, description: t.description, status: t.status },
     allocatedCents: allocated, remainingCents: remaining, mark: mk ? { kind: mk.kind, note: mk.note } : null, suggestion,
-    allocations: als.map((a) => ({ id: String(a.id), chargeId: String(a.charge_id), amountCents: centsFromNumeric(String(a.amount)), status: String(a.status), undoReason: (a.undo_reason as string | null) ?? null, customerName: String(a.legal_name), description: String(a.description) })),
+    allocations: als.map((a) => ({ id: String(a.id), chargeId: String(a.charge_id), amountCents: centsFromNumeric(String(a.amount)), status: String(a.status), undoReason: (a.undo_reason as string | null) ?? null, customerName: String(a.display_name), description: String(a.description) })),
     candidates: candidates.map((c) => ({ id: c.id, customerName: c.customerName, description: c.description, dueDate: c.dueDate, competence: c.competence, openCents: c.openCents, rank: c.rank.slice(2) })),
   };
 }

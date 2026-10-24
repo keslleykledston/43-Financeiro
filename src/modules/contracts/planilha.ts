@@ -17,6 +17,7 @@ export type Entry = {
   name: string; documentRaw: string; grossCents: number | null; netCents: number | null; planoCents: number | null; excedenteCents: number | null;
   dueDay: number | null; service: string; obs: string; email: string; contact: string;
   sheet: string; row: number; // aba e linha (1 = primeira) de onde veio: rastreabilidade do histórico
+  paidRaw: string | null; // texto da célula de pagamento quando NÃO é data (ex.: "24/03;14/04" = dois pagamentos): fica para revisão humana
   dueOn: string | null; paidOn: string | null; // datas completas (AAAA-MM-DD) do vencimento e do pagamento, quando a célula tem data; servem ao histórico
 };
 
@@ -89,6 +90,13 @@ export function isoDateOf(v: Cell): string | null {
   return y >= 2000 && y <= 2100 ? d.toISOString().slice(0, 10) : null;
 }
 
+/** Célula de pagamento que é TEXTO com algo útil (não vazia, não é data, não é rótulo): guarda para revisão. */
+function paidText(v: Cell): string | null {
+  if (typeof v !== "string" || isoDateOf(v)) return null;
+  const t = v.replace(/\s+/g, " ").trim();
+  return t && /\d/.test(t) ? t.slice(0, 40) : null;
+}
+
 export function readSheet(sheet: Sheet, year: number): Entry[] {
   const month = monthOfSheet(sheet.name, year);
   if (!month) return [];
@@ -128,7 +136,7 @@ export function readSheet(sheet: Sheet, year: number): Entry[] {
         out.push({
           block, month, name, documentRaw: text(get("doc")), grossCents: gross, netCents: net, planoCents: plano, excedenteCents: cents(get("excedente")),
           dueDay: dayOf(get("due")), service: text(get("service")), obs: text(get("obs")), email: text(get("email")), contact: text(get("contact")),
-          sheet: sheet.name, row: i + 1, dueOn: isoDateOf(get("due")), paidOn: isoDateOf(get("paid")),
+          sheet: sheet.name, row: i + 1, dueOn: isoDateOf(get("due")), paidOn: isoDateOf(get("paid")), paidRaw: paidText(get("paid")),
         });
       }
     });

@@ -229,7 +229,7 @@ export async function listParties(db: DB, actorId: string, companyId: string, qu
   const sel = (k: Kind) => {
     const { main: t } = tables(k);
     return db.select({
-      id: t.id, legalName: t.legalName, tradeName: t.tradeName, docType: t.docType, document: t.document,
+      id: t.id, legalName: t.legalName, displayName: k === "cliente" ? sql<string>`coalesce(${customers.displayName}, ${t.legalName})`.as("display_name") : sql<string>`${t.legalName}`.as("display_name"), tradeName: t.tradeName, docType: t.docType, document: t.document,
       archivedAt: t.archivedAt, status: t.status, source: t.source, kind: sql<Kind>`${sql.raw(`'${k}'`)}::text`.as("kind"),
     }).from(t).where(where(t));
   };

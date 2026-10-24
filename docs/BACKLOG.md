@@ -156,4 +156,7 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [ ] H2: linha do tempo de clientes/contratos (entrou, mudou valor/vencimento, suspenso, voltou, saiu) inferida do staging; corrigir início de vigência; gerar aditivos "inferidos da planilha".
 - [ ] H3: cobranças e baixas históricas (origin = 'historico', lote próprio fora da emissão/régua) — NOVA autorização escrita do dono.
 - [ ] H4: caixa por data de pagamento + conferência com extrato real da Cora (falta amostra CSV/OFX) e despesas (dono envia depois).
+- [x] (H1) Datas em formato americano detectadas e corrigidas só na análise; pagamento em texto vira divergência; correção de CNPJ/CPF pelo Histórico com validador (pedido do dono).
+- [ ] Usar as correções de CNPJ no passo de contratos: os 4+1 clientes "CNPJ inválido" não importados em E14 podem virar contratos em rascunho depois de corrigidos (precisa de decisão do dono).
+- [ ] Edição de cliente vindo do CRM (hoje somente leitura): precisaria de "correção local" que a sincronização respeite; só se o dono pedir.
 

@@ -36,3 +36,35 @@ export function formatDocument(type: DocType, d: string): string {
     ? d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4")
     : d.replace(/^(.{2})(.{3})(.{3})(.{4})(.{2})$/, "$1.$2.$3/$4-$5");
 }
+
+export type DocCheck =
+  | { state: "vazio" }
+  | { state: "incompleto"; digits: number }
+  | { state: "valido"; type: DocType; digits: string; formatted: string }
+  | { state: "invalido"; message: string; suggestions: { digits: string; formatted: string; why: string }[] };
+
+/** Dígitos verificadores corretos para os 12 primeiros caracteres de um CNPJ. */
+function cnpjWith(base12: string): string {
+  const w1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2], w2 = [6, ...w1];
+  const d1 = dv(base12, w1);
+  return base12 + d1 + dv(base12 + d1, w2);
+}
+
+/** Confere o que a pessoa digitou e, se não bate, sugere o provável erro de digitação (dígitos verificadores trocados ou recalculados). PURO: serve ao navegador e ao servidor. */
+export function checkDocument(raw: string): DocCheck {
+  const c = clean(raw);
+  if (!c) return { state: "vazio" };
+  if (c.length < 11 || (c.length > 11 && c.length < 14)) return { state: "incompleto", digits: c.length };
+  const ok = parseDocument(c);
+  if (ok) return { state: "valido", type: ok.type, digits: ok.digits, formatted: formatDocument(ok.type, ok.digits) };
+  const suggestions: { digits: string; formatted: string; why: string }[] = [];
+  const add = (digits: string, why: string) => { if (digits !== c && parseDocument(digits) && !suggestions.some((s) => s.digits === digits)) suggestions.push({ digits, formatted: formatDocument(digits.length === 11 ? "cpf" : "cnpj", digits), why }); };
+  if (c.length === 14) {
+    add(c.slice(0, 12) + c[13] + c[12], "dígitos verificadores trocados de lugar");
+    add(cnpjWith(c.slice(0, 12)), "dígitos verificadores recalculados (confira se os 12 primeiros estão certos)");
+  } else if (c.length === 11 && /^\d+$/.test(c)) {
+    add(c.slice(0, 9) + c[10] + c[9], "dígitos verificadores trocados de lugar");
+  }
+  const what = c.length === 11 ? "CPF" : "CNPJ";
+  return { state: "invalido", message: /^(.)\1+$/.test(c) ? `${what} com todos os dígitos iguais não existe` : `Os dígitos verificadores do ${what} não conferem: provável erro de digitação`, suggestions };
+}

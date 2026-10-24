@@ -230,7 +230,7 @@ async function runQueue(x: DB, companyId: string, actorId: string | null, now: D
 
   const [co] = await x.select({ name: companies.name }).from(companies).where(eq(companies.id, companyId));
   const contacts = await x.select().from(customerContacts).where(and(eq(customerContacts.companyId, companyId), eq(customerContacts.isFinancial, true)));
-  const due = await x.select({ q: messageQueue, c: charges, customer: customers.legalName, subject: messageTemplateVersions.subject, body: messageTemplateVersions.body })
+  const due = await x.select({ q: messageQueue, c: charges, customer: customers.displayName, subject: messageTemplateVersions.subject, body: messageTemplateVersions.body })
     .from(messageQueue)
     .innerJoin(charges, and(eq(charges.id, messageQueue.chargeId), eq(charges.companyId, messageQueue.companyId)))
     .innerJoin(customers, and(eq(customers.id, messageQueue.customerId), eq(customers.companyId, messageQueue.companyId)))
@@ -342,7 +342,7 @@ export async function runEmailLive(db: DB, companyId: string, actorId: string | 
     const today = localParts(now).date, lateLimit = addDays(today, -st.maxLateDays);
     const [co] = await x.select({ name: companies.name }).from(companies).where(eq(companies.id, companyId));
     const contacts = await x.select().from(customerContacts).where(and(eq(customerContacts.companyId, companyId), eq(customerContacts.isFinancial, true)));
-    const due = await x.select({ q: messageQueue, c: charges, customer: customers.legalName, subject: messageTemplateVersions.subject, body: messageTemplateVersions.body })
+    const due = await x.select({ q: messageQueue, c: charges, customer: customers.displayName, subject: messageTemplateVersions.subject, body: messageTemplateVersions.body })
       .from(messageQueue)
       .innerJoin(charges, and(eq(charges.id, messageQueue.chargeId), eq(charges.companyId, messageQueue.companyId)))
       .innerJoin(customers, and(eq(customers.id, messageQueue.customerId), eq(customers.companyId, messageQueue.companyId)))
@@ -431,11 +431,11 @@ export async function tickAll(db: DB, now = new Date(), providers?: Providers) {
 export async function listQueue(db: DB, actorId: string, companyId: string, status?: string) {
   await requirePerm(db, actorId, companyId, "messages.read");
   const filter = status && ["pendente", "enviando", "enviado", "bloqueado", "simulado", "cancelado"].includes(status) ? status : null;
-  const rows = await db.select({ q: messageQueue, customer: customers.legalName, amount: charges.amount, dueDate: charges.dueDate }).from(messageQueue)
+  const rows = await db.select({ q: messageQueue, customer: customers.displayName, amount: charges.amount, dueDate: charges.dueDate }).from(messageQueue)
     .innerJoin(customers, and(eq(customers.id, messageQueue.customerId), eq(customers.companyId, messageQueue.companyId)))
     .innerJoin(charges, and(eq(charges.id, messageQueue.chargeId), eq(charges.companyId, messageQueue.companyId)))
     .where(and(eq(messageQueue.companyId, companyId), filter ? eq(messageQueue.status, filter) : ne(messageQueue.status, "cancelado")))
-    .orderBy(asc(messageQueue.scheduledFor), asc(customers.legalName)).limit(300);
+    .orderBy(asc(messageQueue.scheduledFor), asc(customers.displayName)).limit(300);
   const counts = await db.select({ status: messageQueue.status, n: sql<number>`count(*)::int` }).from(messageQueue).where(eq(messageQueue.companyId, companyId)).groupBy(messageQueue.status);
   return { items: rows.map((r) => ({ ...r.q, customerName: r.customer, amountCents: centsFromNumeric(r.amount), dueDate: r.dueDate, kindLabelKey: r.q.kind as QueueKind })), counts: Object.fromEntries(counts.map((c) => [c.status, c.n])) as Record<string, number> };
 }

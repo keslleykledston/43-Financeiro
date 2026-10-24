@@ -186,12 +186,12 @@ export async function listContracts(db: DB, actorId: string, companyId: string, 
   await requirePerm(db, actorId, companyId, "contracts.read");
   const page = Math.max(1, Math.floor(query.page ?? 1));
   const like = query.q?.trim() ? `%${query.q.trim().slice(0, 100).replace(/[\\%_]/g, "\\$&")}%` : null;
-  const where = and(eq(contracts.companyId, companyId), query.status ? eq(contracts.status, query.status) : undefined, like ? or(ilike(customers.legalName, like), ilike(contracts.description, like)) : undefined);
+  const where = and(eq(contracts.companyId, companyId), query.status ? eq(contracts.status, query.status) : undefined, like ? or(ilike(customers.displayName, like), ilike(customers.legalName, like), ilike(contracts.description, like)) : undefined);
   const base = db.select({ n: count() }).from(contracts).innerJoin(customers, and(eq(customers.id, contracts.customerId), eq(customers.companyId, contracts.companyId))).where(where);
   const [{ n: total }] = await base;
-  const rows = await db.select({ c: contracts, customerName: customers.legalName, customerStatus: customers.status, pending: sql<boolean>`exists (select 1 from contract_versions v where v.contract_id = ${contracts.id} and v.state = 'pendente')` }).from(contracts)
+  const rows = await db.select({ c: contracts, customerName: customers.displayName, customerStatus: customers.status, pending: sql<boolean>`exists (select 1 from contract_versions v where v.contract_id = ${contracts.id} and v.state = 'pendente')` }).from(contracts)
     .innerJoin(customers, and(eq(customers.id, contracts.customerId), eq(customers.companyId, contracts.companyId))).where(where)
-    .orderBy(asc(customers.legalName), asc(contracts.createdAt)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE);
+    .orderBy(asc(customers.displayName), asc(contracts.createdAt)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE);
   return { page, pages: Math.max(1, Math.ceil(total / PAGE_SIZE)), total, items: rows.map((r) => ({ ...r.c, amountCents: centsFromNumeric(r.c.monthlyAmount), customerName: r.customerName, customerStatus: r.customerStatus, pending: r.pending })) };
 }
 
@@ -202,12 +202,12 @@ export async function getContract(db: DB, actorId: string, companyId: string, id
     .where(and(eq(contracts.id, id), eq(contracts.companyId, companyId)));
   if (!r) return null;
   const versions = await db.select().from(contractVersions).where(and(eq(contractVersions.contractId, id), eq(contractVersions.companyId, companyId))).orderBy(desc(contractVersions.version));
-  return { ...r.c, amountCents: centsFromNumeric(r.c.monthlyAmount), customer: { id: r.cu.id, legalName: r.cu.legalName, status: r.cu.status, archivedAt: r.cu.archivedAt }, versions: versions.map((v) => ({ ...v, terms: v.terms as Terms })) };
+  return { ...r.c, amountCents: centsFromNumeric(r.c.monthlyAmount), customer: { id: r.cu.id, legalName: r.cu.legalName, displayName: r.cu.displayName ?? r.cu.legalName, status: r.cu.status, archivedAt: r.cu.archivedAt }, versions: versions.map((v) => ({ ...v, terms: v.terms as Terms })) };
 }
 
 /** Clientes disponíveis para novos contratos (ativos primeiro; arquivados fora). */
 export async function customerOptions(db: DB, actorId: string, companyId: string) {
   await requirePerm(db, actorId, companyId, "contracts.read");
-  return db.select({ id: customers.id, name: customers.legalName, status: customers.status }).from(customers)
-    .where(and(eq(customers.companyId, companyId), sql`${customers.archivedAt} is null`)).orderBy(asc(customers.legalName)).limit(1000);
+  return db.select({ id: customers.id, name: customers.displayName, status: customers.status }).from(customers)
+    .where(and(eq(customers.companyId, companyId), sql`${customers.archivedAt} is null`)).orderBy(asc(customers.displayName)).limit(1000);
 }

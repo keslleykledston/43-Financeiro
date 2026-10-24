@@ -84,9 +84,9 @@ const manausDay = (d: Date | null) => (d ?? new Date()).toLocaleDateString("sv-S
 
 export async function listContractAlerts(db: DB, actorId: string, companyId: string, today: string, windowDays: number = DEFAULT_WINDOW) {
   await requirePerm(db, actorId, companyId, "contracts.read");
-  const rows = await db.select({ c: contracts, name: customers.legalName }).from(contracts)
+  const rows = await db.select({ c: contracts, name: customers.displayName }).from(contracts)
     .innerJoin(customers, and(eq(customers.id, contracts.customerId), eq(customers.companyId, contracts.companyId)))
-    .where(and(eq(contracts.companyId, companyId), inArray(contracts.status, ["ativo", "suspenso"]))).orderBy(asc(customers.legalName));
+    .where(and(eq(contracts.companyId, companyId), inArray(contracts.status, ["ativo", "suspenso"]))).orderBy(asc(customers.displayName));
   const versions = rows.length ? await db.select({ contractId: contractVersions.contractId, terms: contractVersions.terms, decidedAt: contractVersions.decidedAt, effectiveOn: contractVersions.effectiveOn }).from(contractVersions)
     .where(and(eq(contractVersions.companyId, companyId), eq(contractVersions.state, "aprovada"), inArray(contractVersions.contractId, rows.map((r) => r.c.id)))).orderBy(asc(contractVersions.contractId), asc(contractVersions.version)) : [];
   const byContract = new Map<string, AlertInput["approved"]>();

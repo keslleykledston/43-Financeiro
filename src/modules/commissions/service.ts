@@ -54,7 +54,7 @@ export async function setContractCommission(db: DB, actorId: string, companyId: 
 async function receivedIn(db: DB, companyId: string, partner: string, month: string) {
   const from = `${month}-01`;
   const rows = await db.execute<{ charge_id: string; contract_id: string; customer_id: string; customer_name: string; competence_month: string; received_on: string; base_amount: string; bps: number | null }>(sql`
-    select c.id as charge_id, c.contract_id, c.customer_id, cu.legal_name as customer_name, c.competence_month::text as competence_month,
+    select c.id as charge_id, c.contract_id, c.customer_id, cu.display_name as customer_name, c.competence_month::text as competence_month,
            p.received_on::text as received_on, c.base_amount::text as base_amount, k.commission_bps as bps
     from charges c
     join billing_batches b on b.company_id = c.company_id and b.id = c.batch_id and b.status = 'aprovado'
@@ -64,7 +64,7 @@ async function receivedIn(db: DB, companyId: string, partner: string, month: str
     where c.company_id = ${companyId} and c.status = 'aprovada' and k.commission_partner = ${partner}
       and p.paid >= c.amount and p.received_on >= ${from}::date and p.received_on < (${from}::date + interval '1 month')
       and not exists (select 1 from commission_lines l where l.company_id = c.company_id and l.charge_id = c.id and l.voided_at is null)
-    order by cu.legal_name, c.competence_month`);
+    order by cu.display_name, c.competence_month`);
   const lines: PreviewLine[] = [], missing: MissingPercent[] = [];
   for (const r of rows) {
     const baseCents = centsFromNumeric(r.base_amount);

@@ -23,6 +23,7 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
   if (!role || !can(role, "crm.read")) return <p className="rounded-lg border bg-card p-6">Seu papel não tem acesso a clientes e fornecedores.</p>;
   const p = await getParty(db, ctx.user.id, ctx.current.id, id); // filtrado por empresa: ID de outra empresa => null
   if (!p) notFound();
+  const shown = (p as { displayName?: string | null }).displayName ?? p.legalName; // nome para mostrar (fantasia quando a razão social é só o número do CNPJ)
   const write = can(role, "crm.write");
   const crmMode = (await getCustomerMode(db, ctx.user.id, ctx.current.id)) === "crm";
   const crmOwned = p.source === "crm" && crmMode; // somente leitura só no modo CRM
@@ -32,8 +33,8 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
     <div className="max-w-2xl space-y-5">
       <Link href="/clientes" className="text-sm text-primary">← Voltar</Link>
       <div>
-        <h1 className="text-2xl font-semibold">{p.legalName}</h1>
-        <p className="text-sm text-muted-foreground">{p.kind === "cliente" ? "Cliente" : "Fornecedor"} · {p.docType.toUpperCase()} {p.documentFormatted}{p.archivedAt && <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs">Arquivado</span>}{p.kind === "cliente" && <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${p.status === "ativo" ? "bg-positive-soft text-positive-foreground" : p.status === "cancelado" ? "bg-negative-soft text-negative-foreground" : "bg-warning-soft text-warning-foreground"}`}>{STATUS_LABEL[p.status as Status]}</span>}</p>
+        <h1 className="text-2xl font-semibold">{shown}</h1>
+        <p className="text-sm text-muted-foreground">{p.kind === "cliente" ? "Cliente" : "Fornecedor"} · {p.docType.toUpperCase()} {p.documentFormatted}{shown !== p.legalName && <span> · razão social: {p.legalName}</span>}{p.archivedAt && <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs">Arquivado</span>}{p.kind === "cliente" && <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${p.status === "ativo" ? "bg-positive-soft text-positive-foreground" : p.status === "cancelado" ? "bg-negative-soft text-negative-foreground" : "bg-warning-soft text-warning-foreground"}`}>{STATUS_LABEL[p.status as Status]}</span>}</p>
       </div>
       {p.kind === "cliente" && p.status !== "ativo" && <p role="note" className="rounded-md bg-warning-soft p-3 text-sm text-warning-foreground">Cliente <strong>{p.status}</strong>: continua cadastrado (pode ter dívidas antigas a receber), mas <strong>não gera nova cobrança</strong>.</p>}
       {sp.erro && <p role="alert" className="rounded-md bg-negative-soft p-3 text-sm text-negative-foreground">{sp.erro}</p>}

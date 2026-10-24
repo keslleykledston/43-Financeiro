@@ -1,5 +1,6 @@
 // Operação auditada (H1): grava a planilha de boletos em STAGING (legacy_billing_rows), uma importação por empresa. NÃO cria cobrança, pagamento, contrato nem cliente.
 // Sem OPS_CONFIRM=1 só mostra a prévia (contagens). Idempotente: o mesmo arquivo (hash) não entra duas vezes. Usa a mesma permissão da tela (history.import = diretoria).
+// OPS_REPLACE=1 (com OPS_CONFIRM=1): desfaz antes as importações anteriores da empresa (staging, auditado) e importa de novo.
 // Uso: OPS_XLSX=/in/Boletos__2026.xlsx OPS_USER_EMAIL=... [OPS_YEAR=2026] [OPS_CONFIRM=1] docker compose --profile tools run --rm -e OPS_XLSX -e OPS_USER_EMAIL -e OPS_YEAR -e OPS_CONFIRM -v /pasta:/in:ro tools pnpm tsx scripts/ops-import-legacy.ts
 import { loadEnvConfig } from "@next/env";
 import { readFileSync, statSync } from "node:fs";
@@ -16,7 +17,8 @@ const COMPANY_OF_BLOCK = { solutions: "K3G Solutions", call: "K3G Call" } as con
   const { companies, users } = await import("../src/lib/db/schema");
   const { eq, sql } = await import("drizzle-orm");
   const { readWorkbook } = await import("../src/modules/contracts/planilha");
-  const { importLegacy, sha256 } = await import("../src/modules/history/service");
+  const { importLegacy, removeLegacyImport, sha256 } = await import("../src/modules/history/service");
+  const { legacyImports } = await import("../src/lib/db/schema");
 
   const [u] = await db.select().from(users).where(eq(sql`lower(${users.email})`, email.toLowerCase()));
   if (!u) throw new Error("Usuário não encontrado");
@@ -31,6 +33,7 @@ const COMPANY_OF_BLOCK = { solutions: "K3G Solutions", call: "K3G Call" } as con
     if (!c) { console.log(`${COMPANY_OF_BLOCK[block]}: empresa não encontrada (pulada)`); continue; }
     console.log(`${COMPANY_OF_BLOCK[block]}: ${mine.length} linhas`);
     if (process.env.OPS_CONFIRM !== "1") continue;
+    if (process.env.OPS_REPLACE === "1") for (const old of await db.select({ id: legacyImports.id }).from(legacyImports).where(eq(legacyImports.companyId, c.id))) { await removeLegacyImport(db, u.id, c.id, old.id); console.log(`  importação anterior desfeita (${old.id.slice(0, 8)}…)`); }
     const r = await importLegacy(db, u.id, c.id, { fileSha256: hash, fileLabel: "Boletos (planilha)", year, entries: mine });
     console.log(r.already ? `  já importado antes (importação ${r.importId}); nada mudou` : `  importado: ${r.rows} linhas · ligadas a clientes existentes: ${r.linked}`);
   }
