@@ -25,7 +25,12 @@ O saldo é **sempre calculado**: valor − soma dos pagamentos ativos. Não exis
 ## Registrar um pagamento
 1. Abra a cobrança → **Registrar pagamento**.
 2. Informe valor, data, forma (Pix, boleto, transferência, dinheiro, outro) e, se quiser, uma observação (sem dados pessoais).
-3. **Parcial** é permitido. O valor **não pode passar do saldo** e a data não pode ser futura nem anterior à emissão.
+3. **Parcial** é permitido. O **principal quitado não pode passar do saldo** e a data não pode ser futura nem anterior à emissão.
+   - **Valor recebido** é o que entrou de fato (como no extrato).
+   - **Juros/multa incluídos:** pagou com atraso? Informe quanto do valor recebido é juros/multa. Principal quitado = recebido − juros.
+   - **Desconto/abatimento:** quitou pagando menos (desconto combinado, retenção)? Informe o desconto. Principal quitado = recebido + desconto.
+   - Exemplo: cobrança de R$ 1.000,00, recebido R$ 1.030,00 com R$ 30,00 de juros → quita R$ 1.000,00. Recebido R$ 950,00 com R$ 50,00 de desconto → também quita R$ 1.000,00.
+   - O painel e a lista de recebimentos somam o **dinheiro recebido** (principal + juros − desconto).
 4. Se o pagamento quitar a cobrança, as **mensagens da régua** ainda não processadas são **canceladas** e a cobrança não entra mais na régua.
 5. Clicar duas vezes ou recarregar a página **não** registra duas vezes.
 

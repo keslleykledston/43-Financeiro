@@ -246,7 +246,7 @@ describe.skipIf(!enabled)("E05 lotes de cobrança: prévia idempotente, aprovaç
   it("banco: uma cobrança por contrato+competência, aprovação coerente, valor positivo e FK composta por empresa", async () => {
     const c1 = await active(cli1);
     const { batchId } = await generateBatch(db, asstA, A, D);
-    const ins = (company: string, batch: string, contract: string, customer: string, amount = "10.00", comp = "2026-09-01") => db.execute(sql`insert into charges (company_id, batch_id, contract_id, customer_id, competence_month, due_date, issue_date, description, amount) values (${company}, ${batch}, ${contract}, ${customer}, ${comp}, '2026-10-14', ${D}, 'x', ${amount})`);
+    const ins = (company: string, batch: string, contract: string, customer: string, amount = "10.00", comp = "2026-09-01") => db.execute(sql`insert into charges (company_id, batch_id, contract_id, customer_id, competence_month, due_date, issue_date, description, amount, base_amount) values (${company}, ${batch}, ${contract}, ${customer}, ${comp}, '2026-10-14', ${D}, 'x', ${amount}, ${amount})`);
     await expect(ins(A, batchId, c1, cli1)).rejects.toThrow();                       // duplicada
     await expect(ins(A, batchId, c1, cli1, "10.00", "2026-08-01")).resolves.toBeDefined();
     await expect(ins(A, batchId, c1, cli1, "0", "2026-07-01")).rejects.toThrow();     // valor > 0

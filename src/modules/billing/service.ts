@@ -10,6 +10,7 @@ import { addMonths, billingSchedule, daysInMonth, holidaysFor, nationalHolidays,
 export type CalendarItem = {
   contractId: string; customerId: string; customerName: string; description: string; amountCents: number; jointInvoice: boolean;
   competenceMonth: string; dueDate?: string; issueDate?: string; batch?: 25 | 1 | 8 | 15 | null; review: boolean; reason?: string; warnings: Warning[];
+  baseCents?: number; adjustmentCents?: number; // preenchidos na prévia do lote: valor do contrato × ajustes da competência (amountCents = base + ajustes)
 };
 export type CalendarDay = { date: string; issue: CalendarItem[]; due: CalendarItem[]; holiday?: string };
 export type BatchTotal = { batch: 25 | 1 | 8 | 15 | null; count: number; cents: number };

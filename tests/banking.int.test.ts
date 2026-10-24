@@ -285,6 +285,37 @@ describe.skipIf(!enabled)("E08 conciliação bancária: importação, dedup, sug
     expect((await listAccounts(db, contA, A))[0]).toMatchObject({ pendingCount: 1, pendingCents: 50000 });
   });
 
+  it("juros/multa e desconto na conciliação: o crédito é consumido pelo DINHEIRO (principal + juros − desconto)", async () => {
+    await approvedBatch(); // 2 cobranças de R$ 2.500,00
+    const id = await acct();
+    await imp(id, ofx([{ id: "T1", date: "20261015", amt: "2530.00", memo: `PIX ${D1}` }, { id: "T2", date: "20261016", amt: "2450.00", memo: `PIX ${D2}` }]));
+    const T = async (d: string) => (await txs(id)).find((t) => t.description.startsWith(d))!;
+    const c1 = await chargeOf(cli1), c2 = await chargeOf(cli2);
+    // crédito 2.530 ≠ saldo 2.500: sem sugestão "forte" (só identifica o cliente); o vínculo é manual, com os juros informados
+    expect((await T(`PIX ${D1}`)).suggestion).toMatchObject({ level: "cliente", customerName: "Cliente Um" });
+    const r = await allocate(db, asstA, A, (await T(`PIX ${D1}`)).id, c1.id, "2.530,00", undefined, TODAY, { interest: "30,00" });
+    expect(r).toMatchObject({ settled: true });
+    let g = (await getTransaction(db, contA, A, (await T(`PIX ${D1}`)).id))!;
+    expect(g).toMatchObject({ allocatedCents: 253000, remainingCents: 0 }); // o crédito inteiro foi usado
+    const rc = (await getReceivable(db, contA, A, c1.id, TODAY))!;
+    expect(rc).toMatchObject({ paidCents: 250000, interestCents: 3000, situation: "quitada" });
+    expect(rc.payments[0]).toMatchObject({ amountCents: 250000, interestCents: 3000, cashCents: 253000, method: "extrato" });
+    // desconto: crédito 2.450 quita a cobrança de 2.500 com 50 de desconto
+    await allocate(db, asstA, A, (await T(`PIX ${D2}`)).id, c2.id, "2.450,00", undefined, TODAY, { discount: "50,00" });
+    g = (await getTransaction(db, contA, A, (await T(`PIX ${D2}`)).id))!;
+    expect(g).toMatchObject({ allocatedCents: 245000, remainingCents: 0 });
+    expect(await getReceivable(db, contA, A, c2.id, TODAY)).toMatchObject({ paidCents: 250000, discountCents: 5000, openCents: 0, situation: "quitada" });
+    // desfazer vínculo estorna tudo (principal, juros e desconto) e libera o crédito
+    await undoAllocation(db, gerA, A, g.allocations[0].id, "desconto concedido por engano");
+    expect((await getTransaction(db, contA, A, (await T(`PIX ${D2}`)).id))).toMatchObject({ allocatedCents: 0, remainingCents: 245000 });
+    expect(await getReceivable(db, contA, A, c2.id, TODAY)).toMatchObject({ paidCents: 0, discountCents: 0, situation: "vencida" });
+    // o banco exige que o vínculo seja igual ao DINHEIRO do pagamento: vínculo pelo principal é recusado
+    const pay = (await db.insert(schema.payments).values({ companyId: A, chargeId: c2.id, amount: "2500.00", discountAmount: "50.00", paidAt: "2026-10-16", method: "extrato", registeredBy: asstA }).returning())[0];
+    const ins = (amount: string) => db.insert(schema.bankAllocations).values({ companyId: A, transactionId: (g.tx.id), chargeId: c2.id, paymentId: pay.id, amount, createdBy: asstA });
+    await expect(ins("2500.00")).rejects.toThrow(); // principal, não o dinheiro
+    await expect(ins("2450.00")).resolves.toBeDefined(); // dinheiro = 2500 + 0 − 50
+  });
+
   it("um crédito pode quitar várias cobranças; uma cobrança pode receber vários créditos", async () => {
     await approvedBatch();
     const id = await acct();

@@ -77,8 +77,8 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 
 ## Descobertas da planilha real de boletos 2026 (analisada em 2026-10-23; nenhum dado importado; sem dados pessoais aqui)
 - Planilha com 10 abas (JAN–OUT/2026); cada aba tem 2 blocos: **K3G Solutions** (VALOR BRUTO × LÍQUIDO × DATA PG, 44→69 clientes/mês, ~R$ 89 mil→124 mil) e **K3G Call** (**Plano + Excedente** + Líquido, 14→19 clientes/mês). Somas batem exatamente com as linhas de TOTAL da planilha (serve de teste de fechamento).
-- **Lacuna 1 (E-novo): excedente variável da K3G Call.** A cobrança da Call = plano fixo + excedente mensal (6 de 20 clientes tiveram excedente). O contrato só tem valor mensal fixo: precisa de ajuste/excedente por competência antes de aprovar o lote.
-- **Lacuna 2 (E07/E08): juros, multa e desconto na baixa.** Em 79 pagamentos o LÍQUIDO é maior que o BRUTO (juros/multa) e em 17 é menor (desconto/retenção). Hoje a baixa não passa do saldo. Precisa registrar principal × acréscimos × desconto.
+- **Lacuna 1 — FEITA (E05c): excedente variável da K3G Call, lançado à mão por contrato/competência (confirmado pelo dono: calculado em outro sistema).** A cobrança da Call = plano fixo + excedente mensal (6 de 20 clientes tiveram excedente). O contrato só tem valor mensal fixo: precisa de ajuste/excedente por competência antes de aprovar o lote.
+- **Lacuna 2 — FEITA (E07c): juros, multa e desconto na baixa manual e na conciliação.** Em 79 pagamentos o LÍQUIDO é maior que o BRUTO (juros/multa) e em 17 é menor (desconto/retenção). Hoje a baixa não passa do saldo. Precisa registrar principal × acréscimos × desconto.
 - Pagamentos parciais em duas datas existem (ex.: "24/03;14/04"): o modelo atual cobre.
 - 20 de 75 clientes mudaram de valor no ano e 15 de 75 têm dia de vencimento variável: usar o valor/dia mais recente no contrato e mostrar o histórico.
 - Cruzamento com o sistema (contagens): 48 de 70 CNPJs da planilha (Solutions) já estão no CRM importado; 22 não (4 CNPJs inválidos, 5 sem CNPJ, 13+ não cadastrados); K3G Call não tem nenhum cliente cadastrado (20 na planilha, 11 também são clientes da Solutions).

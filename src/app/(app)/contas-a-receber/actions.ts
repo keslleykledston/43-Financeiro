@@ -15,7 +15,7 @@ export async function payAction(fd: FormData) {
   const id = String(fd.get("id") ?? ""); let err = "", ok = "pago";
   try {
     const c = await ctx();
-    const r = await registerPayment(db, c.userId, c.companyId, id, { amount: String(fd.get("amount") ?? ""), paidAt: String(fd.get("paidAt") ?? ""), method: String(fd.get("method") ?? ""), note: String(fd.get("note") ?? ""), requestKey: String(fd.get("requestKey") ?? "") });
+    const r = await registerPayment(db, c.userId, c.companyId, id, { amount: String(fd.get("amount") ?? ""), paidAt: String(fd.get("paidAt") ?? ""), method: String(fd.get("method") ?? ""), note: String(fd.get("note") ?? ""), requestKey: String(fd.get("requestKey") ?? ""), interest: String(fd.get("interest") ?? ""), discount: String(fd.get("discount") ?? "") });
     if (r.settled) ok = "quitada";
   } catch (e) { err = known(e); }
   revalidatePath("/contas-a-receber"); revalidatePath("/mensagens");

@@ -22,3 +22,12 @@ export function numericFromCents(c: number): string {
   if (!Number.isSafeInteger(c) || c < 0 || c > MAX_CENTS) throw new RangeError("Valor monetário fora do limite suportado");
   return `${Math.trunc(c / 100)}.${String(c % 100).padStart(2, "0")}`;
 }
+
+/** Centavos COM SINAL (ajustes que reduzem o valor) → numeric do Postgres. */
+export function numericFromSignedCents(c: number): string {
+  return c < 0 ? `-${numericFromCents(-c)}` : numericFromCents(c);
+}
+/** numeric com sinal → centavos. */
+export function centsFromSignedNumeric(v: string): number {
+  return v.startsWith("-") ? -centsFromNumeric(v.slice(1)) : centsFromNumeric(v);
+}

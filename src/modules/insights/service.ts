@@ -57,7 +57,7 @@ export async function getOverview(db: DB, actorId: string, companyId: string, to
     const first = `${months[0]}-01`;
     const bill = rows(await db.execute(sql`select to_char(c.issue_date, 'YYYY-MM') m, sum(c.amount)::text s, count(*)::int n from charges c join billing_batches b on b.company_id = c.company_id and b.id = c.batch_id
       where c.company_id = ${companyId} and c.status = 'aprovada' and b.status = 'aprovado' and c.issue_date >= ${first}::date group by 1`));
-    const rec = rows(await db.execute(sql`select to_char(paid_at, 'YYYY-MM') m, sum(amount)::text s from payments where company_id = ${companyId} and status = 'ativo' and paid_at >= ${first}::date group by 1`));
+    const rec = rows(await db.execute(sql`select to_char(paid_at, 'YYYY-MM') m, sum(amount + interest_amount - discount_amount)::text s from payments where company_id = ${companyId} and status = 'ativo' and paid_at >= ${first}::date group by 1`));
     for (const p of ov.series) {
       p.billedCents = cents(bill.find((r) => r.m === p.month)?.s ?? 0);
       p.receivedCents = cents(rec.find((r) => r.m === p.month)?.s ?? 0);
@@ -166,10 +166,10 @@ export async function getGroupOverview(db: DB, actorId: string, companyList: { i
 export async function listReceipts(db: DB, actorId: string, companyId: string, month: string) {
   await requirePerm(db, actorId, companyId, "receivables.read");
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return { month, items: [], totalCents: 0, truncated: false };
-  const r = rows(await db.execute(sql`select p.id, p.paid_at::text d, p.amount::text a, p.method, p.status, p.charge_id, cu.legal_name
+  const r = rows(await db.execute(sql`select p.id, p.paid_at::text d, (p.amount + p.interest_amount - p.discount_amount)::text a, p.interest_amount::text ia, p.discount_amount::text da, p.method, p.status, p.charge_id, cu.legal_name
     from payments p join charges c on c.company_id = p.company_id and c.id = p.charge_id join customers cu on cu.company_id = c.company_id and cu.id = c.customer_id
     where p.company_id = ${companyId} and p.paid_at >= ${month + "-01"}::date and p.paid_at < (${month + "-01"}::date + interval '1 month') order by p.paid_at desc, p.created_at desc limit 500`));
-  const items = r.map((x) => ({ id: String(x.id), paidAt: String(x.d), amountCents: cents(x.a), method: String(x.method), status: String(x.status), chargeId: String(x.charge_id), customerName: String(x.legal_name) }));
-  const [tot] = rows(await db.execute(sql`select coalesce(sum(amount), 0)::text s, count(*)::int n from payments where company_id = ${companyId} and status = 'ativo' and paid_at >= ${month + "-01"}::date and paid_at < (${month + "-01"}::date + interval '1 month')`));
+  const items = r.map((x) => ({ id: String(x.id), paidAt: String(x.d), amountCents: cents(x.a), interestCents: cents(x.ia), discountCents: cents(x.da), method: String(x.method), status: String(x.status), chargeId: String(x.charge_id), customerName: String(x.legal_name) }));
+  const [tot] = rows(await db.execute(sql`select coalesce(sum(amount + interest_amount - discount_amount), 0)::text s, count(*)::int n from payments where company_id = ${companyId} and status = 'ativo' and paid_at >= ${month + "-01"}::date and paid_at < (${month + "-01"}::date + interval '1 month')`));
   return { month, items, totalCents: cents(tot.s), truncated: Number((rows(await db.execute(sql`select count(*)::int n from payments where company_id = ${companyId} and paid_at >= ${month + "-01"}::date and paid_at < (${month + "-01"}::date + interval '1 month')`))[0]).n) > items.length };
 }

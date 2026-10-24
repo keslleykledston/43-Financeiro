@@ -28,6 +28,8 @@ Na lista **A conciliar**, cada crédito mostra uma sugestão:
 - **Sugestão forte**: o histórico traz o **documento do cliente** (inteiro, sem estar colado a outros números; aparece o final dele) e há **uma** cobrança dele com saldo igual ao valor. Aparece o botão *Conciliar com…*. Confira o histórico antes de clicar.
 - **Ambígua / Cliente identificado / Mesmo valor sem identificador**: nada se aplica sozinho. Abra a transação e escolha a cobrança. **Dois Pix iguais sem identificador nunca viram "forte".**
 
+**Juros/multa e desconto:** se o crédito é maior que a cobrança por causa de atraso, informe os **juros/multa incluídos**; se o cliente pagou menos com desconto combinado, informe o **desconto concedido**. O vínculo consome do crédito o **dinheiro** (principal + juros − desconto), e a cobrança é quitada pelo principal. Desfazer o vínculo estorna tudo.
+
 Na transação você pode **vincular parcialmente**: um crédito pode quitar várias cobranças e uma cobrança pode receber vários créditos. O vínculo nunca passa do valor do crédito nem do saldo da cobrança. Ele cria um pagamento "Extrato bancário" em Contas a receber, com a data do crédito.
 
 **Desfazer vínculo** (diretoria e gerente, com motivo): estorna o pagamento, devolve o saldo da cobrança e libera o crédito. O histórico fica. Pagamento vindo da conciliação só se estorna por aqui.

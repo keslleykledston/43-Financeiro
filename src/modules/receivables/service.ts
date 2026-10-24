@@ -40,21 +40,21 @@ const FROM = (companyId: string) => sql`
   from charges c
   join billing_batches b on b.company_id = c.company_id and b.id = c.batch_id
   join customers cu on cu.company_id = c.company_id and cu.id = c.customer_id
-  left join (select charge_id, sum(amount) paid from payments where company_id = ${companyId} and status = 'ativo' group by charge_id) p on p.charge_id = c.id`;
+  left join (select charge_id, sum(amount) paid, sum(interest_amount) interest, sum(discount_amount) discount from payments where company_id = ${companyId} and status = 'ativo' group by charge_id) p on p.charge_id = c.id`;
 
 export type ReceivableRow = {
   id: string; customerId: string; customerName: string; description: string; competenceMonth: string; issueDate: string; dueDate: string;
-  amountCents: number; paidCents: number; openCents: number; situation: ReturnType<typeof situationOf>["situation"]; overdueDays: number;
+  amountCents: number; paidCents: number; interestCents: number; discountCents: number; openCents: number; situation: ReturnType<typeof situationOf>["situation"]; overdueDays: number;
 };
 const toRow = (r: Row, today: string): ReceivableRow => {
   const amountCents = centsFromNumeric(String(r.amount)), paidCents = centsFromNumeric(String(r.paid));
   const s = situationOf({ amountCents, paidCents, dueDate: String(r.due_date), today });
-  return { id: String(r.id), customerId: String(r.customer_id), customerName: String(r.legal_name), description: String(r.description), competenceMonth: String(r.competence_month), issueDate: String(r.issue_date), dueDate: String(r.due_date), amountCents, paidCents, openCents: s.openCents, situation: s.situation, overdueDays: s.overdueDays };
+  return { id: String(r.id), customerId: String(r.customer_id), customerName: String(r.legal_name), description: String(r.description), competenceMonth: String(r.competence_month), issueDate: String(r.issue_date), dueDate: String(r.due_date), amountCents, paidCents, interestCents: centsFromNumeric(String(r.interest ?? 0)), discountCents: centsFromNumeric(String(r.discount ?? 0)), openCents: s.openCents, situation: s.situation, overdueDays: s.overdueDays };
 };
 
 export async function listReceivables(db: DB, actorId: string, companyId: string, f: ListFilters = {}, today = todayManaus()) {
   await requirePerm(db, actorId, companyId, "receivables.read");
-  const rows = await db.execute(sql`select c.id, c.customer_id, cu.legal_name, c.description, c.competence_month::text, c.issue_date::text, c.due_date::text, c.amount::text, coalesce(p.paid, 0)::text paid
+  const rows = await db.execute(sql`select c.id, c.customer_id, cu.legal_name, c.description, c.competence_month::text, c.issue_date::text, c.due_date::text, c.amount::text, coalesce(p.paid, 0)::text paid, coalesce(p.interest, 0)::text interest, coalesce(p.discount, 0)::text discount
     ${FROM(companyId)} where ${where(companyId, f, today)} order by c.due_date asc, cu.legal_name asc, c.id asc limit 500`);
   return (rows as unknown as Row[]).map((r) => toRow(r, today));
 }
@@ -70,7 +70,7 @@ export async function receivablesSummary(db: DB, actorId: string, companyId: str
       count(*) filter (where coalesce(p.paid, 0) < c.amount)::int open_n
     ${base}`)) as unknown as Row[];
   const month = today.slice(0, 7);
-  const [rec] = (await db.execute(sql`select coalesce(sum(amount), 0)::text s, count(*)::int n from payments where company_id = ${companyId} and status = 'ativo' and paid_at >= ${month + "-01"}::date and paid_at < (${month + "-01"}::date + interval '1 month')`)) as unknown as Row[];
+  const [rec] = (await db.execute(sql`select coalesce(sum(amount + interest_amount - discount_amount), 0)::text s, count(*)::int n from payments where company_id = ${companyId} and status = 'ativo' and paid_at >= ${month + "-01"}::date and paid_at < (${month + "-01"}::date + interval '1 month')`)) as unknown as Row[];
   const aging = (await db.execute(sql`select (${today}::date - c.due_date) days, (c.amount - coalesce(p.paid, 0))::text open ${base} and coalesce(p.paid, 0) < c.amount and c.due_date < ${today}::date`)) as unknown as Row[];
   const buckets = AGING.map((b) => ({ key: b.key, label: b.label, cents: 0, count: 0 }));
   for (const a of aging) { const d = Number(a.days); const k = buckets.find((_, i) => d >= AGING[i].min && d <= AGING[i].max); if (k) { k.cents += centsFromNumeric(String(a.open)); k.count++; } }
@@ -88,7 +88,7 @@ export type TimelineEvent = { at: Date; kind: "aprovada" | "pagamento" | "estorn
 export async function getReceivable(db: DB, actorId: string, companyId: string, id: string, today = todayManaus()) {
   await requirePerm(db, actorId, companyId, "receivables.read");
   if (!uuidOk(id)) return null;
-  const [r] = (await db.execute(sql`select c.id, c.customer_id, cu.legal_name, c.description, c.competence_month::text, c.issue_date::text, c.due_date::text, c.amount::text, coalesce(p.paid, 0)::text paid, c.batch_id, c.contract_id, b.approved_at
+  const [r] = (await db.execute(sql`select c.id, c.customer_id, cu.legal_name, c.description, c.competence_month::text, c.issue_date::text, c.due_date::text, c.amount::text, coalesce(p.paid, 0)::text paid, coalesce(p.interest, 0)::text interest, coalesce(p.discount, 0)::text discount, c.batch_id, c.contract_id, b.approved_at
     ${FROM(companyId)} where c.company_id = ${companyId} and c.id = ${id} and c.status = 'aprovada' and b.status = 'aprovado'`)) as unknown as Row[];
   if (!r) return null;
   const row = toRow(r, today);
@@ -99,25 +99,40 @@ export async function getReceivable(db: DB, actorId: string, companyId: string, 
   const events: TimelineEvent[] = [];
   if (r.approved_at) events.push({ at: new Date(String(r.approved_at)), kind: "aprovada", text: "Cobrança aprovada no lote de emissão" });
   for (const x of pays) {
-    events.push({ at: x.p.createdAt, kind: "pagamento", text: `Pagamento de ${formatBRL(centsFromNumeric(x.p.amount))} registrado por ${x.by}` });
-    if (x.p.status === "estornado" && x.p.reversedAt) events.push({ at: x.p.reversedAt, kind: "estorno", text: `Pagamento de ${formatBRL(centsFromNumeric(x.p.amount))} estornado por ${x.revBy ?? "—"}: ${x.p.reverseReason}` });
+    events.push({ at: x.p.createdAt, kind: "pagamento", text: `Recebimento de ${formatBRL(cashOf(x.p))} registrado por ${x.by}` });
+    if (x.p.status === "estornado" && x.p.reversedAt) events.push({ at: x.p.reversedAt, kind: "estorno", text: `Recebimento de ${formatBRL(cashOf(x.p))} estornado por ${x.revBy ?? "—"}: ${x.p.reverseReason}` });
   }
   for (const m of msgs) if (m.at) events.push({ at: m.at, kind: "mensagem", text: `Mensagem simulada (${m.kind}, ${m.channel})` });
   events.sort((a, b) => a.at.getTime() - b.at.getTime());
   return {
     ...row, batchId: String(r.batch_id), contractId: String(r.contract_id),
-    payments: pays.map((x) => ({ id: x.p.id, amountCents: centsFromNumeric(x.p.amount), paidAt: x.p.paidAt, method: x.p.method as Method, note: x.p.note, status: x.p.status, registeredBy: x.by, reversedBy: x.revBy, reverseReason: x.p.reverseReason, createdAt: x.p.createdAt })),
+    payments: pays.map((x) => ({ id: x.p.id, amountCents: centsFromNumeric(x.p.amount), interestCents: centsFromNumeric(x.p.interestAmount), discountCents: centsFromNumeric(x.p.discountAmount), cashCents: cashOf(x.p), paidAt: x.p.paidAt, method: x.p.method as Method, note: x.p.note, status: x.p.status, registeredBy: x.by, reversedBy: x.revBy, reverseReason: x.p.reverseReason, createdAt: x.p.createdAt })),
     events,
   };
 }
 
-export type PaymentInput = { amount: string; paidAt: string; method: string; note?: string; requestKey?: string };
+/** Dinheiro efetivamente recebido = principal + juros/multa − desconto. */
+const cashOf = (p: { amount: string; interestAmount: string; discountAmount: string }) => centsFromNumeric(p.amount) + centsFromNumeric(p.interestAmount) - centsFromNumeric(p.discountAmount);
+
+/** `amount` = valor RECEBIDO (como no extrato). `interest` = juros/multa incluídos nele; `discount` = abatimento/desconto concedido (quita o principal sem entrar dinheiro). Principal quitado = recebido − juros + desconto. */
+export type PaymentInput = { amount: string; paidAt: string; method: string; note?: string; requestKey?: string; interest?: string; discount?: string };
+
+/** Valida e separa recebido/juros/desconto → principal. */
+export function splitReceipt(amount: string, interest: string | undefined, discount: string | undefined) {
+  const cash = parseMoneyToCents(amount ?? "");
+  if (cash === null || cash <= 0) throw new Invalid("Informe um valor válido, maior que zero");
+  const i = (interest ?? "").trim() ? parseMoneyToCents(interest!) : 0, d = (discount ?? "").trim() ? parseMoneyToCents(discount!) : 0;
+  if (i === null) throw new Invalid("Juros/multa inválido");
+  if (d === null) throw new Invalid("Desconto inválido");
+  const principal = cash - i + d;
+  if (principal <= 0) throw new Invalid("Os juros/multa não podem ser maiores ou iguais ao valor recebido");
+  return { cash, interestCents: i, discountCents: d, principalCents: principal };
+}
 
 export async function registerPayment(db: DB, actorId: string, companyId: string, chargeId: string, input: PaymentInput, today = todayManaus()) {
   await requirePerm(db, actorId, companyId, "receivables.pay");
   if (!uuidOk(chargeId)) throw new Invalid("Cobrança não encontrada");
-  const cents = parseMoneyToCents(input.amount ?? "");
-  if (cents === null || cents <= 0) throw new Invalid("Informe um valor válido, maior que zero");
+  const sp = splitReceipt(input.amount, input.interest, input.discount);
   if (!(METHODS as readonly string[]).includes(input.method)) throw new Invalid("Forma de pagamento inválida");
   if (!isoDate(input.paidAt ?? "")) throw new Invalid("Data do pagamento inválida");
   if (input.paidAt > today) throw new Invalid("A data do pagamento não pode ser futura");
@@ -128,7 +143,7 @@ export async function registerPayment(db: DB, actorId: string, companyId: string
   try {
     return await db.transaction(async (tx) => {
       const x = tx as unknown as DB;
-      return recordPaymentTx(x, companyId, actorId, chargeId, { cents, paidAt: input.paidAt, method: input.method, note, key });
+      return recordPaymentTx(x, companyId, actorId, chargeId, { cents: sp.principalCents, interestCents: sp.interestCents, discountCents: sp.discountCents, paidAt: input.paidAt, method: input.method, note, key });
     });
   } catch (e) {
     const cause = (e as { cause?: { code?: string; constraint_name?: string; message?: string } }).cause;
@@ -144,7 +159,7 @@ export async function registerPayment(db: DB, actorId: string, companyId: string
   }
 }
 
-type PaymentCore = { cents: number; paidAt: string; method: string; note: string; key: string | null };
+type PaymentCore = { cents: number; interestCents?: number; discountCents?: number; paidAt: string; method: string; note: string; key: string | null }; // cents = PRINCIPAL quitado
 /** Núcleo da baixa, DENTRO de uma transação do chamador (registro manual e conciliação bancária). Trava a cobrança; o trigger do banco é a 2ª barreira. */
 export async function recordPaymentTx(x: DB, companyId: string, actorId: string, chargeId: string, p0: PaymentCore, auditExtra: Record<string, unknown> = {}) {
   const { cents, key, note } = p0; const input = { paidAt: p0.paidAt, method: p0.method };
@@ -159,10 +174,10 @@ export async function recordPaymentTx(x: DB, companyId: string, actorId: string,
       const [{ paid }] = await x.select({ paid: sql<string>`coalesce(sum(${payments.amount}), 0)::text` }).from(payments).where(and(eq(payments.companyId, companyId), eq(payments.chargeId, chargeId), eq(payments.status, "ativo")));
       const open = centsFromNumeric(c.c.amount) - centsFromNumeric(paid);
       if (cents > open) throw new Invalid(`O valor passa do saldo em aberto (${formatBRL(open)})`);
-      const [p] = await x.insert(payments).values({ companyId, chargeId, amount: numericFromCents(cents), paidAt: input.paidAt, method: input.method, note: note || null, requestKey: key, registeredBy: actorId }).returning();
+      const [p] = await x.insert(payments).values({ companyId, chargeId, amount: numericFromCents(cents), interestAmount: numericFromCents(p0.interestCents ?? 0), discountAmount: numericFromCents(p0.discountCents ?? 0), paidAt: input.paidAt, method: input.method, note: note || null, requestKey: key, registeredBy: actorId }).returning();
       const settled = cents === open;
       const stopped = settled ? await cancelQueueForCharges(x, companyId, [chargeId]) : 0; // quitou: as mensagens da régua param
-      await audit(x, companyId, actorId, "receivable.payment_registered", { chargeId, paymentId: p.id, method: input.method, settled, messagesStopped: stopped, ...auditExtra });
+      await audit(x, companyId, actorId, "receivable.payment_registered", { chargeId, paymentId: p.id, method: input.method, settled, hasExtras: (p0.interestCents ?? 0) > 0 || (p0.discountCents ?? 0) > 0, messagesStopped: stopped, ...auditExtra });
       return { paymentId: p.id, duplicate: false, settled };
 }
 
@@ -199,8 +214,8 @@ export async function exportReceivables(db: DB, actorId: string, companyId: stri
   const br = (d: string) => d.split("-").reverse().join("/");
   const money = (c: number) => (c / 100).toFixed(2).replace(".", ",");
   const csv = toCsv([
-    ["Cliente", "Descrição", "Competência", "Emissão", "Vencimento", "Valor", "Pago", "Saldo", "Situação", "Dias de atraso"],
-    ...rows.map((r) => [r.customerName, r.description, `${r.competenceMonth.slice(5, 7)}/${r.competenceMonth.slice(0, 4)}`, br(r.issueDate), br(r.dueDate), money(r.amountCents), money(r.paidCents), money(r.openCents), SITUATION_LABEL[r.situation], String(r.overdueDays)]),
+    ["Cliente", "Descrição", "Competência", "Emissão", "Vencimento", "Valor", "Pago", "Juros/multa", "Descontos", "Saldo", "Situação", "Dias de atraso"],
+    ...rows.map((r) => [r.customerName, r.description, `${r.competenceMonth.slice(5, 7)}/${r.competenceMonth.slice(0, 4)}`, br(r.issueDate), br(r.dueDate), money(r.amountCents), money(r.paidCents), money(r.interestCents), money(r.discountCents), money(r.openCents), SITUATION_LABEL[r.situation], String(r.overdueDays)]),
   ]);
   await db.insert(auditLog).values({ companyId, actorId, action: "receivable.exported", detail: { count: rows.length, status: f.status ?? "abertas" } });
   return csv;

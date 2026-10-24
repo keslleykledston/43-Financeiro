@@ -114,6 +114,54 @@ describe.skipIf(!enabled)("E07 contas a receber: baixa manual, saldo, estorno, i
     expect((await listReceivables(db, contA, A, { status: "quitadas" }, TODAY)).map((x) => x.customerName)).toEqual(["Cliente Um"]);
   });
 
+  it("juros/multa e desconto na baixa: o recebido difere do principal; saldo, painel e histórico corretos", async () => {
+    await approvedBatch(); // 2 cobranças de R$ 2.500,00
+    const c1 = await chargeOf(cli1), c2 = await chargeOf(cli2);
+    // pagou com atraso: recebeu 2.530,00, sendo 30,00 de juros/multa → quita o principal de 2.500,00
+    expect(await pay(c1.id, "2.530,00", { interest: "30,00" })).toMatchObject({ settled: true });
+    let d = (await getReceivable(db, contA, A, c1.id, TODAY))!;
+    expect(d).toMatchObject({ paidCents: 250000, openCents: 0, situation: "quitada", interestCents: 3000, discountCents: 0 });
+    expect(d.payments[0]).toMatchObject({ amountCents: 250000, interestCents: 3000, discountCents: 0, cashCents: 253000 });
+    expect(d.events.some((e) => e.text.includes("Recebimento de R$ 2.530,00"))).toBe(true);
+    // desconto/retenção: recebeu 2.450,00 e concedeu 50,00 → também quita 2.500,00
+    expect(await pay(c2.id, "2.450,00", { discount: "50,00" })).toMatchObject({ settled: true });
+    d = (await getReceivable(db, contA, A, c2.id, TODAY))!;
+    expect(d).toMatchObject({ paidCents: 250000, openCents: 0, discountCents: 5000 });
+    expect(d.payments[0]).toMatchObject({ amountCents: 250000, discountCents: 5000, cashCents: 245000 });
+    // o painel soma o DINHEIRO recebido (2.530 + 2.450), não o principal
+    expect((await receivablesSummary(db, contA, A, TODAY)).receivedMonthCents).toBe(253000 + 245000);
+    const rows = await listReceivables(db, contA, A, { status: "quitadas" }, TODAY);
+    expect(rows.map((r) => [r.interestCents, r.discountCents]).sort()).toEqual([[0, 5000], [3000, 0]]);
+    expect((await exportReceivables(db, contA, A, { status: "todas" }, TODAY))).toContain('"2500,00";"2500,00";"30,00";"0,00";"0,00"'); // valor; pago; juros; descontos; saldo
+    // estorno devolve o principal; refazer parcial com juros: recebeu 1.010,00 com 10,00 de juros → principal 1.000,00
+    const pid = d.payments[0].id;
+    await reversePayment(db, gerA, A, pid, "baixa com desconto lançada errado");
+    expect(await pay(c2.id, "1.010,00", { interest: "10,00" })).toMatchObject({ settled: false });
+    expect((await getReceivable(db, contA, A, c2.id, TODAY))).toMatchObject({ paidCents: 100000, openCents: 150000, situation: "parcial", interestCents: 1000 });
+    expect((await receivablesSummary(db, contA, A, TODAY)).receivedMonthCents).toBe(253000 + 101000); // o estornado saiu
+  });
+
+  it("juros/desconto: validações, teto do principal e proteção no banco", async () => {
+    await approvedBatch();
+    const c = await chargeOf(cli1);
+    await expect(pay(c.id, "10,00", { interest: "10,00" })).rejects.toThrow(/juros/i); // principal zero
+    await expect(pay(c.id, "10,00", { interest: "50,00" })).rejects.toThrow(/juros/i); // principal negativo
+    await expect(pay(c.id, "100,00", { interest: "abc" })).rejects.toThrow(/Juros\/multa inválido/);
+    await expect(pay(c.id, "100,00", { discount: "x,1" })).rejects.toThrow(/Desconto inválido/);
+    await expect(pay(c.id, "100,00", { interest: "-5,00" })).rejects.toThrow(/Juros\/multa inválido/);
+    await expect(pay(c.id, "2.600,01", { interest: "100,00" })).rejects.toThrow(/saldo em aberto \(R\$ 2\.500,00\)/); // principal 2.500,01
+    await expect(pay(c.id, "2.400,00", { discount: "100,01" })).rejects.toThrow(/saldo em aberto/); // principal 2.500,01
+    expect(await pay(c.id, "2.500,00", { interest: "0,00", discount: "" })).toMatchObject({ settled: true }); // vazio/zero = sem extras
+    // banco: desconto precisa ser menor que principal + juros; juros não negativos; extras imutáveis
+    const ins = (amount: string, interest: string, discount: string) => db.insert(schema.payments).values({ companyId: A, chargeId: c.id, amount, interestAmount: interest, discountAmount: discount, paidAt: "2026-10-15", method: "pix", registeredBy: asstA });
+    await expect(ins("1.00", "0", "1.00")).rejects.toThrow();
+    await expect(ins("1.00", "-1", "0")).rejects.toThrow();
+    await expect(db.execute(sql`update payments set interest_amount = 5`)).rejects.toThrow();
+    await expect(db.execute(sql`update payments set discount_amount = 5`)).rejects.toThrow();
+    const logs = await db.select().from(schema.auditLog).where(sql`${schema.auditLog.action} = 'receivable.payment_registered'`);
+    expect(JSON.stringify(logs.map((l) => l.detail))).not.toMatch(/2500|2\.500|30/);
+  });
+
   it("banco: trigger barra soma acima do valor e pagamento em cobrança não aprovada, mesmo sem passar pelo serviço", async () => {
     await approvedBatch();
     const c = await chargeOf(cli1);
@@ -296,9 +344,9 @@ describe.skipIf(!enabled)("E07 contas a receber: baixa manual, saldo, estorno, i
     await expect(exportReceivables(db, asstA, A, {}, TODAY)).rejects.toThrow(Forbidden);
     await expect(exportReceivables(db, techA, A, {}, TODAY)).rejects.toThrow(Forbidden);
     const csv = await exportReceivables(db, contA, A, { status: "todas" }, TODAY);
-    expect(csv.split("\r\n")[0]).toBe("\uFEFFCliente;Descrição;Competência;Emissão;Vencimento;Valor;Pago;Saldo;Situação;Dias de atraso");
+    expect(csv.split("\r\n")[0]).toBe("\uFEFFCliente;Descrição;Competência;Emissão;Vencimento;Valor;Pago;Juros/multa;Descontos;Saldo;Situação;Dias de atraso");
     expect(csv).toContain("'=HYPERLINK"); expect(csv).not.toMatch(/(^|;)=HYPERLINK/m);
-    expect(csv).toContain('"2500,00";"0,00";"2500,00";Vencida;6');
+    expect(csv).toContain('"2500,00";"0,00";"0,00";"0,00";"2500,00";Vencida;6');
     expect(csv).not.toContain("Empresa B");
     expect((await exportReceivables(db, dirB, B, {}, TODAY)).split("\r\n").filter(Boolean)).toHaveLength(1); // só o cabeçalho
     const logs = await db.select().from(schema.auditLog).where(sql`${schema.auditLog.action} like 'receivable.%'`);

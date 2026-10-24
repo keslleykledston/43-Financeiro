@@ -30,7 +30,7 @@ export default async function Recebimentos({ searchParams }: { searchParams: Pro
             {r.items.map((p) => (
               <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
                 <div><AppLink href={`/contas-a-receber/${p.chargeId}`} className={p.status === "estornado" ? "text-muted-foreground line-through" : "font-medium hover:underline"}>{p.customerName}</AppLink>
-                  <p className="text-xs text-muted-foreground">{br(p.paidAt)} · {METHOD_LABEL[p.method as Method] ?? p.method}</p></div>
+                  <p className="text-xs text-muted-foreground">{br(p.paidAt)} · {METHOD_LABEL[p.method as Method] ?? p.method}{p.interestCents > 0 ? ` · inclui juros/multa de ${(p.interestCents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}` : ""}{p.discountCents > 0 ? ` · desconto de ${(p.discountCents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}` : ""}</p></div>
                 <span className="flex items-center gap-2"><Money cents={p.amountCents} /><StatusPill tone={p.status === "ativo" ? "positive" : "neutral"}>{p.status === "ativo" ? "Ativo" : "Estornado"}</StatusPill></span>
               </li>
             ))}

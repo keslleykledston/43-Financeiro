@@ -50,7 +50,7 @@ export async function undoImportAction(fd: FormData) {
 
 export async function allocateAction(fd: FormData) {
   const tx = s(fd, "txId"), back = s(fd, "back") === "lista" ? `/conciliacao/contas/${s(fd, "accountId")}` : `/conciliacao/transacoes/${tx}`; let err = "", ok = "vinculado";
-  try { const c = await ctx(); const r = await allocate(db, c.userId, c.companyId, tx, s(fd, "chargeId"), s(fd, "amount"), s(fd, "requestKey")); if (r.settled) ok = "quitada"; } catch (e) { err = known(e); }
+  try { const c = await ctx(); const r = await allocate(db, c.userId, c.companyId, tx, s(fd, "chargeId"), s(fd, "amount"), s(fd, "requestKey"), undefined, { interest: s(fd, "interest"), discount: s(fd, "discount") }); if (r.settled) ok = "quitada"; } catch (e) { err = known(e); }
   revalidatePath("/conciliacao"); revalidatePath("/contas-a-receber"); go(back, err, ok);
 }
 export async function undoAllocationAction(fd: FormData) {

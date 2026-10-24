@@ -52,6 +52,7 @@ export default async function Transacao({ params, searchParams }: { params: Prom
           {r.suggestion?.level === "forte" && <Callout tone="positive">Sugestão forte: o histórico traz o documento de <strong>{r.suggestion.customerName}</strong> e há uma cobrança com saldo igual ao valor.</Callout>}
           {r.suggestion?.level === "ambigua" && <Callout tone="warning">Há mais de uma possibilidade: escolha manualmente a cobrança certa.</Callout>}
           {r.suggestion?.level === "valor" && <Callout tone="warning">Há {r.suggestion.count} cobrança(s) com este valor, mas o histórico <strong>não identifica o cliente</strong>. Não adivinhe: confirme com o comprovante.</Callout>}
+          <p className="mt-2 text-xs text-muted-foreground">Crédito maior que a cobrança por causa de atraso? Informe o <strong>juros/multa</strong>. Cliente pagou menos com desconto combinado? Informe o <strong>desconto</strong>: a cobrança é quitada pelo valor do crédito + desconto.</p>
           <form method="get" className="my-3 flex gap-2"><input name="q" defaultValue={sp.q ?? ""} maxLength={60} placeholder="Buscar cliente…" aria-label="Buscar cliente" className={`${inputClass} max-w-xs`} /><button className={buttonClass("outline", "sm")}>Buscar</button></form>
           {r.candidates.length === 0 ? <p className="text-sm text-muted-foreground">Nenhuma cobrança em aberto combina. Busque pelo nome do cliente.</p> : (
             <ul className="divide-y divide-border text-sm">
@@ -63,7 +64,9 @@ export default async function Transacao({ params, searchParams }: { params: Prom
                   </div>
                   <form action={allocateAction} className="mt-2 flex flex-wrap items-end gap-2">
                     <input type="hidden" name="txId" value={tx.id} /><input type="hidden" name="chargeId" value={c.id} /><input type="hidden" name="requestKey" value={randomUUID().replace(/-/g, "")} />
-                    <div><label htmlFor={`v-${c.id}`} className="mb-1 block text-xs font-medium">Valor a vincular (R$)</label><input id={`v-${c.id}`} name="amount" inputMode="decimal" defaultValue={fmt(Math.min(c.openCents, r.remainingCents))} required className={`${inputClass} w-40`} /></div>
+                    <div><label htmlFor={`v-${c.id}`} className="mb-1 block text-xs font-medium">Valor do crédito a vincular (R$)</label><input id={`v-${c.id}`} name="amount" inputMode="decimal" defaultValue={fmt(Math.min(c.openCents, r.remainingCents))} required className={`${inputClass} w-40`} /></div>
+                    <div><label htmlFor={`j-${c.id}`} className="mb-1 block text-xs font-medium">Juros/multa incluídos (opcional)</label><input id={`j-${c.id}`} name="interest" inputMode="decimal" placeholder="0,00" className={`${inputClass} w-36`} /></div>
+                    <div><label htmlFor={`d-${c.id}`} className="mb-1 block text-xs font-medium">Desconto concedido (opcional)</label><input id={`d-${c.id}`} name="discount" inputMode="decimal" placeholder="0,00" className={`${inputClass} w-36`} /></div>
                     <button className={buttonClass("primary", "sm")}>Vincular</button>
                   </form>
                 </li>

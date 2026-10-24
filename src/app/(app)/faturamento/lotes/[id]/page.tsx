@@ -29,7 +29,7 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
   return (
     <div className="space-y-5">
       <PageHeader title={`Lote de emissão ${br(b.issueDate)}`} description={ctx.current.name}
-        actions={<AppLink href="/faturamento/lotes" className={buttonClass("outline")}><ArrowLeft className="size-4" aria-hidden /> Lotes</AppLink>} />
+        actions={<span className="flex gap-2"><AppLink href="/faturamento/ajustes" className={buttonClass("outline")}>Ajustes</AppLink><AppLink href="/faturamento/lotes" className={buttonClass("outline")}><ArrowLeft className="size-4" aria-hidden /> Lotes</AppLink></span>} />
       {sp.ok && OK[sp.ok] && <Callout tone="positive" role="status">{OK[sp.ok]}</Callout>}
       {sp.erro && <Callout tone="negative" role="alert">{sp.erro}</Callout>}
 
@@ -64,6 +64,7 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
                   <AppLink href={`/contratos/${c.contractId}`} className="font-medium hover:underline">{c.customerName}</AppLink>
                   <p className="text-muted-foreground">{c.description} · competência {c.competenceMonth.slice(5, 7)}/{c.competenceMonth.slice(0, 4)} · vence {br(c.dueDate)}{c.jointInvoice ? " · boleto + NF" : ""}</p>
                   {(c.warnings as Warning[]).length > 0 && <p className="text-xs text-muted-foreground">{(c.warnings as Warning[]).map((w) => WARNING_LABEL[w]).join("; ")}</p>}
+                  {c.adjustments.length > 0 && <p className="text-xs text-muted-foreground">Contrato <Money cents={c.baseCents} /> {c.adjustments.map((a) => `${a.kind === "desconto" ? "−" : "+"} ${a.description} ${(a.amountCents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`).join(" ")}</p>}
                 </div>
                 <Money cents={c.amountCents} className="font-semibold" />
               </li>

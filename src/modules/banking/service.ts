@@ -6,7 +6,7 @@ import { isIsoDate } from "@/lib/iso-date";
 import { centsFromNumeric, numericFromCents } from "@/lib/money";
 import { Invalid, requirePerm } from "@/modules/identity/service";
 import { todayManaus } from "@/modules/messaging/service";
-import { recordPaymentTx, reversePaymentTx } from "@/modules/receivables/service";
+import { recordPaymentTx, reversePaymentTx, splitReceipt } from "@/modules/receivables/service";
 import { ParseError, parseSignedMoney, parseStatement, sha256, withRefKeys } from "./parsers";
 
 /**
@@ -336,11 +336,12 @@ export async function getTransaction(db: DB, actorId: string, companyId: string,
   };
 }
 
-export async function allocate(db: DB, actorId: string, companyId: string, txId: string, chargeId: string, amountStr: string, requestKey?: string, today = todayManaus()) {
+/** `amountStr` = valor do CRÉDITO aplicado a esta cobrança (dinheiro). `extras`: juros/multa incluídos nele e desconto concedido; o principal quitado é recebido − juros + desconto. */
+export async function allocate(db: DB, actorId: string, companyId: string, txId: string, chargeId: string, amountStr: string, requestKey?: string, today = todayManaus(), extras: { interest?: string; discount?: string } = {}) {
   await requirePerm(db, actorId, companyId, "bank.reconcile");
   if (!uuidOk(txId) || !uuidOk(chargeId)) throw new Invalid("Transação ou cobrança não encontrada");
-  const cents = parseSignedMoney(amountStr ?? "");
-  if (cents === null || cents <= 0) throw new Invalid("Informe um valor válido, maior que zero");
+  const sp = splitReceipt(amountStr, extras.interest, extras.discount);
+  const cents = sp.cash;
   const key = (requestKey ?? "").trim() || null;
   if (key && !/^[A-Za-z0-9_-]{8,64}$/.test(key)) throw new Invalid("Chave de envio inválida");
   try {
@@ -360,7 +361,7 @@ export async function allocate(db: DB, actorId: string, companyId: string, txId:
       const remaining = txCents - centsFromNumeric(s);
       if (cents > remaining) throw new Invalid(`O valor passa do que resta do crédito (${formatBRL(remaining)})`);
       if (t.postedAt > today) throw new Invalid("A data do crédito é futura");
-      const pay = await recordPaymentTx(x, companyId, actorId, chargeId, { cents, paidAt: t.postedAt, method: "extrato", note: "Conciliação bancária", key: null }, { source: "bank" });
+      const pay = await recordPaymentTx(x, companyId, actorId, chargeId, { cents: sp.principalCents, interestCents: sp.interestCents, discountCents: sp.discountCents, paidAt: t.postedAt, method: "extrato", note: "Conciliação bancária", key: null }, { source: "bank" });
       const [a] = await x.insert(bankAllocations).values({ companyId, transactionId: txId, chargeId, paymentId: pay.paymentId, amount: numericFromCents(cents), requestKey: key, createdBy: actorId }).returning({ id: bankAllocations.id });
       await audit(x, companyId, actorId, "bank.allocated", { transactionId: txId, chargeId, allocationId: a.id, paymentId: pay.paymentId, settled: pay.settled });
       return { allocationId: a.id, duplicate: false, settled: pay.settled };

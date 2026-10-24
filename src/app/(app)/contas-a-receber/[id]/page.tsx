@@ -7,7 +7,7 @@ import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
 import { getReceivable } from "@/modules/receivables/service";
 import { METHODS, METHOD_LABEL, SITUATION_LABEL, type Situation } from "@/modules/receivables/status";
-import { formatDateTime } from "@/lib/format";
+import { formatBRL, formatDateTime } from "@/lib/format";
 import { Callout, Money, PageHeader, SectionCard, StatusPill, type StatusTone } from "@/components/k3g/primitives";
 import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass, inputClass, selectClass } from "@/components/k3g/button";
@@ -46,7 +46,9 @@ export default async function Cobranca({ params, searchParams }: { params: Promi
         <SectionCard title="Registrar pagamento (baixa manual)">
           <form action={payAction} className="grid max-w-2xl gap-4 sm:grid-cols-2">
             <input type="hidden" name="id" value={r.id} /><input type="hidden" name="requestKey" value={requestKey} />
-            <div><label htmlFor="amount" className="mb-1 block text-sm font-medium">Valor (R$)</label><input id="amount" name="amount" inputMode="decimal" defaultValue={openText} required className={inputClass} /><p className="mt-1 text-xs text-muted-foreground">Pagamento parcial é permitido; não pode passar do saldo.</p></div>
+            <div><label htmlFor="amount" className="mb-1 block text-sm font-medium">Valor recebido (R$)</label><input id="amount" name="amount" inputMode="decimal" defaultValue={openText} required className={inputClass} /><p className="mt-1 text-xs text-muted-foreground">O que entrou de fato (como no extrato). Parcial é permitido; o principal quitado não pode passar do saldo.</p></div>
+            <div><label htmlFor="interest" className="mb-1 block text-sm font-medium">Juros/multa incluídos (R$, opcional)</label><input id="interest" name="interest" inputMode="decimal" placeholder="0,00" className={inputClass} /><p className="mt-1 text-xs text-muted-foreground">Pagou com atraso? Informe quanto do valor recebido é juros/multa.</p></div>
+            <div><label htmlFor="discount" className="mb-1 block text-sm font-medium">Desconto/abatimento concedido (R$, opcional)</label><input id="discount" name="discount" inputMode="decimal" placeholder="0,00" className={inputClass} /><p className="mt-1 text-xs text-muted-foreground">Quitou pagando menos (desconto, retenção)? A cobrança é quitada pelo valor recebido + desconto.</p></div>
             <div><label htmlFor="paidAt" className="mb-1 block text-sm font-medium">Data do pagamento</label><input id="paidAt" name="paidAt" type="date" defaultValue={today} min={r.issueDate} max={today} required className={inputClass} /></div>
             <div><label htmlFor="method" className="mb-1 block text-sm font-medium">Forma</label><select id="method" name="method" defaultValue="pix" className={`${selectClass} w-full`}>{METHODS.map((m) => <option key={m} value={m}>{METHOD_LABEL[m]}</option>)}</select></div>
             <div><label htmlFor="note" className="mb-1 block text-sm font-medium">Observação (opcional)</label><input id="note" name="note" maxLength={200} className={inputClass} /></div>
@@ -61,8 +63,8 @@ export default async function Cobranca({ params, searchParams }: { params: Promi
             {r.payments.map((p) => (
               <li key={p.id} className="py-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div><p className={p.status === "estornado" ? "text-muted-foreground line-through" : "font-medium"}><Money cents={p.amountCents} /> · {METHOD_LABEL[p.method]} · {br(p.paidAt)}</p>
-                    <p className="text-xs text-muted-foreground">Registrado por {p.registeredBy}{p.note ? ` · ${p.note}` : ""}</p></div>
+                  <div><p className={p.status === "estornado" ? "text-muted-foreground line-through" : "font-medium"}><Money cents={p.cashCents} /> · {METHOD_LABEL[p.method]} · {br(p.paidAt)}</p>
+                    <p className="text-xs text-muted-foreground">Registrado por {p.registeredBy}{p.note ? ` · ${p.note}` : ""}{p.interestCents > 0 ? ` · inclui juros/multa de ${formatBRL(p.interestCents)}` : ""}{p.discountCents > 0 ? ` · desconto de ${formatBRL(p.discountCents)} (quitou ${formatBRL(p.amountCents)} do principal)` : ""}</p></div>
                   <StatusPill tone={p.status === "ativo" ? "positive" : "neutral"}>{p.status === "ativo" ? "Ativo" : "Estornado"}</StatusPill>
                 </div>
                 {p.status === "estornado" && <p className="mt-1 text-xs text-muted-foreground">Estornado por {p.reversedBy ?? "—"}: {p.reverseReason}</p>}

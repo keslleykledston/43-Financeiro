@@ -246,7 +246,9 @@ export const charges = pgTable("charges", {
   dueDate: date("due_date", { mode: "string" }).notNull(),
   issueDate: date("issue_date", { mode: "string" }).notNull(),
   description: text("description").notNull(),
-  amount: numeric("amount", { precision: 18, scale: 2 }).notNull(),
+  amount: numeric("amount", { precision: 18, scale: 2 }).notNull(), // valor da cobrança = base + ajustes
+  baseAmount: numeric("base_amount", { precision: 18, scale: 2 }).notNull(), // valor fixo do contrato no momento da prévia
+  adjustmentAmount: numeric("adjustment_amount", { precision: 18, scale: 2 }).notNull().default("0"), // excedente/acréscimo (+) e desconto (−) da competência
   jointInvoice: boolean("joint_invoice").notNull().default(false),
   warnings: jsonb("warnings").notNull().default(sql`'[]'::jsonb`),
   status: text("status").notNull().default("previa"), // previa | aprovada | cancelada
@@ -259,6 +261,7 @@ export const charges = pgTable("charges", {
   unique("charges_company_id_uq").on(t.companyId, t.id),
   check("charges_status_chk", sql`${t.status} in ('previa', 'aprovada', 'cancelada')`),
   check("charges_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),
+  check("charges_composition_chk", sql`${t.amount} = ${t.baseAmount} + ${t.adjustmentAmount}`),
   check("charges_competence_day_chk", sql`extract(day from ${t.competenceMonth}) = 1`),
 ]);
 
@@ -358,7 +361,9 @@ export const payments = pgTable("payments", {
   ...base,
   companyId: uuid("company_id").notNull().references(() => companies.id),
   chargeId: uuid("charge_id").notNull(),
-  amount: numeric("amount", { precision: 18, scale: 2 }).notNull(),
+  amount: numeric("amount", { precision: 18, scale: 2 }).notNull(), // PRINCIPAL quitado (é o que abate o saldo da cobrança)
+  interestAmount: numeric("interest_amount", { precision: 18, scale: 2 }).notNull().default("0"), // juros/multa recebidos além do principal
+  discountAmount: numeric("discount_amount", { precision: 18, scale: 2 }).notNull().default("0"), // desconto/abatimento/retenção concedido (principal quitado sem entrar dinheiro)
   paidAt: date("paid_at", { mode: "string" }).notNull(),
   method: text("method").notNull(), // pix | boleto | transferencia | dinheiro | outro
   note: text("note"),
@@ -374,6 +379,7 @@ export const payments = pgTable("payments", {
   uniqueIndex("payments_request_key_uq").on(t.companyId, t.requestKey).where(sql`${t.requestKey} is not null`),
   index("payments_charge_idx").on(t.companyId, t.chargeId),
   check("payments_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),
+  check("payments_extras_chk", sql`${t.interestAmount} >= 0 and ${t.interestAmount} <= 99999999999.99 and ${t.discountAmount} >= 0 and ${t.discountAmount} < ${t.amount} + ${t.interestAmount}`), // dinheiro recebido (principal + juros − desconto) é sempre > 0
   check("payments_method_chk", sql`${t.method} in ('pix', 'boleto', 'transferencia', 'dinheiro', 'outro', 'extrato')`),
   check("payments_status_chk", sql`${t.status} in ('ativo', 'estornado')`),
   check("payments_reversal_chk", sql`(${t.status} = 'estornado' and ${t.reversedBy} is not null and ${t.reversedAt} is not null and ${t.reverseReason} is not null) or (${t.status} = 'ativo' and ${t.reversedBy} is null and ${t.reversedAt} is null and ${t.reverseReason} is null)`),
@@ -622,4 +628,24 @@ export const payablesSettings = pgTable("payables_settings", {
 }, (t) => [
   unique("payables_settings_company_uq").on(t.companyId),
   check("payables_settings_limit_chk", sql`${t.managerLimit} >= 0 and ${t.managerLimit} <= 99999999999.99`),
+]);
+
+// Ajustes da cobrança por competência (ex.: EXCEDENTE da K3G Call, calculado em outro sistema e lançado à mão). Entram no valor da cobrança na prévia do lote.
+// Depois que a cobrança da competência está em lote APROVADO, os ajustes ficam travados (trigger): para mudar, reabrir o lote.
+export const chargeAdjustments = pgTable("charge_adjustments", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  contractId: uuid("contract_id").notNull(),
+  competenceMonth: date("competence_month", { mode: "string" }).notNull(), // 1º dia do mês de competência
+  kind: text("kind").notNull(), // excedente | acrescimo | desconto
+  description: text("description").notNull(),
+  amount: numeric("amount", { precision: 18, scale: 2 }).notNull(), // sempre positivo; o sinal vem do tipo
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.contractId], foreignColumns: [contracts.companyId, contracts.id] }),
+  index("charge_adjustments_idx").on(t.companyId, t.contractId, t.competenceMonth),
+  check("charge_adjustments_kind_chk", sql`${t.kind} in ('excedente', 'acrescimo', 'desconto')`),
+  check("charge_adjustments_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),
+  check("charge_adjustments_text_chk", sql`char_length(${t.description}) between 2 and 120`),
+  check("charge_adjustments_day_chk", sql`extract(day from ${t.competenceMonth}) = 1`),
 ]);

@@ -40,22 +40,22 @@ test("E07 — contas a receber: parcial → quitada, saldo nunca negativo, estor
   });
 
   await test.step("pagamento parcial → Parcial; acima do saldo é recusado", async () => {
-    await page.getByLabel("Valor (R$)").fill("400,00");
+    await page.getByLabel("Valor recebido (R$)").fill("400,00");
     await page.getByRole("button", { name: "Registrar pagamento" }).click();
     await expect(page.getByText("Pagamento registrado.")).toBeVisible();
     await expect(page.getByText("Parcial", { exact: true }).first()).toBeVisible();
-    await page.getByLabel("Valor (R$)").fill("600,01");
+    await page.getByLabel("Valor recebido (R$)").fill("600,01");
     await page.getByRole("button", { name: "Registrar pagamento" }).click();
     await expect(page.getByText(/passa do saldo em aberto \(R\$\s*600,00\)/)).toBeVisible();
   });
 
   await test.step("completar o saldo quita e para a régua", async () => {
-    await page.getByLabel("Valor (R$)").fill("600,00");
+    await page.getByLabel("Valor recebido (R$)").fill("600,00");
     await page.getByRole("button", { name: "Registrar pagamento" }).click();
     await expect(page.getByText(/Cobrança quitada/)).toBeVisible();
     await expect(page.getByText("Quitada", { exact: true }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Registrar pagamento" })).toHaveCount(0); // sem saldo, sem formulário
-    await expect(page.getByText(/Pagamento de R\$\s*400,00 registrado/)).toBeVisible();
+    await expect(page.getByText(/Recebimento de R\$\s*400,00 registrado/)).toBeVisible();
   });
 
   await test.step("estorno exige motivo, mantém o histórico e devolve o saldo", async () => {
