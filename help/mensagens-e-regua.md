@@ -50,3 +50,7 @@ Cada etapa sai por **e-mail** e **WhatsApp**.
 
 ## Provedores
 Em *Integrações → Provedores* aparecem Cora (somente boletos), NFS-e da Cora (beta), SMTP e WAHA. Todos **simulados**. Se alguma chave de envio real for ligada no servidor sem existir adaptador homologado, o sistema **recusa enviar** e mostra um aviso.
+
+## E-mail real (canário)
+Em geral tudo aqui é **simulado**. Se a diretoria registrou a autorização de envio real e a chave do servidor está ligada (o topo mostra **E-MAIL REAL ATIVO**), *Processar fila* envia e-mails de verdade, **só** para contatos da lista autorizada. Itens ganham os status **Enviando** e **Enviado (real)**; os fora da lista ficam *Bloqueados*. Mensagem enviada não pode ser apagada nem alterada. Detalhes em *Conta de e-mail (SMTP)*.
+

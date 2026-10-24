@@ -216,8 +216,8 @@ describe.skipIf(!enabled)("E09 envio simulado: janela, limites, pausa, falhas e 
     const live: Providers = { ...base, email: { mode: "live", send: async () => ({ ok: true, providerRef: "real" }) } };
     await expect(processQueue(db, asstA, A, D, live)).rejects.toThrow(/não simulado/);
     await expect(runScheduled(db, A, OPEN, live)).rejects.toThrow(/não simulado/);
-    process.env.EMAIL_EXTERNAL_ENABLED = "true";
-    try { await expect(processQueue(db, asstA, A, D, base)).rejects.toThrow(/adaptador real/); } finally { delete process.env.EMAIL_EXTERNAL_ENABLED; }
+    process.env.WHATSAPP_LIVE_ENABLED = "true";
+    try { await expect(processQueue(db, asstA, A, D, base)).rejects.toThrow(/adaptador real/); } finally { delete process.env.WHATSAPP_LIVE_ENABLED; }
     expect(await n("message_queue where status = 'simulado'")).toBe(0);
   });
 

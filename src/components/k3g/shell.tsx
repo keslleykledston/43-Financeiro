@@ -3,11 +3,13 @@ import { FlaskConical, KeyRound, LogOut } from "lucide-react";
 import { buttonClass } from "./button";
 import { AppLink } from "./app-link";
 
-export function DemoBanner() {
+export function DemoBanner({ emailLive = false }: { emailLive?: boolean }) {
   return (
     <div role="status" className="sticky top-0 z-50 flex h-9 items-center justify-center gap-2 bg-demo px-3 text-center text-xs font-medium text-demo-foreground">
       <FlaskConical className="size-3.5 shrink-0" aria-hidden />
-      <span><strong>VALIDAÇÃO</strong> — nenhum boleto, nota, e-mail ou WhatsApp real é emitido ou enviado.</span>
+      {emailLive
+        ? <span><strong>E-MAIL REAL ATIVO (canário)</strong> — só para a lista autorizada. Boleto, nota e WhatsApp seguem simulados.</span>
+        : <span><strong>VALIDAÇÃO</strong> — nenhum boleto, nota, e-mail ou WhatsApp real é emitido ou enviado.</span>}
     </div>
   );
 }

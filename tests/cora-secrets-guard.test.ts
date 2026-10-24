@@ -9,7 +9,8 @@ const walk = (d: string): string[] => readdirSync(d).flatMap((n) => { const p = 
 describe("segredos do e-mail (SMTP) em claro", () => {
   it("nenhum arquivo de src/ importa email-secrets; a config nunca lê as credenciais em claro", () => {
     const offenders = walk("src").filter((f) => !f.endsWith("email-secrets.ts") && /email-secrets/.test(readFileSync(f, "utf8")));
-    expect(offenders.filter((f) => !f.endsWith("email-config.ts"))).toEqual([]); // email-config importa só a função de contexto (emailContext)
+    // email-config importa só a função de contexto (emailContext); email-live.ts é o ÚNICO autorizado a ler a conta em claro (adaptador real, E23)
+    expect(offenders.filter((f) => !f.endsWith("email-config.ts") && !f.endsWith("email-live.ts"))).toEqual([]);
     expect(readFileSync("src/modules/providers/email-config.ts", "utf8")).not.toMatch(/readEmailCredentials/);
   });
   it("cliente (use client) nunca importa módulos de credenciais de e-mail", () => {

@@ -12,17 +12,20 @@ export class LiveNotAvailable extends Error {
 }
 
 export const liveFlagsOn = (env: Record<string, string | undefined> = process.env) => LIVE_FLAGS.filter((f) => env[f] === "true");
+/** Chaves SEM adaptador real: ligadas, o sistema recusa tudo. O e-mail (E23) tem adaptador, mas só vale com autorização registrada por empresa (providers/email-live.ts): a chave sozinha não envia. */
+export const UNSUPPORTED_FLAGS = LIVE_FLAGS.filter((f) => f !== "EMAIL_EXTERNAL_ENABLED");
+export const unsupportedFlagsOn = (env: Record<string, string | undefined> = process.env) => UNSUPPORTED_FLAGS.filter((f) => env[f] === "true");
 
 /** Falha FECHADA: com qualquer chave real ligada, recusa em vez de fingir que enviou ou de enviar de verdade. */
 export function getProviders(env: Record<string, string | undefined> = process.env): Providers {
-  const on = liveFlagsOn(env);
+  const on = unsupportedFlagsOn(env);
   if (on.length > 0) throw new LiveNotAvailable([...on]);
   return createMockProviders();
 }
 
 /** Vale também para provedores INJETADOS (testes ou chamadores futuros): chave real ligada ou adaptador não simulado → recusa. */
 export function assertSimulated(p: Providers, env: Record<string, string | undefined> = process.env): Providers {
-  const on = liveFlagsOn(env);
+  const on = unsupportedFlagsOn(env);
   if (on.length > 0) throw new LiveNotAvailable([...on]);
   const real = Object.entries(p).filter(([, v]) => v.mode !== "mock").map(([k]) => k);
   if (real.length > 0) throw new LiveNotAvailable(real, `Provedor(es) ${real.join(", ")} não simulado(s): adaptador real só entra na fase E10, com homologação e autorização.`);

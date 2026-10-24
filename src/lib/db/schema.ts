@@ -353,7 +353,7 @@ export const messageQueue = pgTable("message_queue", {
   kind: text("kind").notNull(), // emissao | d_menos_3 | d0 | d_mais_3 | d_mais_7 | revisao_d15
   channel: text("channel").notNull(), // email | whatsapp | interno (revisão humana)
   scheduledFor: date("scheduled_for", { mode: "string" }).notNull(),
-  status: text("status").notNull().default("pendente"), // pendente | bloqueado | simulado | cancelado
+  status: text("status").notNull().default("pendente"), // pendente | enviando | enviado (E-mail REAL, E23) | bloqueado | simulado | cancelado
   blockedReason: text("blocked_reason"),
   templateVersionId: uuid("template_version_id"),
   renderedSubject: text("rendered_subject"),
@@ -369,7 +369,7 @@ export const messageQueue = pgTable("message_queue", {
   foreignKey({ columns: [t.companyId, t.templateVersionId], foreignColumns: [messageTemplateVersions.companyId, messageTemplateVersions.id] }),
   uniqueIndex("message_queue_one_uq").on(t.companyId, t.chargeId, t.kind, t.channel).where(sql`${t.status} <> 'cancelado'`),
   index("message_queue_due_idx").on(t.companyId, t.status, t.scheduledFor),
-  check("message_queue_status_chk", sql`${t.status} in ('pendente', 'bloqueado', 'simulado', 'cancelado')`),
+  check("message_queue_status_chk", sql`${t.status} in ('pendente', 'enviando', 'enviado', 'bloqueado', 'simulado', 'cancelado')`),
   check("message_queue_kind_chk", sql`${t.kind} in ('emissao', 'd_menos_3', 'd0', 'd_mais_3', 'd_mais_7', 'revisao_d15')`),
   check("message_queue_channel_chk", sql`${t.channel} in ('email', 'whatsapp', 'interno')`),
   check("message_queue_internal_chk", sql`(${t.kind} = 'revisao_d15') = (${t.channel} = 'interno')`),
@@ -859,4 +859,44 @@ export const companyFiscal = pgTable("company_fiscal", {
   check("company_fiscal_iss_chk", sql`${t.issRateBps} is null or ${t.issRateBps} between 0 and 500`),
   check("company_fiscal_formats_chk", sql`(${t.cnae} is null or ${t.cnae} ~ '^[0-9]{7}$') and (${t.cityIbge} is null or ${t.cityIbge} ~ '^[0-9]{7}$') and (${t.cep} is null or ${t.cep} ~ '^[0-9]{8}$') and (${t.uf} is null or ${t.uf} ~ '^[A-Z]{2}$')`),
   check("company_fiscal_len_chk", sql`char_length(${t.accountantName}) <= 160 and char_length(${t.accountantDocument}) <= 20 and char_length(${t.accountantCrc}) <= 30 and char_length(${t.accountantContact}) <= 120 and char_length(${t.accountantEmail}) <= 200 and char_length(${t.accountantPhone}) <= 30 and char_length(${t.accountantNotes}) <= 500 and char_length(${t.municipalRegistration}) <= 30 and char_length(${t.serviceCode}) <= 10 and char_length(${t.cityName}) <= 80 and char_length(${t.street}) <= 160 and char_length(${t.streetNumber}) <= 20 and char_length(${t.complement}) <= 80 and char_length(${t.district}) <= 80 and char_length(${t.phone}) <= 30`),
+]);
+
+// E23 — envio REAL de e-mail (canário). Dupla chave: chave do servidor EMAIL_EXTERNAL_ENABLED + autorização registrada aqui pela diretoria
+// (referência da autorização escrita, destinatários permitidos, limite diário). Histórico imutável: revogar é a única alteração permitida (trigger).
+export const emailLiveAuthorizations = pgTable("email_live_authorizations", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  reference: text("reference").notNull(), // onde está a autorização escrita (e-mail, ata, documento)
+  allowed: text("allowed").array().notNull(), // endereços exatos ou "@dominio" (só o domínio exato, sem subdomínios)
+  dailyLimit: integer("daily_limit").notNull(),
+  active: boolean("active").notNull().default(true),
+  authorizedBy: uuid("authorized_by").notNull().references(() => users.id),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  revokedBy: uuid("revoked_by").references(() => users.id),
+}, (t) => [
+  uniqueIndex("email_live_auth_active_uq").on(t.companyId).where(sql`${t.active}`),
+  check("email_live_auth_ref_chk", sql`char_length(${t.reference}) between 5 and 200`),
+  check("email_live_auth_allowed_chk", sql`cardinality(${t.allowed}) between 1 and 20`),
+  check("email_live_auth_limit_chk", sql`${t.dailyLimit} between 1 and 200`),
+  check("email_live_auth_revoked_chk", sql`${t.active} = (${t.revokedAt} is null)`),
+]);
+
+// Registro de cada tentativa de envio real (fila ou teste). Só os DOMÍNIOS dos destinatários (nunca os endereços). Append-only: só sai de "enviando" uma vez.
+export const emailSendLog = pgTable("email_send_log", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  kind: text("kind").notNull(), // fila | teste
+  queueId: uuid("queue_id"), // sem FK de propósito: o registro não pode sumir junto com a fila
+  recipientDomains: text("recipient_domains").notNull(),
+  recipients: integer("recipients").notNull(),
+  status: text("status").notNull().default("enviando"), // enviando | enviado | falhou | desconhecido
+  providerRef: text("provider_ref"),
+  error: text("error"),
+  actorId: uuid("actor_id").references(() => users.id), // nulo = agendador
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+}, (t) => [
+  index("email_send_log_company_idx").on(t.companyId, t.createdAt),
+  check("email_send_log_kind_chk", sql`${t.kind} in ('fila', 'teste')`),
+  check("email_send_log_status_chk", sql`${t.status} in ('enviando', 'enviado', 'falhou', 'desconhecido')`),
+  check("email_send_log_finished_chk", sql`(${t.status} = 'enviando') = (${t.finishedAt} is null)`),
 ]);

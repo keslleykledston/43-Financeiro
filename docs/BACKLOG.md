@@ -141,3 +141,12 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 
 - [ ] (Codex E22 P2) Adaptador SMTP real: resolver DNS (A/AAAA) na hora de conectar, bloquear faixas internas/loopback/link-local, proteger contra DNS rebinding e restringir o egress do container. A validação atual só barra IP literal e nomes internos comuns.
 - [ ] (Codex E22 P2) Código do serviço (LC 116) só confere o formato: validar contra a lista aceita pela prefeitura quando a NFS-e for ligada; até lá, confirmar com o contador.
+
+## E23 — Adaptador de e-mail real (canário) (2026-10-24, ADR-020)
+- [x] Adaptador SMTP (nodemailer) com proteção SSRF, TLS verificado, lista de destinatários, tempos limite; reservar → enviar → registrar; desconhecido nunca reenvia; registro imutável (migração 0027).
+- [x] Integrações → "Envio real — canário": autorização (referência, lista, limite diário), revogar, e-mail de teste, últimos envios. Banner do topo muda quando ativo.
+- [ ] **NÃO LIGADO**: ligar exige autorização escrita do dono + trocar `EMAIL_EXTERNAL_ENABLED` no docker-compose.yml + registrar a autorização na tela + SPF/DKIM/DMARC do domínio. Passo a passo em docs/E10_GOLIVE.md.
+- [ ] Boleto na mensagem (link/linha digitável/PDF) — depende do adaptador da Cora (E10b-2).
+- [ ] Tratamento de e-mail devolvido (bounce) e cabeçalhos de lista (List-Unsubscribe) antes de sair do canário.
+- [ ] Envio automático real pelo scheduler: hoje PROIBIDO de propósito (Codex E23 P1); só reabrir com decisão do dono depois do canário.
+

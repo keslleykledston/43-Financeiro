@@ -11,9 +11,9 @@ import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass } from "@/components/k3g/button";
 import { processAction, scheduleAction } from "./actions";
 
-const TONE: Record<string, StatusTone> = { pendente: "info", bloqueado: "warning", simulado: "positive", cancelado: "neutral" };
-const LABEL: Record<string, string> = { pendente: "Aguardando", bloqueado: "Bloqueado", simulado: "Simulado", cancelado: "Cancelado" };
-const FILTERS = ["pendente", "bloqueado", "simulado", "cancelado"] as const;
+const TONE: Record<string, StatusTone> = { pendente: "info", enviando: "info", enviado: "positive", bloqueado: "warning", simulado: "positive", cancelado: "neutral" };
+const LABEL: Record<string, string> = { pendente: "Aguardando", enviando: "Enviando", enviado: "Enviado (real)", bloqueado: "Bloqueado", simulado: "Simulado", cancelado: "Cancelado" };
+const FILTERS = ["pendente", "enviando", "enviado", "bloqueado", "simulado", "cancelado"] as const;
 const br = (d: string) => d.split("-").reverse().join("/");
 
 function okText(ok?: string) {
@@ -69,7 +69,7 @@ export default async function Mensagens({ searchParams }: { searchParams: Promis
                 {i.blockedReason && <p className="mt-1 text-xs text-warning-foreground">{i.blockedReason}. Cadastre o contato financeiro e programe de novo.</p>}
                 {i.renderedBody && (
                   <details className="mt-2 rounded-md border border-border bg-muted/40 p-3">
-                    <summary className="cursor-pointer text-xs font-medium">Ver texto simulado</summary>
+                    <summary className="cursor-pointer text-xs font-medium">Ver o texto da mensagem</summary>
                     {i.renderedSubject && <p className="mt-2 text-xs font-medium">Assunto: {i.renderedSubject}</p>}
                     <pre className="mt-2 whitespace-pre-wrap font-sans text-xs">{i.renderedBody}</pre>
                   </details>

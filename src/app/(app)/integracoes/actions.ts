@@ -7,6 +7,8 @@ import { setCustomerMode } from "@/modules/crm/service";
 import { getCrmAdapter } from "@/modules/integrations/crm/factory";
 import { removeCoraCredentials, saveCoraCredentials } from "@/modules/providers/cora-config";
 import { removeEmailAccount, saveEmailAccount } from "@/modules/providers/email-config";
+import { authorizeEmailLive, revokeEmailLive } from "@/modules/providers/email-auth";
+import { sendTestEmail } from "@/modules/providers/email-live";
 import { applySync, previewSync, resolveConflict, saveConnection } from "@/modules/integrations/crm/sync";
 
 type Sample = Awaited<ReturnType<typeof previewSync>>;
@@ -122,4 +124,34 @@ export async function saveEmailAction(_: EmailState, fd: FormData): Promise<Emai
 export async function removeEmailAction() {
   try { const c = await ctx(); await removeEmailAccount(db, c.userId, c.companyId); } catch (e) { msg(e); }
   revalidatePath("/integracoes");
+}
+
+export type LiveState = { error?: string; saved?: string } | undefined;
+
+/** Registra a autorização escrita (canário). Não envia nada: o servidor também precisa estar com EMAIL_EXTERNAL_ENABLED=true. */
+export async function authorizeEmailLiveAction(_: LiveState, fd: FormData): Promise<LiveState> {
+  try {
+    const c = await ctx();
+    await authorizeEmailLive(db, c.userId, c.companyId, { reference: bounded(fd, "reference", 300), allowed: bounded(fd, "allowed", 3000), dailyLimit: bounded(fd, "dailyLimit", 10) });
+    revalidatePath("/integracoes"); revalidatePath("/", "layout");
+    return { saved: "Autorização registrada. Nada foi enviado: o envio só acontece com a chave do servidor ligada e ao processar a fila." };
+  } catch (e) { if (e instanceof Invalid || e instanceof Forbidden) return { error: e.message }; throw e; }
+}
+
+export async function revokeEmailLiveAction() {
+  try { const c = await ctx(); await revokeEmailLive(db, c.userId, c.companyId); } catch (e) { msg(e); }
+  revalidatePath("/integracoes"); revalidatePath("/", "layout");
+}
+
+export async function testEmailAction(_: LiveState, fd: FormData): Promise<LiveState> {
+  try {
+    const c = await ctx();
+    await sendTestEmail(db, c.userId, c.companyId, bounded(fd, "to", 300));
+    revalidatePath("/integracoes");
+    return { saved: "E-mail de teste enviado. Confira a caixa de entrada (e o spam) do destinatário." };
+  } catch (e) {
+    if (e instanceof Invalid || e instanceof Forbidden) return { error: e.message };
+    console.error("email: falha inesperada no teste", e instanceof Error ? e.name : "erro");
+    return { error: "Não foi possível enviar agora. Tente de novo; se persistir, avise o suporte." };
+  }
 }

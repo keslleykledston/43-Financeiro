@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, lte, ne, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
-import { auditLog, billingBatches, charges, companies, customerContacts, customers, holidays, messageQueue, messageTemplates, messageTemplateVersions, messagingSettings } from "@/lib/db/schema";
+import { auditLog, billingBatches, charges, companies, customerContacts, customers, emailSendLog, holidays, messageQueue, messageTemplates, messageTemplateVersions, messagingSettings } from "@/lib/db/schema";
 import { centsFromNumeric } from "@/lib/money";
 import { formatBRL } from "@/lib/format";
 import { Invalid, requirePerm } from "@/modules/identity/service";
@@ -9,6 +9,8 @@ import { DEFAULT_SETTINGS, WINDOW_REASON, localParts, parseSettings, windowState
 import { addDays } from "./dates";
 import { resolveProviders } from "@/modules/providers/registry";
 import type { Providers, SendResult } from "@/modules/providers/types";
+import { activeAuthorization, domainsOf, finishLog, flagOn, liveEmailFor, sentToday, type LiveState } from "@/modules/providers/email-live";
+import { isAllowed } from "@/modules/providers/smtp";
 
 /**
  * E06 — SIMULAÇÃO. Nenhuma função daqui envia e-mail ou WhatsApp: a fila registra o que SERIA enviado e "processar" só grava o
@@ -192,8 +194,16 @@ export async function saveSettings(db: DB, actorId: string, companyId: string, r
 }
 
 const MAX_ATTEMPTS = 3;
+type DueRow = { q: typeof messageQueue.$inferSelect; c: typeof charges.$inferSelect; customer: string; subject: string | null; body: string | null };
+/** Texto da mensagem (assunto/corpo) a partir do modelo ativo. Único lugar que monta o texto, para o simulado e o real nunca divergirem. */
+function buildMessage(r: DueRow, companyName: string, internal: boolean) {
+  const vars: Vars = { cliente: r.customer, empresa: companyName, valor: formatBRL(centsFromNumeric(r.c.amount)), vencimento: br(r.c.dueDate), competencia: `${r.c.competenceMonth.slice(5, 7)}/${r.c.competenceMonth.slice(0, 4)}`, descricao: r.c.description, emissao: br(r.c.issueDate) };
+  const subject = internal ? "Revisão humana D+15" : render(r.subject ?? "", vars);
+  const body = internal ? `Cobrança de ${vars.cliente} (${vars.valor}, vencida em ${vars.vencimento}) está há 15 dias em atraso. Decidir o próximo passo manualmente.` : render(r.body ?? "", vars);
+  return { subject, body };
+}
 const RECIPIENT_EMAIL = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/;
-type RunOpts = { respectWindow: boolean; onlyAuto?: boolean; providers?: Providers };
+type RunOpts = { respectWindow: boolean; onlyAuto?: boolean; providers?: Providers; /** E23: o e-mail desta empresa é tratado pelo caminho REAL (ou está bloqueado): o simulado não o toca */ skipEmail?: boolean };
 export type RunResult = { processed: number; cancelled: number; failed: number; blocked: number; skipped: number; waiting?: string };
 
 /**
@@ -214,7 +224,7 @@ async function runQueue(x: DB, companyId: string, actorId: string | null, now: D
   const providers = resolveProviders(o.providers);
   const today = localParts(now).date;
   out.cancelled = await cancelOrphans(x, companyId);
-  const sentLastHour = Number((await x.execute(sql`select count(*)::int n from message_queue where company_id = ${companyId} and status = 'simulado' and channel <> 'interno' and processed_at > ${new Date(now.getTime() - 3600_000).toISOString()}::timestamptz`))[0].n);
+  const sentLastHour = Number((await x.execute(sql`select count(*)::int n from message_queue where company_id = ${companyId} and status in ('simulado', 'enviando', 'enviado') and channel <> 'interno' and processed_at > ${new Date(now.getTime() - 3600_000).toISOString()}::timestamptz`))[0].n);
   const budget = Math.max(0, Math.min(st.maxPerRun, st.maxPerHour - sentLastHour));
   if (budget === 0) return { ...out, waiting: "Limite de envios por hora atingido" };
 
@@ -235,11 +245,10 @@ async function runQueue(x: DB, companyId: string, actorId: string | null, now: D
   for (const r of due) {
     if (used >= budget) { out.waiting = "Limite de envios atingido nesta execução"; break; }
     const q = r.q, internal = q.channel === "interno";
+    if (o.skipEmail && q.channel === "email") continue; // E23: não consome (nem simula) e-mail que pertence ao caminho real
     if (!internal && ((q.channel === "email" && !st.emailEnabled) || (q.channel === "whatsapp" && !st.whatsappEnabled))) { out.skipped++; continue; }
     if (q.scheduledFor < lateLimit) { await block(q.id, `Perdeu a data (mais de ${st.maxLateDays} dia(s) de atraso): revisar manualmente`); continue; }
-    const vars: Vars = { cliente: r.customer, empresa: co.name, valor: formatBRL(centsFromNumeric(r.c.amount)), vencimento: br(r.c.dueDate), competencia: `${r.c.competenceMonth.slice(5, 7)}/${r.c.competenceMonth.slice(0, 4)}`, descricao: r.c.description, emissao: br(r.c.issueDate) };
-    const subject = internal ? "Revisão humana D+15" : render(r.subject ?? "", vars);
-    const body = internal ? `Cobrança de ${vars.cliente} (${vars.valor}, vencida em ${vars.vencimento}) está há 15 dias em atraso. Decidir o próximo passo manualmente.` : render(r.body ?? "", vars);
+    const { subject, body } = buildMessage(r, co.name, internal);
     let providerRef: string | null = null;
     if (!internal) {
       const mine = contacts.filter((c) => c.partyId === q.customerId);
@@ -274,30 +283,139 @@ async function runQueue(x: DB, companyId: string, actorId: string | null, now: D
 const auditRun = (x: DB, companyId: string, actorId: string | null, action: string, r: RunResult) =>
   audit(x, companyId, actorId, action, { processed: r.processed, cancelled: r.cancelled, failed: r.failed, blocked: r.blocked, skipped: r.skipped, waiting: r.waiting ?? null });
 
+type LiveDeps = { env?: Record<string, string | undefined>; smtp?: import("@/modules/providers/smtp").SmtpDeps; afterReserve?: () => Promise<void> };
+const OFF: LiveState = { state: "off" };
+const EMPTY: RunResult = { processed: 0, cancelled: 0, failed: 0, blocked: 0, skipped: 0 };
+const merge = (a: RunResult, b: RunResult): RunResult => ({ processed: a.processed + b.processed, cancelled: a.cancelled + b.cancelled, failed: a.failed + b.failed, blocked: a.blocked + b.blocked, skipped: a.skipped + b.skipped, waiting: a.waiting ?? b.waiting });
+/** Provedores/ambiente injetados só valem sob o executor de testes. */
+const resolveLive = (db: DB, companyId: string, d?: LiveDeps) => (process.env.VITEST === "true" && d ? liveEmailFor(db, companyId, d.env ?? process.env, d.smtp) : liveEmailFor(db, companyId));
+
 /**
- * "Processa" (SIMULAÇÃO) os itens pendentes com data <= hoje: renderiza, chama o provedor SIMULADO e marca como simulado. Nada é enviado.
- * Manual: ignora a janela de horário, mas respeita pausa, canais e limites.
+ * Executa a fila de UMA empresa. SIMULADO por padrão (provedores de mock). Quando a empresa tem o e-mail REAL liberado (chave do servidor + autorização
+ * registrada + conta legível; ver providers/email-live.ts), os itens de e-mail vão pelo caminho real (`runEmailLive`); WhatsApp e revisão interna continuam
+ * simulados. Se o real está liberado mas bloqueado agora (ex.: cofre indisponível neste processo), os e-mails ficam NA FILA: nem enviados nem "simulados".
  */
-export async function processQueue(db: DB, actorId: string, companyId: string, today?: string, providers?: Providers) {
-  await requirePerm(db, actorId, companyId, "messages.write");
-  return db.transaction(async (tx) => {
+async function dispatch(db: DB, companyId: string, actorId: string | null, now: Date, o: RunOpts, live: LiveState, auditAction: string | null, hooks: { afterReserve?: () => Promise<void> } = {}): Promise<RunResult> {
+  const sim = await db.transaction(async (tx) => {
     const x = tx as unknown as DB;
     await lockQueue(x, companyId);
-    const r = await runQueue(x, companyId, actorId, today ? new Date(`${today}T12:00:00-04:00`) : new Date(), { respectWindow: false, providers });
-    await auditRun(x, companyId, actorId, "messages.queue.processed_simulated", r);
+    const r = await runQueue(x, companyId, actorId, now, { ...o, skipEmail: live.state !== "off" });
+    if (auditAction && (actorId !== null || r.processed + r.failed + r.blocked + r.cancelled > 0)) await auditRun(x, companyId, actorId, auditAction, r);
     return r;
   });
+  if (live.state === "blocked") return { ...sim, waiting: sim.waiting ?? `E-mail real bloqueado: ${live.reason}` };
+  if (live.state !== "ready") return sim;
+  return merge(sim, await runEmailLive(db, companyId, actorId, now, o, live, process.env.VITEST === "true" ? hooks : {}));
 }
 
-/** Execução do AGENDADOR para uma empresa: só age se o envio automático estiver ligado e dentro da janela. Sem usuário (ator nulo). */
-export async function runScheduled(db: DB, companyId: string, now = new Date(), providers?: Providers) {
-  return db.transaction(async (tx) => {
+/**
+ * Caminho REAL do e-mail (E23): RESERVAR (transação curta: pendente → enviando + registro) → ENVIAR fora de transação → REGISTRAR (enviado / de volta à fila /
+ * bloqueado). Nunca reenvia sozinho um resultado desconhecido (queda depois de entregar o conteúdo): vai para revisão humana. Respeita pausa, canal, janela,
+ * limites por execução/hora, limite diário da autorização e a lista de destinatários autorizados (também reconferida no adaptador).
+ */
+export async function runEmailLive(db: DB, companyId: string, actorId: string | null, now: Date, o: { respectWindow: boolean; onlyAuto?: boolean }, live: Extract<LiveState, { state: "ready" }>, hooks: { afterReserve?: () => Promise<void> } = {}): Promise<RunResult> {
+  const out: RunResult = { ...EMPTY };
+  type Job = { id: string; logId: string; to: string[]; subject: string; body: string; attempts: number };
+  const jobs: Job[] = [];
+  await db.transaction(async (tx) => {
     const x = tx as unknown as DB;
     await lockQueue(x, companyId);
-    const r = await runQueue(x, companyId, null, now, { respectWindow: true, onlyAuto: true, providers });
-    if (r.processed + r.failed + r.blocked + r.cancelled > 0) await auditRun(x, companyId, null, "messages.queue.auto_run", r);
-    return r;
+    await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"email-live:" + companyId}))`);
+    const st = await loadSettings(x, companyId);
+    if (st.paused) { out.waiting = "Envio pausado"; return; }
+    if (!st.emailEnabled) { out.waiting = "E-mail desligado nas configurações de envio"; return; }
+    if (o.onlyAuto && !st.autoDispatch) { out.waiting = "Envio automático desligado"; return; }
+    if (o.respectWindow) {
+      const hol = await x.select().from(holidays).where(eq(holidays.companyId, companyId));
+      const w = windowState(now, st, new Map(hol.map((h) => [h.day, h.name])));
+      if (!w.open) { out.waiting = WINDOW_REASON[w.reason]; return; }
+    }
+    const stuckBefore = new Date(Date.now() - 10 * 60_000); // relógio real: updated_at/created_at do registro são sempre de agora
+    await x.execute(sql`update message_queue set status = 'bloqueado', blocked_reason = 'Resultado desconhecido (o processo caiu durante o envio): confira nos enviados antes de reenviar', updated_at = now()
+      where company_id = ${companyId} and channel = 'email' and status = 'enviando' and updated_at < ${stuckBefore.toISOString()}::timestamptz`);
+    await x.execute(sql`update email_send_log set status = 'desconhecido', error = 'processo_interrompido', finished_at = now(), updated_at = now()
+      where company_id = ${companyId} and status = 'enviando' and created_at < ${stuckBefore.toISOString()}::timestamptz`);
+    out.cancelled = await cancelOrphans(x, companyId);
+    const sentLastHour = Number((await x.execute(sql`select count(*)::int n from message_queue where company_id = ${companyId} and status in ('simulado', 'enviando', 'enviado') and channel <> 'interno' and processed_at > ${new Date(now.getTime() - 3600_000).toISOString()}::timestamptz`))[0].n);
+    const budget = Math.max(0, Math.min(st.maxPerRun, st.maxPerHour - sentLastHour, live.dailyLimit - (await sentToday(x, companyId))));
+    if (budget === 0) { out.waiting = "Limite de envios (por hora ou diário) atingido"; return; }
+    const today = localParts(now).date, lateLimit = addDays(today, -st.maxLateDays);
+    const [co] = await x.select({ name: companies.name }).from(companies).where(eq(companies.id, companyId));
+    const contacts = await x.select().from(customerContacts).where(and(eq(customerContacts.companyId, companyId), eq(customerContacts.isFinancial, true)));
+    const due = await x.select({ q: messageQueue, c: charges, customer: customers.legalName, subject: messageTemplateVersions.subject, body: messageTemplateVersions.body })
+      .from(messageQueue)
+      .innerJoin(charges, and(eq(charges.id, messageQueue.chargeId), eq(charges.companyId, messageQueue.companyId)))
+      .innerJoin(customers, and(eq(customers.id, messageQueue.customerId), eq(customers.companyId, messageQueue.companyId)))
+      .leftJoin(messageTemplateVersions, and(eq(messageTemplateVersions.id, messageQueue.templateVersionId), eq(messageTemplateVersions.companyId, messageQueue.companyId)))
+      .where(and(eq(messageQueue.companyId, companyId), eq(messageQueue.status, "pendente"), eq(messageQueue.channel, "email"), lte(messageQueue.scheduledFor, today)))
+      .orderBy(asc(messageQueue.scheduledFor), asc(messageQueue.createdAt)).limit(500).for("update", { of: messageQueue });
+    const block = async (id: string, reason: string) => { await x.update(messageQueue).set({ status: "bloqueado", blockedReason: reason, updatedAt: now }).where(and(eq(messageQueue.id, id), eq(messageQueue.status, "pendente"))); out.blocked++; };
+    for (const r of due) {
+      if (jobs.length >= budget) { out.waiting = "Limite de envios atingido nesta execução"; break; }
+      const q = r.q;
+      if (q.scheduledFor < lateLimit) { await block(q.id, `Perdeu a data (mais de ${st.maxLateDays} dia(s) de atraso): revisar manualmente`); continue; }
+      const mine = contacts.filter((c) => c.partyId === q.customerId);
+      const valid = [...new Set(mine.map((c) => c.email?.trim().toLowerCase() ?? "").filter((e) => RECIPIENT_EMAIL.test(e)))].slice(0, 3);
+      if (valid.length === 0) { await block(q.id, REASON_EMAIL); continue; }
+      const to = valid.filter((a) => isAllowed(a, live.allowed));
+      if (to.length === 0) { await block(q.id, "Destinatário fora da lista autorizada do envio real (canário): fica sem enviar até a lista ser ampliada"); continue; }
+      const { subject, body } = buildMessage(r, co.name, false);
+      const won = await x.update(messageQueue).set({ status: "enviando", renderedSubject: subject, renderedBody: body, attempts: q.attempts + 1, lastError: null, processedAt: now, processedBy: actorId, updatedAt: now })
+        .where(and(eq(messageQueue.id, q.id), eq(messageQueue.status, "pendente"))).returning({ id: messageQueue.id });
+      if (won.length === 0) continue;
+      const [log] = await x.insert(emailSendLog).values({ companyId, kind: "fila", queueId: q.id, recipientDomains: domainsOf(to), recipients: to.length, actorId }).returning({ id: emailSendLog.id });
+      jobs.push({ id: q.id, logId: log.id, to, subject, body, attempts: q.attempts + 1 });
+    }
   });
+  if (process.env.VITEST === "true") await hooks.afterReserve?.(); // só testes: simula a revogação entre reservar e enviar
+  for (const j of jobs) { // FORA de transação: nenhuma conexão do banco fica aberta durante a rede
+    // Revogou (ou desligou a chave) depois de reservar? Reconfere ANTES de entregar cada mensagem ao SMTP: o item volta à fila sem enviar.
+    const stillAuthorized = flagOn(live.env) && (await activeAuthorization(db, companyId))?.id === live.authorizationId;
+    if (!stillAuthorized) {
+      await db.transaction(async (tx) => {
+        const x = tx as unknown as DB;
+        await finishLog(x, j.logId, { status: "falhou", error: "autorizacao_revogada" });
+        await x.update(messageQueue).set({ status: "pendente", attempts: j.attempts - 1, lastError: "autorizacao_revogada", updatedAt: new Date() }).where(and(eq(messageQueue.id, j.id), eq(messageQueue.status, "enviando")));
+      });
+      out.waiting = "Autorização de envio real revogada: nada foi enviado";
+      continue;
+    }
+    const res: SendResult = await live.provider.send({ to: j.to, subject: j.subject, text: j.body, html: toEmailHtml(j.body), idempotencyKey: `msg-${j.id}` }).catch(() => ({ ok: false as const, retryable: false, unknown: true, error: "resultado_desconhecido" }));
+    await db.transaction(async (tx) => {
+      const x = tx as unknown as DB;
+      await finishLog(x, j.logId, res.ok ? { status: "enviado", providerRef: res.providerRef } : { status: res.unknown ? "desconhecido" : "falhou", error: res.error });
+      if (res.ok) {
+        await x.update(messageQueue).set({ status: "enviado", providerRef: res.providerRef, lastError: null, processedAt: now, updatedAt: new Date() }).where(and(eq(messageQueue.id, j.id), eq(messageQueue.status, "enviando")));
+        out.processed++;
+        return;
+      }
+      out.failed++;
+      const give = !!res.unknown || !res.retryable || j.attempts >= MAX_ATTEMPTS;
+      const reason = res.unknown ? "Resultado desconhecido: o e-mail PODE ter sido enviado. Confira nos enviados antes de reenviar" : `Falha no envio (${res.error.slice(0, 60)}): revisar manualmente`;
+      await x.update(messageQueue).set({ lastError: res.error.slice(0, 120), updatedAt: new Date(), ...(give ? { status: "bloqueado", blockedReason: reason } : { status: "pendente" }) }).where(and(eq(messageQueue.id, j.id), eq(messageQueue.status, "enviando")));
+      if (give) out.blocked++;
+    });
+  }
+  if (jobs.length > 0 || out.blocked > 0 || out.cancelled > 0) await audit(db, companyId, actorId, "messages.email.live_run", { sent: out.processed, failed: out.failed, blocked: out.blocked, cancelled: out.cancelled, waiting: out.waiting ?? null });
+  return out;
+}
+
+/**
+ * Processa os itens pendentes com data <= hoje: SIMULADO (nada sai) ou, se o e-mail real da empresa está liberado, e-mail REAL só para a lista autorizada.
+ * Manual: ignora a janela de horário, mas respeita pausa, canais e limites.
+ */
+export async function processQueue(db: DB, actorId: string, companyId: string, today?: string, providers?: Providers, liveDeps?: LiveDeps) {
+  await requirePerm(db, actorId, companyId, "messages.write");
+  const live = providers ? OFF : await resolveLive(db, companyId, liveDeps); // provedores injetados (testes) = só simulado
+  return dispatch(db, companyId, actorId, today ? new Date(`${today}T12:00:00-04:00`) : new Date(), { respectWindow: false, providers }, live, "messages.queue.processed_simulated", { afterReserve: liveDeps?.afterReserve });
+}
+
+/** Execução do AGENDADOR para uma empresa: só age se o envio automático estiver ligado e dentro da janela. Sem usuário (ator nulo). E-mail REAL nunca é enviado por aqui (só manual, pelo botão). */
+export async function runScheduled(db: DB, companyId: string, now = new Date(), providers?: Providers, liveDeps?: LiveDeps) {
+  let live = providers ? OFF : await resolveLive(db, companyId, liveDeps);
+  // Canário: o e-mail REAL nunca sai sozinho. O agendador só pode simular; com o real liberado ele NÃO toca nos e-mails (ficam na fila para o botão Processar fila).
+  if (live.state === "ready") live = { state: "blocked", reason: "o envio real do canário é só pelo botão Processar fila (o agendador não envia e-mail real)" };
+  return dispatch(db, companyId, null, now, { respectWindow: true, onlyAuto: true, providers }, live, "messages.queue.auto_run");
 }
 
 /** Um ciclo do agendador: todas as empresas com envio automático ligado. Erro em uma empresa não impede as outras. */
@@ -312,7 +430,7 @@ export async function tickAll(db: DB, now = new Date(), providers?: Providers) {
 
 export async function listQueue(db: DB, actorId: string, companyId: string, status?: string) {
   await requirePerm(db, actorId, companyId, "messages.read");
-  const filter = status && ["pendente", "bloqueado", "simulado", "cancelado"].includes(status) ? status : null;
+  const filter = status && ["pendente", "enviando", "enviado", "bloqueado", "simulado", "cancelado"].includes(status) ? status : null;
   const rows = await db.select({ q: messageQueue, customer: customers.legalName, amount: charges.amount, dueDate: charges.dueDate }).from(messageQueue)
     .innerJoin(customers, and(eq(customers.id, messageQueue.customerId), eq(customers.companyId, messageQueue.companyId)))
     .innerJoin(charges, and(eq(charges.id, messageQueue.chargeId), eq(charges.companyId, messageQueue.companyId)))

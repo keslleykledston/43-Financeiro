@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { LIVE_FLAGS, liveFlagsOn } from "./registry";
+import { LIVE_FLAGS, unsupportedFlagsOn } from "./registry";
 
 /**
  * E10 — checklist do GATE de emissão real. Só verifica EXISTÊNCIA de arquivos de segredo e o estado das chaves; nunca lê conteúdo.
@@ -11,11 +11,12 @@ export type ReadinessItem = { key: string; label: string; state: CheckState; det
 const SECRET_DIR = process.env.K3G_SECRETS_DIR ?? "/run/secrets";
 const has = (f: string) => existsSync(`${SECRET_DIR}/${f}`);
 
-export function readiness(env: Record<string, string | undefined> = process.env, opts: { coraInDb?: boolean; emailInDb?: boolean; fiscalComplete?: boolean } = {}): ReadinessItem[] {
-  const live = liveFlagsOn(env);
+export function readiness(env: Record<string, string | undefined> = process.env, opts: { coraInDb?: boolean; emailInDb?: boolean; fiscalComplete?: boolean; emailAuthorized?: boolean } = {}): ReadinessItem[] {
+  const live = unsupportedFlagsOn(env);
   const human = (key: string, label: string, detail: string): ReadinessItem => ({ key, label, state: "pendente", detail });
   return [
-    { key: "flags", label: "Chaves de emissão/envio reais desligadas", state: live.length === 0 ? "ok" : "alerta", detail: live.length === 0 ? `${LIVE_FLAGS.length} chaves, todas desligadas` : `Ligadas sem adaptador homologado: ${live.join(", ")}` },
+    { key: "flags", label: "Chaves de emissão/envio reais desligadas", state: live.length === 0 ? "ok" : "alerta", detail: live.length === 0 ? `${LIVE_FLAGS.length - 1} chaves sem adaptador, todas desligadas (a do e-mail só vale com autorização registrada)` : `Ligadas sem adaptador homologado: ${live.join(", ")}` },
+    { key: "email-authorization", label: "Autorização de envio real de e-mail registrada (canário)", state: opts.emailAuthorized ? "ok" : "pendente", detail: "Integrações → E-mail (SMTP) → Envio real: referência da autorização escrita, destinatários permitidos e limite diário. Registrar NÃO envia: o servidor também precisa estar com EMAIL_EXTERNAL_ENABLED=true" },
     { key: "cora-creds", label: "Credenciais Cora (client-id, certificado e chave mTLS)", state: opts.coraInDb || (has("cora_client_id") && has("cora_cert.pem") && has("cora_key.pem")) ? "ok" : "pendente", detail: "Cadastradas na seção «Cora — boletos» desta tela (guardadas cifradas) ou como arquivos cora_client_id, cora_cert.pem e cora_key.pem em /run/secrets. Ter as credenciais NÃO liga a emissão real" },
     { key: "smtp-creds", label: "Credenciais SMTP do domínio", state: opts.emailInDb || (has("smtp_user") && has("smtp_password")) ? "ok" : "pendente", detail: "Conta cadastrada na seção «E-mail (SMTP)» desta tela (guardada cifrada) ou arquivos smtp_user e smtp_password em /run/secrets. Ter a conta NÃO liga o envio real" },
     { key: "waha-creds", label: "Chave do WAHA (WhatsApp)", state: has("waha_api_key") ? "ok" : "pendente", detail: "Arquivo waha_api_key em /run/secrets" },

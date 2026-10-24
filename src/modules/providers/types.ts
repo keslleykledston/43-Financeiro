@@ -3,7 +3,8 @@
  * Os adaptadores reais (E10) implementam estas mesmas interfaces, um provedor por vez, só após homologação,
  * credenciais fora do Git e autorização explícita. Nada aqui faz chamada de rede.
  */
-export type SendResult = { ok: true; providerRef: string } | { ok: false; retryable: boolean; error: string };
+/** `unknown: true` = o envio PODE ter acontecido (queda depois de enviar o conteúdo): nunca reenviar sozinho, só revisão humana. */
+export type SendResult = { ok: true; providerRef: string } | { ok: false; retryable: boolean; error: string; unknown?: boolean };
 
 export interface EmailProvider {
   readonly mode: "mock" | "live";

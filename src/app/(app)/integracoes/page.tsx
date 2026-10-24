@@ -8,16 +8,19 @@ import { ConnectionForm } from "./connection-form";
 import { ModeForm } from "./mode-form";
 import { SyncPanel } from "./sync-panel";
 import { resolveAction } from "./actions";
-import { PROVIDER_CATALOG, liveFlagsOn } from "@/modules/providers/registry";
+import { PROVIDER_CATALOG, unsupportedFlagsOn } from "@/modules/providers/registry";
 import { readiness } from "@/modules/providers/readiness";
 import { getCoraStatus, hasCoraCredentials } from "@/modules/providers/cora-config";
 import { CORA_SCOPE, ENV_LABEL } from "@/modules/providers/cora";
 import { CoraForm } from "./cora-form";
 import { EmailForm } from "./email-form";
+import { AuthorizeForm, TestForm } from "./email-live-forms";
+import { getEmailLiveStatus } from "@/modules/providers/email-auth";
+import { listSendLog } from "@/modules/providers/email-live";
 import { getEmailStatus, hasEmailAccount } from "@/modules/providers/email-config";
 import { SECURITY_LABEL } from "@/modules/providers/email";
 import { nfseProfileComplete } from "@/modules/companies/fiscal";
-import { removeCoraAction, removeEmailAction } from "./actions";
+import { removeCoraAction, removeEmailAction, revokeEmailLiveAction } from "./actions";
 
 const REASON: Record<string, string> = { duplicate_document: "Já existe um cadastro local com este documento", document_collision: "O documento colide com outro cadastro ativo", ambiguous_company: "Não foi possível saber a qual empresa pertence" };
 const fmt = (d: Date) => d.toLocaleString("pt-BR", { timeZone: "America/Manaus" });
@@ -35,6 +38,8 @@ export default async function Integracoes() {
   const cora = coraAccess ? await getCoraStatus(db, ctx.user.id, ctx.current.id) : [];
   const coraInDb = coraAccess ? await hasCoraCredentials(db, ctx.user.id, ctx.current.id) : false;
   const email = coraAccess ? await getEmailStatus(db, ctx.user.id, ctx.current.id) : null;
+  const live = coraAccess ? await getEmailLiveStatus(db, ctx.user.id, ctx.current.id) : null;
+  const sendLog = coraAccess ? await listSendLog(db, ctx.user.id, ctx.current.id, 8) : [];
   const emailInDb = coraAccess ? await hasEmailAccount(db, ctx.user.id, ctx.current.id) : false;
   const fiscalComplete = can(role, "company.manage") ? await nfseProfileComplete(db, ctx.user.id, ctx.current.id) : false;
   const master = process.env.CRM_SYNC_ENABLED === "true";
@@ -127,12 +132,25 @@ export default async function Integracoes() {
           </div>
           <p className="mb-3 rounded-md bg-muted p-3 text-xs text-muted-foreground">Guardar a conta <strong>não liga o envio</strong>: nenhum e-mail sai até a fase do envio real, a homologação (SPF, DKIM e DMARC do domínio) e a sua autorização escrita. Por segurança só aceitamos o <strong>nome público</strong> do servidor (sem IP) e as portas 465, 587, 2525 ou 25.</p>
           <EmailForm current={email.configured ? { host: email.host, port: email.port, security: email.security, fromEmail: email.fromEmail, fromName: email.fromName ?? "", replyTo: email.replyTo ?? "" } : null} />
+          <div className="mt-6 border-t border-border pt-4" aria-labelledby="live-h">
+            <h3 id="live-h" className="mb-1 font-medium">Envio real — canário</h3>
+            <p className="mb-3 text-xs text-muted-foreground">O e-mail real só sai com <strong>três travas</strong> ao mesmo tempo: (1) a chave do servidor <code>EMAIL_EXTERNAL_ENABLED</code> ligada por quem opera o servidor; (2) uma autorização registrada aqui, com a referência do documento escrito, a lista de quem pode receber e o limite diário; (3) a conta cadastrada acima. Qualquer uma faltando, nada é enviado. Boleto, nota e WhatsApp continuam simulados.</p>
+            <ul className="mb-3 space-y-1 text-sm">
+              <li>Chave do servidor: <strong>{live?.flag ? "LIGADA" : "desligada"}</strong></li>
+              <li>Autorização: {live?.authorization ? <><strong>ativa</strong> · {live.authorization.reference} · {live.authorization.allowed.length} destinatário(s) · limite {live.authorization.dailyLimit}/dia · hoje {live.sentToday}</> : <strong>nenhuma</strong>}</li>
+            </ul>
+            {live?.authorization && <><p className="mb-2 text-xs text-muted-foreground">Quem pode receber: {live.authorization.allowed.join(", ")}</p>
+              <div className="mb-4 flex flex-wrap gap-3"><form action={revokeEmailLiveAction}><button className="rounded-md px-3 py-1.5 text-sm text-negative-foreground ring-1 ring-border">Revogar autorização</button></form></div>
+              <div className="mb-4 rounded-md border border-border p-3"><TestForm /></div></>}
+            {email.configured ? <details className="mb-3 rounded-md border border-border p-3"><summary className="cursor-pointer text-sm font-medium">{live?.authorization ? "Substituir a autorização" : "Registrar autorização"}</summary><div className="mt-3"><AuthorizeForm ownDomain={email.fromEmail.slice(email.fromEmail.lastIndexOf("@") + 1)} /></div></details> : <p className="text-xs text-muted-foreground">Cadastre a conta acima antes de registrar a autorização.</p>}
+            {sendLog.length > 0 && <div><p className="mb-1 text-xs font-medium">Últimos envios reais (só os domínios dos destinatários)</p><ul className="divide-y divide-border text-xs text-muted-foreground">{sendLog.map((l) => <li key={l.id} className="flex flex-wrap justify-between gap-2 py-1.5"><span>{l.at.toLocaleString("pt-BR", { timeZone: "America/Manaus" })} · {l.kind === "teste" ? "teste" : "cobrança"} · {l.domains}</span><span>{l.status}{l.error ? ` (${l.error})` : ""}</span></li>)}</ul></div>}
+          </div>
         </>) : <p className="text-sm text-muted-foreground">A conta de e-mail é cadastrada somente pela diretoria.</p>}
       </section>
       <section className="rounded-lg border bg-card p-5">
         <h2 className="mb-1 font-semibold">Provedores de cobrança e mensagens</h2>
         <p className="mb-3 text-sm text-muted-foreground">Hoje todos funcionam em <strong>modo simulado</strong>: nada é emitido nem enviado de verdade. Cada provedor real entra numa fase própria, só com credenciais fora do Git, homologação e autorização.</p>
-        {liveFlagsOn().length > 0 && <p role="alert" className="mb-3 rounded-md bg-negative-soft p-3 text-sm text-negative-foreground">Atenção: há chave(s) real(is) ligada(s) ({liveFlagsOn().join(", ")}) sem adaptador homologado. O envio fica bloqueado até desligá-las.</p>}
+        {unsupportedFlagsOn().length > 0 && <p role="alert" className="mb-3 rounded-md bg-negative-soft p-3 text-sm text-negative-foreground">Atenção: há chave(s) real(is) ligada(s) ({unsupportedFlagsOn().join(", ")}) sem adaptador homologado. O envio fica bloqueado até desligá-las.</p>}
         <ul className="divide-y divide-border text-sm">
           {PROVIDER_CATALOG.map((p) => (
             <li key={p.key} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
@@ -146,7 +164,7 @@ export default async function Integracoes() {
         <h2 className="mb-1 font-semibold">Portão da emissão real (checklist)</h2>
         <p className="mb-3 text-sm text-muted-foreground">Enquanto algum item estiver pendente, a emissão e o envio reais permanecem <strong>bloqueados</strong>. O sistema só confere se os arquivos de segredo existem; nunca lê o conteúdo. Detalhes em <code>docs/E10_GOLIVE.md</code>.</p>
         <ul className="divide-y divide-border text-sm">
-          {readiness(process.env, { coraInDb, emailInDb, fiscalComplete }).filter((r) => (coraAccess || (r.key !== "cora-creds" && r.key !== "smtp-creds")) && (can(role, "company.manage") || r.key !== "fiscal-profile")).map((r) => (
+          {readiness(process.env, { coraInDb, emailInDb, fiscalComplete, emailAuthorized: !!live?.authorization }).filter((r) => (coraAccess || (r.key !== "cora-creds" && r.key !== "smtp-creds" && r.key !== "email-authorization")) && (can(role, "company.manage") || r.key !== "fiscal-profile")).map((r) => (
             <li key={r.key} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
               <div><p className="font-medium">{r.label}</p><p className="text-xs text-muted-foreground">{r.detail}</p></div>
               <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${r.state === "ok" ? "bg-positive-soft text-positive-foreground" : r.state === "alerta" ? "bg-negative-soft text-negative-foreground" : "bg-muted"}`}>{r.state === "ok" ? "OK" : r.state === "alerta" ? "Atenção" : "Pendente"}</span>

@@ -43,10 +43,13 @@ describe("E09 provedores simulados (contrato)", () => {
   it("falha FECHADA: qualquer chave *_LIVE ligada recusa em vez de enviar ou fingir", () => {
     expect(liveFlagsOn({})).toEqual([]);
     expect(getProviders({}).email.mode).toBe("mock");
-    for (const f of LIVE_FLAGS) {
+    for (const f of LIVE_FLAGS.filter((x) => x !== "EMAIL_EXTERNAL_ENABLED")) {
       expect(() => getProviders({ [f]: "true" })).toThrow(LiveNotAvailable);
       expect(() => getProviders({ [f]: "false" })).not.toThrow();
     }
+    // e-mail (E23): a chave sozinha NÃO envia nada (os provedores resolvidos seguem simulados); o envio real depende de autorização registrada por empresa
+    expect(getProviders({ EMAIL_EXTERNAL_ENABLED: "true" }).email.mode).toBe("mock");
+    expect(liveFlagsOn({ EMAIL_EXTERNAL_ENABLED: "true" })).toEqual(["EMAIL_EXTERNAL_ENABLED"]);
   });
   it("assertSimulated recusa provedor injetado não simulado e chaves reais", () => {
     const m = createMockProviders();
@@ -54,11 +57,14 @@ describe("E09 provedores simulados (contrato)", () => {
     expect(() => assertSimulated({ ...m, whatsapp: { mode: "live", send: async () => ({ ok: true, providerRef: "x" }) } }, {})).toThrow(/whatsapp/);
     expect(() => assertSimulated(m, { WHATSAPP_LIVE_ENABLED: "true" })).toThrow(LiveNotAvailable);
   });
-  it("nenhum arquivo dos provedores faz chamada de rede nesta fase", () => {
+  it("rede só no adaptador de e-mail (E23): nenhum outro arquivo dos provedores abre conexão", () => {
     const dir = join(process.cwd(), "src/modules/providers");
     for (const f of readdirSync(dir)) {
       const src = readFileSync(join(dir, f), "utf8");
-      expect(src, f).not.toMatch(/\bfetch\s*\(|node:(http|https|net|tls|dgram)|from "(undici|axios|nodemailer|got)"|XMLHttpRequest/);
+      expect(src, f).not.toMatch(/\bfetch\s*\(|node:(http|https|tls|dgram)|from "(undici|axios|got)"|XMLHttpRequest/);
+      if (f !== "smtp.ts") expect(src, f).not.toMatch(/nodemailer|node:dns/); // só o adaptador SMTP resolve DNS e abre conexão
+      if (f !== "net-guard.ts") expect(src, f).not.toMatch(/node:net/); // net-guard só usa isIPv4/isIPv6 (sem sockets)
     }
+    expect(readFileSync(join(dir, "net-guard.ts"), "utf8")).not.toMatch(/createConnection|connect\s*\(|Socket/);
   });
 });

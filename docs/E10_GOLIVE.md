@@ -25,6 +25,15 @@ Arquivos de 1 linha em um diretório **fora do repositório**, permissão 600, m
 `cora_client_id`, `cora_cert.pem`, `cora_key.pem`, `smtp_user`, `smtp_password`, `waha_api_key`.
 O checklist em *Integrações → Portão da emissão real* só confere se os arquivos existem; nunca lê o conteúdo.
 
+## Como ligar o canário de e-mail (E23) — só com autorização escrita do dono
+O adaptador existe, mas **está desligado**. Para o canário (e-mails reais só para a lista autorizada), nesta ordem:
+1. Conta SMTP cadastrada em Integrações → E-mail (SMTP) (E22). SPF/DKIM/DMARC do domínio prontos.
+2. Autorização escrita do dono (e-mail/ata). Em Integrações → Envio real → **Registrar autorização**: referência do documento, lista de destinatários (comece só com endereços internos), limite diário pequeno (ex.: 10).
+3. Quem opera o servidor muda `EMAIL_EXTERNAL_ENABLED` de `"false"` para `"true"` em `docker-compose.yml` (commit), rebuild e restart do `web`. O topo do sistema passa a mostrar **E-MAIL REAL ATIVO (canário)**.
+4. **Enviar teste** para um endereço interno; conferir chegada (e spam).
+5. Só então processar a fila (botão em Mensagens): vão só os e-mails cujo destinatário está na lista; o resto fica bloqueado com o motivo.
+**Desligar (kill switch):** *Revogar autorização* (imediato), ou `paused` em Mensagens, ou voltar a chave para `"false"`.
+
 ## Ordem de habilitação (um provedor por vez, cada passo com sandbox + revisão do Codex)
 1. **Canário interno de e-mail:** só para endereços internos, limite pequeno, kill switch testado.
 2. **Cora homologação** (boleto/extrato) com a conta de teste; reconsulta, cancelamento e conciliação conferidos.
