@@ -1,4 +1,4 @@
-import { FilePlus2 } from "lucide-react";
+import { FilePlus2, Upload } from "lucide-react";
 import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
@@ -23,7 +23,7 @@ export default async function Contratos({ searchParams }: { searchParams: Promis
   return (
     <div className="space-y-4">
       <PageHeader title="Contratos" description={`${ctx.current.name} · ${r.total} contrato(s). A cobrança só nasce de contratos ativos de clientes ativos.`}
-        actions={can(role, "contracts.write") ? <AppLink href="/contratos/novo" className={buttonClass("primary")}><FilePlus2 className="size-4" aria-hidden /> Novo contrato</AppLink> : undefined} />
+        actions={can(role, "contracts.write") ? <><AppLink href="/contratos/importar" className={buttonClass("outline")}><Upload className="size-4" aria-hidden /> Importar</AppLink><AppLink href="/contratos/novo" className={buttonClass("primary")}><FilePlus2 className="size-4" aria-hidden /> Novo contrato</AppLink></> : undefined} />
       <form className="flex flex-wrap gap-2" role="search">
         <label htmlFor="status" className="sr-only">Situação</label>
         <select id="status" name="status" defaultValue={status ?? ""} className={selectClass}><option value="">Todas as situações</option>{STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}</select>
@@ -42,6 +42,7 @@ export default async function Contratos({ searchParams }: { searchParams: Promis
                 <div className="min-w-0"><p className="truncate font-medium">{c.customerName}</p><p className="truncate text-sm text-muted-foreground">{c.description} · vence dia {c.dueDay}{c.invoiceJointRequired ? " · NF junto" : ""}</p></div>
                 <div className="flex items-center gap-2">
                   {c.pending && c.status !== "rascunho" && <StatusPill tone="info">alteração pendente</StatusPill>}
+                  {c.commissionPartner && <StatusPill tone="neutral">comissão {c.commissionPartner}</StatusPill>}
                   {c.customerStatus !== "ativo" && <StatusPill tone="warning">cliente {c.customerStatus}</StatusPill>}
                   <StatusPill tone={TONE[c.status as ContractStatus]}>{c.status === "rascunho" ? "Aguardando aprovação" : STATUS_LABEL[c.status as ContractStatus]}</StatusPill>
                   <Money cents={c.amountCents} className="text-sm font-semibold" />

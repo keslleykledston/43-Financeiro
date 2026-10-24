@@ -49,6 +49,14 @@ export function isContractBillable(c: { status: string; startAt: string; endAt: 
   return c.startAt <= last && (c.endAt === null || c.endAt >= first);
 }
 
+/** Rascunho + versão inicial pendente (aprovação por outra pessoa). Chamar DENTRO de uma transação. */
+export async function insertDraft(x: DB, actorId: string, companyId: string, customerId: string, t: Terms, reason: string, extra: { importId?: string; commissionPartner?: string | null } = {}) {
+  const [c] = await x.insert(contracts).values({ companyId, customerId, createdBy: actorId, status: "rascunho", importId: extra.importId ?? null, commissionPartner: extra.commissionPartner ?? null, ...columns(t) }).returning();
+  await x.insert(contractVersions).values({ companyId, contractId: c.id, version: 1, state: "pendente", terms: t, reason, requestedBy: actorId });
+  await audit(x, companyId, actorId, "contract.created", { contractId: c.id });
+  return c;
+}
+
 export async function createContract(db: DB, actorId: string, companyId: string, customerId: string, input: unknown, reason?: string) {
   await requirePerm(db, actorId, companyId, "contracts.write");
   const t = parseTerms(input);
@@ -58,10 +66,7 @@ export async function createContract(db: DB, actorId: string, companyId: string,
       const x = tx as unknown as DB;
       const [cu] = await x.select().from(customers).where(and(eq(customers.id, customerId), eq(customers.companyId, companyId)));
       if (!cu || cu.archivedAt) throw new Invalid("Cliente não encontrado ou arquivado nesta empresa");
-      const [c] = await x.insert(contracts).values({ companyId, customerId, createdBy: actorId, status: "rascunho", ...columns(t) }).returning();
-      await x.insert(contractVersions).values({ companyId, contractId: c.id, version: 1, state: "pendente", terms: t, reason: reason ?? "Contrato inicial", requestedBy: actorId });
-      await audit(x, companyId, actorId, "contract.created", { contractId: c.id });
-      return c;
+      return insertDraft(x, actorId, companyId, customerId, t, reason ?? "Contrato inicial");
     });
   } catch (e) { if (pgCode(e) === "23514") throw new Invalid("Dados do contrato violam uma regra (valor, datas ou dias)"); throw e; }
 }

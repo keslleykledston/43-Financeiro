@@ -33,3 +33,7 @@ Mostra **quando emitir** boletos e notas e **quando vencem**. É só previsão: 
 
 ## Feriados da empresa
 Os feriados **nacionais** já estão no calendário. Gerente ou diretoria cadastram os **municipais e estaduais** em *Faturamento → Feriados desta empresa*; eles mudam a previsão e marcam emissões para revisão.
+
+
+## Importar da planilha
+Veja `importar-contratos.md`: cada linha do CSV vira um contrato em rascunho e o lote é aprovado de uma vez. O contrato pode ter a marca **Parceiro com comissão** (hoje só informativa).

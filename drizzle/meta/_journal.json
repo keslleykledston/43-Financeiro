@@ -141,6 +141,13 @@
       "when": 1792803847985,
       "tag": "0019_hard_khan",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792810868558,
+      "tag": "0020_dapper_sasquatch",
+      "breakpoints": true
     }
   ]
 }

@@ -40,6 +40,7 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
         <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
           <div><dt className="text-muted-foreground">Valor mensal</dt><dd className="font-semibold"><Money cents={c.amountCents} /></dd></div>
           <div><dt className="text-muted-foreground">Vencimento</dt><dd>dia {c.dueDay} (competência M, vence em M+1)</dd></div>
+          {c.commissionPartner && <div><dt className="text-muted-foreground">Parceiro com comissão</dt><dd>{c.commissionPartner}</dd></div>}
           <div><dt className="text-muted-foreground">Vigência</dt><dd>{formatDate(c.startAt)}{c.endAt ? ` a ${formatDate(c.endAt)}` : " · sem data final"}</dd></div>
           <div><dt className="text-muted-foreground">Nota fiscal</dt><dd>{c.invoiceJointRequired ? "Emitida junto do boleto" : "Regra fiscal a definir (separada)"}</dd></div>
         </dl>

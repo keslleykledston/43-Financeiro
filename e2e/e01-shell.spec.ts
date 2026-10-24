@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-const ROTAS = ["/", "/clientes", "/contratos", "/faturamento", "/faturamento/lotes", "/faturamento/ajustes", "/faturamento/emissoes", "/mensagens", "/mensagens/modelos", "/mensagens/configuracao", "/conta", "/contas-a-receber", "/contas-a-pagar", "/contas-a-pagar/novo", "/contas-a-pagar/execucao", "/conciliacao", "/integracoes", "/configuracao"];
+const ROTAS = ["/", "/clientes", "/contratos", "/faturamento", "/faturamento/lotes", "/faturamento/ajustes", "/contratos/importar", "/faturamento/emissoes", "/mensagens", "/mensagens/modelos", "/mensagens/configuracao", "/conta", "/contas-a-receber", "/contas-a-pagar", "/contas-a-pagar/novo", "/contas-a-pagar/execucao", "/conciliacao", "/integracoes", "/configuracao"];
 const anon = { cookies: [], origins: [] };
 
 test.describe("E01 — acesso anônimo", () => {

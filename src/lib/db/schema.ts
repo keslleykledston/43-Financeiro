@@ -162,10 +162,20 @@ export const integrationConflicts = pgTable("integration_conflicts", {
 
 // ---------- Contratos (E04): fonte de verdade AQUI (o K3G CRM não tem contratos — ADR-012) ----------
 // As colunas guardam os termos VIGENTES (aprovados). Mudanças entram como versão pendente em `contract_versions` e só valem após aprovação.
+// Lote de importação de contratos (planilha → CSV → prévia → confirmação). Os contratos nascem como rascunho; o lote é aprovado/rejeitado de uma vez.
+export const contractImports = pgTable("contract_imports", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+  summary: jsonb("summary").notNull().default(sql`'{}'::jsonb`), // só contagens
+}, (t) => [unique("contract_imports_company_id_uq").on(t.companyId, t.id)]);
+
 export const contracts = pgTable("contracts", {
   ...base,
   companyId: uuid("company_id").notNull().references(() => companies.id),
   customerId: uuid("customer_id").notNull(),
+  importId: uuid("import_id"), // lote de importação que originou o contrato
+  commissionPartner: text("commission_partner"), // parceiro que recebe comissão sobre este contrato (ex.: Medina); informativo até existir o cálculo de comissões
   description: text("description").notNull(), // serviço contratado
   monthlyAmount: numeric("monthly_amount", { precision: 18, scale: 2 }).notNull(), // dinheiro: numeric(18,2); a aplicação usa centavos inteiros
   startAt: date("start_at", { mode: "string" }).notNull(),
@@ -181,6 +191,8 @@ export const contracts = pgTable("contracts", {
 }, (t) => [
   unique("contracts_company_id_uq").on(t.companyId, t.id),
   foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
+  foreignKey({ columns: [t.companyId, t.importId], foreignColumns: [contractImports.companyId, contractImports.id] }),
+  check("contracts_commission_chk", sql`${t.commissionPartner} is null or char_length(${t.commissionPartner}) between 2 and 60`),
   index("contracts_company_status_idx").on(t.companyId, t.status),
   index("contracts_customer_idx").on(t.companyId, t.customerId),
   check("contracts_status_chk", sql`${t.status} in ('rascunho', 'ativo', 'suspenso', 'encerrado')`),
