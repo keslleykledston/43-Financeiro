@@ -1,9 +1,11 @@
-import { FilePlus2, Upload } from "lucide-react";
+import { BellRing, FilePlus2, Upload } from "lucide-react";
 import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
 import { listContracts, STATUS_LABEL, type ContractStatus } from "@/modules/contracts/service";
+import { listContractAlerts } from "@/modules/contracts/alerts";
+import { todayManaus } from "@/modules/messaging/service";
 import { Callout, Money, PageHeader, StatusPill, type StatusTone } from "@/components/k3g/primitives";
 import { EmptyState } from "@/components/k3g/states";
 import { AppLink } from "@/components/k3g/app-link";
@@ -18,12 +20,15 @@ export default async function Contratos({ searchParams }: { searchParams: Promis
   if (!ctx.current || !role || !can(role, "contracts.read")) return <Callout tone="warning">Seu papel não tem acesso a contratos.</Callout>;
   const status = STATUSES.find((s) => s === sp.status);
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
-  const r = await listContracts(db, ctx.user.id, ctx.current.id, { q: sp.q, status, page });
+  const [r, al] = await Promise.all([listContracts(db, ctx.user.id, ctx.current.id, { q: sp.q, status, page }), listContractAlerts(db, ctx.user.id, ctx.current.id, todayManaus())]);
   const qs = (o: Record<string, string | undefined>) => { const u = new URLSearchParams(); for (const [k, v] of Object.entries({ ...sp, ...o })) if (v) u.set(k, v); const s = u.toString(); return s ? `?${s}` : ""; };
   return (
     <div className="space-y-4">
       <PageHeader title="Contratos" description={`${ctx.current.name} · ${r.total} contrato(s). A cobrança só nasce de contratos ativos de clientes ativos.`}
         actions={can(role, "contracts.write") ? <><AppLink href="/contratos/importar" className={buttonClass("outline")}><Upload className="size-4" aria-hidden /> Importar</AppLink><AppLink href="/contratos/novo" className={buttonClass("primary")}><FilePlus2 className="size-4" aria-hidden /> Novo contrato</AppLink></> : undefined} />
+      {al.alerts.length > 0 && (
+        <Callout tone="warning"><BellRing className="mr-1 inline size-4" aria-hidden /> {al.alerts.length} alerta(s) de vigência ou reajuste. <AppLink href="/contratos/alertas" className="font-medium underline">Ver alertas</AppLink></Callout>
+      )}
       <form className="flex flex-wrap gap-2" role="search">
         <label htmlFor="status" className="sr-only">Situação</label>
         <select id="status" name="status" defaultValue={status ?? ""} className={selectClass}><option value="">Todas as situações</option>{STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}</select>

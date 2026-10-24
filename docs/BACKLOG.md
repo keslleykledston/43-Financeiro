@@ -101,3 +101,8 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 ## E16 — Central de ajuda (2026-10-24)
 - [x] `/ajuda` (lista) e `/ajuda/<artigo>` renderizando `help/*.md`; botão "?" no cabeçalho abre o artigo da tela.
 - [ ] Busca dentro da ajuda; capturas de tela ilustrativas sem dados reais.
+
+## E17 — Alertas de contratos (2026-10-24)
+- [x] `/contratos/alertas`: vigência terminada / termina em breve e reajuste em atraso / próximo (janela 30/60/90 dias); aviso no topo de `/contratos`. Só leitura, sem migração.
+- [x] Regra de reajuste: 12 meses desde o início ou desde a última versão aprovada que mudou o valor.
+- [ ] Índice (IPCA/IGP-M) e percentual de reajuste por contrato; "adiar/ignorar alerta"; aviso por e-mail à diretoria (depende de E10b).

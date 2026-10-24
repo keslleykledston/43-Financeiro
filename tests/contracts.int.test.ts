@@ -9,6 +9,8 @@ import type { DB } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
 import { createParty } from "@/modules/crm/service";
 import { createContract, customerOptions, decideVersion, getContract, listContracts, proposeChange, setStatus } from "@/modules/contracts/service";
+import { listContractAlerts } from "@/modules/contracts/alerts";
+import { todayManaus } from "@/modules/messaging/service";
 import { addHoliday, getBillingCalendar, listHolidays, removeHoliday } from "@/modules/billing/service";
 
 const enabled = !!process.env.POSTGRES_USER;
@@ -219,5 +221,24 @@ describe.skipIf(!enabled)("Contratos e calendário de faturamento (DB de teste)"
     expect((await listHolidays(db, dirA, A, 2026)).own).toHaveLength(0);
     expect((await listHolidays(db, dirA, A, 2026)).national.some((h) => h.name === "Natal")).toBe(true);
     expect(await db.select().from(schema.auditLog).where(sql`action like 'holiday.%'`)).toHaveLength(2);
+  });
+  it("alertas: vigência e reajuste só do que está ativo, isolados por empresa; reajuste aprovado zera a contagem", async () => {
+    const today = todayManaus();
+    const shift = (days: number, years = 0) => { const d = new Date(`${today}T00:00:00Z`); d.setUTCFullYear(d.getUTCFullYear() + years); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); };
+    const velho = await active(cliA, terms({ startAt: shift(-10, -1) }));                    // fez 12 meses há 10 dias
+    const acaba = await active(cliA, terms({ startAt: shift(0, 0), endAt: shift(20) }));    // vigência termina em 20 dias
+    await createContract(db, asstA, A, cliA, terms({ startAt: shift(-10, -1) }));            // rascunho: não alerta
+    await db.insert(schema.contracts).values({ companyId: B, customerId: cliB, description: "x", monthlyAmount: "100.00", startAt: shift(-10, -1), dueDay: 5, status: "ativo" }); // outra empresa: não aparece em A
+    const r = await listContractAlerts(db, contA, A, today);
+    expect(r.checked).toBe(2);
+    expect(r.alerts.map((a) => [a.contractId, a.kind])).toEqual([[velho, "reajuste_atrasado"], [acaba, "vigencia_proxima"]]);
+    expect((await listContractAlerts(db, contA, A, today, 30)).alerts).toHaveLength(2);
+    expect((await listContractAlerts(db, contA, A, today, 90)).alerts).toHaveLength(2);
+    await expect(listContractAlerts(db, techA, A, today)).rejects.toBeInstanceOf(Forbidden);
+    // reajuste: nova versão com valor diferente, aprovada por outra pessoa → a contagem recomeça hoje
+    await proposeChange(db, asstA, A, velho, terms({ startAt: shift(-10, -1), monthlyAmount: "2.700,00" }), "reajuste anual");
+    const pend = (await getContract(db, dirA, A, velho))!.versions.find((v) => v.state === "pendente")!;
+    await decideVersion(db, dirA, A, pend.id, "aprovar");
+    expect((await listContractAlerts(db, contA, A, today)).alerts.map((a) => a.contractId)).toEqual([acaba]);
   });
 });
