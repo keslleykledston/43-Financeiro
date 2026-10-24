@@ -177,7 +177,8 @@ export const contracts = pgTable("contracts", {
   companyId: uuid("company_id").notNull().references(() => companies.id),
   customerId: uuid("customer_id").notNull(),
   importId: uuid("import_id"), // lote de importação que originou o contrato
-  commissionPartner: text("commission_partner"), // parceiro que recebe comissão sobre este contrato (ex.: Medina); informativo até existir o cálculo de comissões
+  commissionPartner: text("commission_partner"), // parceiro que recebe comissão sobre este contrato (ex.: Medina)
+  commissionBps: integer("commission_bps"), // percentual da comissão em pontos-base (3000 = 30%) sobre o valor mensal do contrato; nulo = parceiro marcado, percentual ainda não definido (E18)
   description: text("description").notNull(), // serviço contratado
   monthlyAmount: numeric("monthly_amount", { precision: 18, scale: 2 }).notNull(), // dinheiro: numeric(18,2); a aplicação usa centavos inteiros
   startAt: date("start_at", { mode: "string" }).notNull(),
@@ -195,6 +196,7 @@ export const contracts = pgTable("contracts", {
   foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
   foreignKey({ columns: [t.companyId, t.importId], foreignColumns: [contractImports.companyId, contractImports.id] }),
   check("contracts_commission_chk", sql`${t.commissionPartner} is null or char_length(${t.commissionPartner}) between 2 and 60`),
+  check("contracts_commission_bps_chk", sql`${t.commissionBps} is null or (${t.commissionBps} between 1 and 10000 and ${t.commissionPartner} is not null)`),
   index("contracts_company_status_idx").on(t.companyId, t.status),
   index("contracts_customer_idx").on(t.companyId, t.customerId),
   check("contracts_status_chk", sql`${t.status} in ('rascunho', 'ativo', 'suspenso', 'encerrado')`),
@@ -666,4 +668,59 @@ export const chargeAdjustments = pgTable("charge_adjustments", {
   check("charge_adjustments_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),
   check("charge_adjustments_text_chk", sql`char_length(${t.description}) between 2 and 120`),
   check("charge_adjustments_day_chk", sql`extract(day from ${t.competenceMonth}) = 1`),
+]);
+
+// E18 — comissões de parceiros (ex.: Medina). Regra do dono: no dia 16 paga-se o percentual do contrato sobre o valor mensal dos contratos marcados
+// cujas cobranças foram RECEBIDAS (quitadas) no mês anterior. O fechamento congela o cálculo (linhas imutáveis); a mudança de percentual só vale para os próximos.
+export const commissionStatements = pgTable("commission_statements", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  partner: text("partner").notNull(),
+  month: date("month", { mode: "string" }).notNull(), // 1º dia do mês em que as cobranças foram recebidas; o pagamento é no dia 16 do mês seguinte
+  status: text("status").notNull().default("fechado"), // fechado | pago | cancelado
+  totalAmount: numeric("total_amount", { precision: 18, scale: 2 }).notNull(),
+  lineCount: integer("line_count").notNull(),
+  closedBy: uuid("closed_by").notNull().references(() => users.id),
+  paidOn: date("paid_on", { mode: "string" }),
+  paidBy: uuid("paid_by").references(() => users.id),
+  paidNote: text("paid_note"),
+  cancelledBy: uuid("cancelled_by").references(() => users.id),
+  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  cancelReason: text("cancel_reason"),
+}, (t) => [
+  unique("commission_statements_company_id_uq").on(t.companyId, t.id),
+  uniqueIndex("commission_statements_one_uq").on(t.companyId, t.partner, t.month).where(sql`${t.status} <> 'cancelado'`),
+  check("commission_statements_status_chk", sql`${t.status} in ('fechado', 'pago', 'cancelado')`),
+  check("commission_statements_month_chk", sql`extract(day from ${t.month}) = 1`),
+  check("commission_statements_partner_chk", sql`char_length(${t.partner}) between 2 and 60`),
+  check("commission_statements_total_chk", sql`${t.totalAmount} > 0 and ${t.totalAmount} <= 99999999999.99 and ${t.lineCount} > 0`),
+  check("commission_statements_paid_chk", sql`(${t.status} = 'pago') = (${t.paidOn} is not null and ${t.paidBy} is not null)`),
+  check("commission_statements_cancel_chk", sql`(${t.status} = 'cancelado') = (${t.cancelledBy} is not null and ${t.cancelledAt} is not null and ${t.cancelReason} is not null)`),
+  check("commission_statements_note_chk", sql`${t.paidNote} is null or char_length(${t.paidNote}) <= 200`),
+]);
+
+export const commissionLines = pgTable("commission_lines", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  statementId: uuid("statement_id").notNull(),
+  chargeId: uuid("charge_id").notNull(),
+  contractId: uuid("contract_id").notNull(),
+  customerId: uuid("customer_id").notNull(),
+  customerName: text("customer_name").notNull(), // SNAPSHOT do nome no fechamento
+  competenceMonth: date("competence_month", { mode: "string" }).notNull(),
+  receivedOn: date("received_on", { mode: "string" }).notNull(), // data da baixa que quitou a cobrança
+  baseAmount: numeric("base_amount", { precision: 18, scale: 2 }).notNull(), // valor mensal do contrato na cobrança (sem excedente/ajustes)
+  bps: integer("bps").notNull(),
+  commissionAmount: numeric("commission_amount", { precision: 18, scale: 2 }).notNull(),
+  voidedAt: timestamp("voided_at", { withTimezone: true }), // preenchido quando o fechamento é cancelado: a cobrança volta a poder entrar em outro
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.statementId], foreignColumns: [commissionStatements.companyId, commissionStatements.id] }),
+  foreignKey({ columns: [t.companyId, t.chargeId], foreignColumns: [charges.companyId, charges.id] }),
+  foreignKey({ columns: [t.companyId, t.contractId], foreignColumns: [contracts.companyId, contracts.id] }),
+  uniqueIndex("commission_lines_charge_uq").on(t.companyId, t.chargeId).where(sql`${t.voidedAt} is null`), // uma cobrança entra em no máximo um fechamento válido
+  index("commission_lines_statement_idx").on(t.companyId, t.statementId),
+  check("commission_lines_bps_chk", sql`${t.bps} between 1 and 10000`),
+  check("commission_lines_base_chk", sql`${t.baseAmount} > 0 and ${t.baseAmount} <= 99999999999.99`),
+  check("commission_lines_calc_chk", sql`${t.commissionAmount} = round(${t.baseAmount} * ${t.bps} / 10000.0, 2)`),
+  check("commission_lines_day_chk", sql`extract(day from ${t.competenceMonth}) = 1`),
 ]);

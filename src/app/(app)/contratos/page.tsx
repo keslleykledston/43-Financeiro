@@ -47,7 +47,7 @@ export default async function Contratos({ searchParams }: { searchParams: Promis
                 <div className="min-w-0"><p className="truncate font-medium">{c.customerName}</p><p className="truncate text-sm text-muted-foreground">{c.description} · vence dia {c.dueDay}{c.invoiceJointRequired ? " · NF junto" : ""}</p></div>
                 <div className="flex items-center gap-2">
                   {c.pending && c.status !== "rascunho" && <StatusPill tone="info">alteração pendente</StatusPill>}
-                  {c.commissionPartner && <StatusPill tone="neutral">comissão {c.commissionPartner}</StatusPill>}
+                  {c.commissionPartner && <StatusPill tone="neutral">comissão {c.commissionPartner}{can(role, "commissions.read") ? (c.commissionBps ? ` ${c.commissionBps / 100}%` : " (sem %)") : ""}</StatusPill>}
                   {c.customerStatus !== "ativo" && <StatusPill tone="warning">cliente {c.customerStatus}</StatusPill>}
                   <StatusPill tone={TONE[c.status as ContractStatus]}>{c.status === "rascunho" ? "Aguardando aprovação" : STATUS_LABEL[c.status as ContractStatus]}</StatusPill>
                   <Money cents={c.amountCents} className="text-sm font-semibold" />

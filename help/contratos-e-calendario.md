@@ -39,7 +39,7 @@ Os feriados **nacionais** já estão no calendário. Gerente ou diretoria cadast
 
 
 ## Importar da planilha
-Veja `importar-contratos.md`: cada linha do CSV vira um contrato em rascunho e o lote é aprovado de uma vez. O contrato pode ter a marca **Parceiro com comissão** (hoje só informativa).
+Veja `importar-contratos.md`: cada linha do CSV vira um contrato em rascunho e o lote é aprovado de uma vez. O contrato pode ter a marca **Parceiro com comissão** e um percentual: veja `comissoes.md`.
 
 ## Alertas
 Veja `alertas-de-contratos.md`: fim de vigência e reajuste anual aparecem num aviso no topo da lista de contratos.

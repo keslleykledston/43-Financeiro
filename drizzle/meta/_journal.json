@@ -155,6 +155,13 @@
       "when": 1792849739720,
       "tag": "0021_powerful_mindworm",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792861766716,
+      "tag": "0022_square_skrulls",
+      "breakpoints": true
     }
   ]
 }

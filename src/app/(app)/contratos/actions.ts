@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
+import { setContractCommission } from "@/modules/commissions/service";
 import { createContract, decideVersion, proposeChange, setStatus, type ContractStatus } from "@/modules/contracts/service";
 
 export type FormState = { error?: string; values?: Record<string, string> } | undefined;
@@ -47,4 +48,12 @@ export async function statusAction(fd: FormData) {
   try { const c = await ctx(); await setStatus(db, c.userId, c.companyId, contractId, to); } catch (e) { err = msg(e); }
   revalidatePath(`/contratos/${contractId}`); revalidatePath("/contratos"); revalidatePath("/faturamento");
   redirect(`/contratos/${contractId}${err ? `?erro=${encodeURIComponent(err)}` : ""}`);
+}
+
+export async function commissionAction(fd: FormData) {
+  const contractId = String(fd.get("contractId") ?? "");
+  let err = "";
+  try { const c = await ctx(); await setContractCommission(db, c.userId, c.companyId, contractId, { partner: String(fd.get("partner") ?? ""), percent: String(fd.get("percent") ?? "") }); } catch (e) { err = msg(e); }
+  revalidatePath(`/contratos/${contractId}`); revalidatePath("/contratos"); revalidatePath("/comissoes");
+  redirect(`/contratos/${contractId}${err ? `?erro=${encodeURIComponent(err)}` : "?comissao=1"}`);
 }

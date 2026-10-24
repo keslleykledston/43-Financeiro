@@ -36,7 +36,7 @@ test("E14 — importar contratos: prévia classifica as linhas, lote nasce em ra
     await page.getByRole("button", { name: /^Aprovar 1 contrato/ }).click();
     await expect(page.getByText("Ativo", { exact: true })).toBeVisible();
     await page.getByRole("link", { name: new RegExp(NOME) }).click();
-    await expect(page.getByText("Parceiro com comissão")).toBeVisible();
+    await expect(page.getByText("Comissão de parceiro", { exact: true })).toBeVisible();
     await expect(page.getByText("Medina", { exact: true })).toBeVisible();
   });
 

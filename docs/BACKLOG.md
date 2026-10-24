@@ -107,3 +107,8 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [x] Regra do dono: contrato vale 12 meses e renova sozinho; sem data final = renovação automática (alerta `renovacao_proxima`, junto do reajuste quando coincidem).
 - [x] Regra de reajuste: 12 meses desde o início ou desde a última versão aprovada que mudou o valor.
 - [ ] Índice (IPCA/IGP-M) e percentual de reajuste por contrato; "adiar/ignorar alerta"; aviso por e-mail à diretoria (depende de E10b).
+
+## E18 — Comissão de parceiros (2026-10-24)
+- [x] Regra do dono: percentual POR CONTRATO sobre o valor mensal, das cobranças quitadas no mês anterior; pago no dia 16 (ex.: 16/10 paga o recebido em setembro).
+- [x] Migração 0022: `contracts.commission_bps`, `commission_statements` (fechamento: fechado → pago | cancelado), `commission_lines` (congeladas, imutáveis). Telas `/comissoes` (prévia, fechar, pagar, cancelar, CSV) e bloco "Comissão de parceiro" no contrato. Permissões `commissions.read` (diretoria, gerente, contabilidade) e `commissions.manage` (diretoria, gerente).
+- [ ] Comissão proporcional a cobrança parcial; lançamento de acerto quando há estorno depois do pagamento; gerar a conta a pagar do parceiro (E11); ajuste do percentual em lote.

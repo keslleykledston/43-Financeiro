@@ -11,19 +11,20 @@ import { Callout, Money, PageHeader, SectionCard, StatusPill, type StatusTone } 
 import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass, inputClass } from "@/components/k3g/button";
 import { ContractForm } from "../contract-form";
-import { decideAction, proposeAction, statusAction } from "../actions";
+import { commissionAction, decideAction, proposeAction, statusAction } from "../actions";
+import { percentLabel } from "@/modules/commissions/calc";
 
 const TONE: Record<ContractStatus, StatusTone> = { rascunho: "info", ativo: "positive", suspenso: "warning", encerrado: "neutral" };
 const VTONE = { pendente: "info", aprovada: "positive", rejeitada: "negative", substituida: "neutral" } as const;
 const brMoney = (c: number) => (c / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); // 250000 → "2.500,00" (aceito pelo parser estrito)
 
-export default async function Detalhe({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ erro?: string; proposta?: string }> }) {
+export default async function Detalhe({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ erro?: string; proposta?: string; comissao?: string }> }) {
   const [{ id }, sp, ctx] = await Promise.all([params, searchParams, requireContext()]);
   const role = ctx.current ? await activeRole(db, ctx.user.id, ctx.current.id) : null;
   if (!ctx.current || !role || !can(role, "contracts.read")) return <Callout tone="warning">Seu papel não tem acesso a contratos.</Callout>;
   const c = await getContract(db, ctx.user.id, ctx.current.id, id);
   if (!c) notFound();
-  const write = can(role, "contracts.write"), approve = can(role, "contracts.approve");
+  const write = can(role, "contracts.write"), approve = can(role, "contracts.approve"), commRead = can(role, "commissions.read"), commManage = can(role, "commissions.manage");
   const pending = c.versions.find((v) => v.state === "pendente");
   const nextComp = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Manaus" }).slice(0, 7);
   const sched = billingSchedule({ competenceMonth: nextComp, dueDay: c.dueDay, jointInvoice: c.invoiceJointRequired, issueDayOverride: c.issueDayOverride });
@@ -41,7 +42,6 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
         <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
           <div><dt className="text-muted-foreground">Valor mensal</dt><dd className="font-semibold"><Money cents={c.amountCents} /></dd></div>
           <div><dt className="text-muted-foreground">Vencimento</dt><dd>dia {c.dueDay} (competência M, vence em M+1)</dd></div>
-          {c.commissionPartner && <div><dt className="text-muted-foreground">Parceiro com comissão</dt><dd>{c.commissionPartner}</dd></div>}
           <div><dt className="text-muted-foreground">Vigência</dt><dd>{formatDate(c.startAt)}{c.endAt ? ` a ${formatDate(c.endAt)}` : " · renova sozinho a cada 12 meses"}{!c.endAt && status === "ativo" ? ` (próxima: ${formatDate(nextRenewal(c.startAt, new Date().toLocaleDateString("sv-SE", { timeZone: "America/Manaus" })))})` : ""}</dd></div>
           <div><dt className="text-muted-foreground">Nota fiscal</dt><dd>{c.invoiceJointRequired ? "Emitida junto do boleto" : "Regra fiscal a definir (separada)"}</dd></div>
         </dl>
@@ -54,6 +54,21 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
           </div>
         )}
       </SectionCard>
+
+      {sp.comissao && <Callout tone="positive" role="status">Comissão atualizada. Vale para os próximos fechamentos; os já fechados não mudam.</Callout>}
+      {(c.commissionPartner && commRead) || commManage ? (
+        <SectionCard title="Comissão de parceiro">
+          {c.commissionPartner && commRead && <p className="mb-2 text-sm">Parceiro <strong>{c.commissionPartner}</strong> · {c.commissionBps ? <>percentual <strong>{percentLabel(c.commissionBps)}</strong> sobre o valor mensal</> : <span className="text-warning-foreground">percentual ainda não definido (fica fora do cálculo e impede o fechamento)</span>}.</p>}
+          {commManage ? (
+            <form action={commissionAction} className="flex flex-wrap items-end gap-2">
+              <input type="hidden" name="contractId" value={c.id} />
+              <div><label htmlFor="partner" className="block text-xs text-muted-foreground">Parceiro (vazio = sem comissão)</label><input id="partner" name="partner" maxLength={60} defaultValue={c.commissionPartner ?? ""} placeholder="Ex.: Medina" className={`${inputClass} max-w-[14rem]`} /></div>
+              <div><label htmlFor="percent" className="block text-xs text-muted-foreground">Percentual (%)</label><input id="percent" name="percent" inputMode="decimal" defaultValue={c.commissionBps ? String(c.commissionBps / 100).replace(".", ",") : ""} placeholder="30" className={`${inputClass} max-w-[7rem]`} /></div>
+              <button className={buttonClass("outline")}>Salvar comissão</button>
+            </form>
+          ) : null}
+        </SectionCard>
+      ) : null}
 
       {pending && (
         <SectionCard title={status === "rascunho" ? "Aprovação do contrato" : "Alteração aguardando aprovação"}>

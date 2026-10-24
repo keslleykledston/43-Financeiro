@@ -1,4 +1,4 @@
-import { CircleHelp, Landmark, FileText, LayoutDashboard, MessageSquare, Plug, Receipt, ReceiptText, Settings, Users, Wallet, type LucideIcon } from "lucide-react";
+import { CircleHelp, HandCoins, Landmark, FileText, LayoutDashboard, MessageSquare, Plug, Receipt, ReceiptText, Settings, Users, Wallet, type LucideIcon } from "lucide-react";
 
 export interface NavItem { label: string; href: string; icon: LucideIcon; soon?: boolean; mobile?: boolean }
 
@@ -12,6 +12,7 @@ export const NAV: NavItem[] = [
   { label: "A receber", href: "/contas-a-receber", icon: Wallet },
   { label: "A pagar", href: "/contas-a-pagar", icon: ReceiptText },
   { label: "Conciliação", href: "/conciliacao", icon: Landmark },
+  { label: "Comissões", href: "/comissoes", icon: HandCoins },
   { label: "Integrações", href: "/integracoes", icon: Plug, mobile: true },
   { label: "Ajuda", href: "/ajuda", icon: CircleHelp },
   { label: "Ajustes", href: "/configuracao", icon: Settings, mobile: true },
