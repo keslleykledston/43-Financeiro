@@ -112,3 +112,11 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [x] Regra do dono: percentual POR CONTRATO sobre o valor mensal, das cobranças quitadas no mês anterior; pago no dia 16 (ex.: 16/10 paga o recebido em setembro).
 - [x] Migração 0022: `contracts.commission_bps`, `commission_statements` (fechamento: fechado → pago | cancelado), `commission_lines` (congeladas, imutáveis). Telas `/comissoes` (prévia, fechar, pagar, cancelar, CSV) e bloco "Comissão de parceiro" no contrato. Permissões `commissions.read` (diretoria, gerente, contabilidade) e `commissions.manage` (diretoria, gerente).
 - [ ] Comissão proporcional a cobrança parcial; lançamento de acerto quando há estorno depois do pagamento; gerar a conta a pagar do parceiro (E11); ajuste do percentual em lote.
+
+## E19 — Área do Cora em Integrações (2026-10-24)
+- [x] Seção "Cora — boletos": escopo só de boletos (emitir, consultar situação, segunda via; nunca pagamento/transferência/saldo/extrato), credenciais por empresa e ambiente (homologação/produção), guardadas CIFRADAS (AES-256-GCM, migração 0023), escrita apenas, validação do certificado/chave, aviso de vencimento. Só diretoria (`providers.credentials`).
+- [ ] E10b (adaptador real de boletos: emitir/consultar/segunda via/webhook de status) — BLOQUEADO até homologação + autorização escrita. Atualizar o checklist quando o adaptador existir.
+- [ ] Segunda via na tela da cobrança; acompanhar "pago/atrasado" pela situação do boleto (baixa automática) quando o adaptador existir.
+
+## E20 — Cancelar boleto pela plataforma (autorizado pelo dono em 2026-10-24, ADR-017)
+- [ ] Permissão `boletos.cancel` (só diretoria) já existe. Falta: tela/ação na cobrança, motivo obrigatório, só boleto emitido e sem pagamento, chamada ao provedor fora de transação (reservar → chamar → registrar) com idempotência, registro IMUTÁVEL (quem, quando, por quê, referência do boleto, resultado, tentativas), reemissão com nova chave de idempotência, auditoria e help. Hoje só provedor simulado.

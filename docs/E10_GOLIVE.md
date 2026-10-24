@@ -16,7 +16,11 @@
 4. **WhatsApp (WAHA):** chave, número dedicado, lista de **opt-in** revisada, janelas e limites aprovados.
 5. **Autorização escrita da diretoria**, por provedor e por empresa, com limites de envio.
 
+## Escopo da Cora (decisão do dono, 2026-10-24)
+Só **boletos**: emitir, consultar situação (emitido/pago/atrasado), segunda via e **cancelar (somente diretoria, com motivo, tudo registrado; fase E20)**. **Nunca** pagamento, transferência, Pix enviado, saldo/extrato (por isso a conciliação não usa a API da Cora). Ver ADR-017. Definido em `src/modules/providers/cora.ts` (`CORA_SCOPE`) e coberto por teste.
+
 ## Como os segredos entram (sem passar por chat, Git ou Lovable)
+Duas vias, ambas fora do Git e do chat: (a) a seção **Cora — boletos** em *Integrações* (diretoria; guardado CIFRADO no banco, escrita apenas, chave `K3G_CREDENTIALS_KEY`, em `.env.credentials` (0600, fora do Git; sem ela cai em `AUTH_SECRET`). Perder ou trocar essa chave exige cadastrar as credenciais de novo. Faça cópia dela junto dos demais segredos) ou (b) arquivos montados em `/run/secrets`, abaixo. Guardar credenciais NÃO liga a emissão real.
 Arquivos de 1 linha em um diretório **fora do repositório**, permissão 600, montados **somente-leitura** em `/run/secrets` (Compose `secrets:`):
 `cora_client_id`, `cora_cert.pem`, `cora_key.pem`, `smtp_user`, `smtp_password`, `waha_api_key`.
 O checklist em *Integrações → Portão da emissão real* só confere se os arquivos existem; nunca lê o conteúdo.

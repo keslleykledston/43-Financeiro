@@ -10,6 +10,10 @@ import { SyncPanel } from "./sync-panel";
 import { resolveAction } from "./actions";
 import { PROVIDER_CATALOG, liveFlagsOn } from "@/modules/providers/registry";
 import { readiness } from "@/modules/providers/readiness";
+import { getCoraStatus, hasCoraCredentials } from "@/modules/providers/cora-config";
+import { CORA_SCOPE, ENV_LABEL } from "@/modules/providers/cora";
+import { CoraForm } from "./cora-form";
+import { removeCoraAction } from "./actions";
 
 const REASON: Record<string, string> = { duplicate_document: "Já existe um cadastro local com este documento", document_collision: "O documento colide com outro cadastro ativo", ambiguous_company: "Não foi possível saber a qual empresa pertence" };
 const fmt = (d: Date) => d.toLocaleString("pt-BR", { timeZone: "America/Manaus" });
@@ -23,6 +27,9 @@ export default async function Integracoes() {
   const manage = can(role, "integrations.manage") && can(role, "crm.write");
   const mode = await getCustomerMode(db, ctx.user.id, ctx.current.id);
   const [conn, conflicts, runs] = await Promise.all([getConnection(db, ctx.current.id), manage ? listConflicts(db, ctx.user.id, ctx.current.id) : Promise.resolve([]), listRuns(db, ctx.user.id, ctx.current.id)]);
+  const coraAccess = can(role, "providers.credentials");
+  const cora = coraAccess ? await getCoraStatus(db, ctx.user.id, ctx.current.id) : [];
+  const coraInDb = coraAccess ? await hasCoraCredentials(db, ctx.user.id, ctx.current.id) : false;
   const master = process.env.CRM_SYNC_ENABLED === "true";
   const configured = !!process.env.CRM_BASE_URL && !!process.env.CRM_API_TOKEN;
   return (
@@ -76,6 +83,30 @@ export default async function Integracoes() {
         </ul>
       </section>
       </>)}
+      <section className="rounded-lg border bg-card p-5" aria-labelledby="cora-h">
+        <h2 id="cora-h" className="mb-1 font-semibold">Cora — boletos</h2>
+        <p className="mb-3 text-sm text-muted-foreground">Integração <strong>somente de boletos</strong>. A plataforma não movimenta dinheiro da conta.</p>
+        <div className="mb-3 grid gap-3 text-sm sm:grid-cols-2">
+          <div><p className="mb-1 font-medium">Pode</p><ul className="list-disc pl-5 text-muted-foreground">{CORA_SCOPE.allowed.map((a) => <li key={a.key}>{a.label}</li>)}</ul></div>
+          <div><p className="mb-1 font-medium">Nunca faz</p><ul className="list-disc pl-5 text-muted-foreground">{CORA_SCOPE.forbidden.map((a) => <li key={a.key}>{a.label}</li>)}</ul></div>
+        </div>
+        {coraAccess ? (<>
+          <ul className="mb-4 divide-y divide-border text-sm">
+            {cora.map((c) => (
+              <li key={c.environment} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                <div><p className="font-medium">{ENV_LABEL[c.environment]}</p>
+                  <p className="text-xs text-muted-foreground">{c.configured ? <>Configurado{c.label ? ` · ${c.label}` : ""} · certificado {c.fingerprint}… · vence em {c.notAfter!.split("-").reverse().join("/")}{c.daysLeft! < 0 ? " (VENCIDO)" : c.daysLeft! <= 30 ? ` (faltam ${c.daysLeft} dias)` : ""}</> : "Nenhuma credencial guardada"}</p></div>
+                <div className="flex items-center gap-2">
+                  <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${c.configured ? (c.daysLeft! < 0 ? "bg-negative-soft text-negative-foreground" : "bg-positive-soft text-positive-foreground") : "bg-muted"}`}>{c.configured ? (c.daysLeft! < 0 ? "Vencido" : "Guardada") : "Pendente"}</span>
+                  {c.configured && <form action={removeCoraAction}><input type="hidden" name="environment" value={c.environment} /><button className="rounded-md px-2.5 py-1 text-xs text-negative-foreground ring-1 ring-border">Remover</button></form>}
+                </div>
+              </li>
+            ))}
+          </ul>
+          <p className="mb-3 rounded-md bg-muted p-3 text-xs text-muted-foreground">Guardar as credenciais <strong>não liga a emissão real</strong>. Ela continua desligada até a homologação e a sua autorização escrita (veja o checklist abaixo). Na Cora, crie a integração direta só com o que é preciso para boletos.</p>
+          <CoraForm />
+        </>) : <p className="text-sm text-muted-foreground">As credenciais da Cora são cadastradas somente pela diretoria.</p>}
+      </section>
       <section className="rounded-lg border bg-card p-5">
         <h2 className="mb-1 font-semibold">Provedores de cobrança e mensagens</h2>
         <p className="mb-3 text-sm text-muted-foreground">Hoje todos funcionam em <strong>modo simulado</strong>: nada é emitido nem enviado de verdade. Cada provedor real entra numa fase própria, só com credenciais fora do Git, homologação e autorização.</p>
@@ -93,7 +124,7 @@ export default async function Integracoes() {
         <h2 className="mb-1 font-semibold">Portão da emissão real (checklist)</h2>
         <p className="mb-3 text-sm text-muted-foreground">Enquanto algum item estiver pendente, a emissão e o envio reais permanecem <strong>bloqueados</strong>. O sistema só confere se os arquivos de segredo existem; nunca lê o conteúdo. Detalhes em <code>docs/E10_GOLIVE.md</code>.</p>
         <ul className="divide-y divide-border text-sm">
-          {readiness().map((r) => (
+          {readiness(process.env, { coraInDb }).filter((r) => coraAccess || r.key !== "cora-creds").map((r) => (
             <li key={r.key} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
               <div><p className="font-medium">{r.label}</p><p className="text-xs text-muted-foreground">{r.detail}</p></div>
               <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${r.state === "ok" ? "bg-positive-soft text-positive-foreground" : r.state === "alerta" ? "bg-negative-soft text-negative-foreground" : "bg-muted"}`}>{r.state === "ok" ? "OK" : r.state === "alerta" ? "Atenção" : "Pendente"}</span>

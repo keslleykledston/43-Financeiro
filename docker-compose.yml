@@ -42,6 +42,8 @@ services:
       - .env.auth
       - path: .env.crm   # opcional: CRM_BASE_URL e CRM_API_TOKEN (somente leitura)
         required: false
+      - path: .env.credentials   # opcional: K3G_CREDENTIALS_KEY (chave que cifra as credenciais guardadas em Integrações); sem ela usa AUTH_SECRET
+        required: false
     environment: *app-env
     ports:
       - "127.0.0.1:3150:3150"

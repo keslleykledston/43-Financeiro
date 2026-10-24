@@ -68,3 +68,18 @@ Calendário (`src/modules/billing/calendar.ts`, funções puras testadas contra 
 - **WhatsApp:** **WAHA** (não oficial) — dono ciente do risco de bloqueio do número. Mitigações obrigatórias: opt-in/lista de destinatários revisada, janela de horário, limite de taxa e jitter, kill switch, stop-on-payment, texto sem pressão/ameaça, número dedicado (não o principal). API oficial da Meta fica como caminho futuro via `MessageChannel`.
 - **E-mail:** **SMTP do domínio k3gsolutions.com.br**. Exige SPF/DKIM/DMARC e remetente por empresa; limites de envio e pouca visibilidade de entrega (sem webhook de bounce): tratar bounce por caixa de retorno/erro SMTP e limitar taxa.
 - Tudo atrás de feature flags DESLIGADAS (`BILLING_LIVE_ENABLED`, `EMAIL_EXTERNAL_ENABLED`, `CORA_LIVE_ENABLED`, `FISCAL_LIVE_ENABLED`, + `WHATSAPP_LIVE_ENABLED`) e do gate E10 (homologação, calendário fiscal aprovado, autorização explícita, limites). Ordem de construção: E05 (prévia+aprovação de lote) → E06 (templates e fila em simulação) → E09 (adapters com mocks: Cora, NFS-e, SMTP, WAHA; agendador) → E10 (real, por provedor, um de cada vez).
+
+## ADR-015 Vigência: contrato vale 12 meses e renova sozinho (2026-10-24, dono)
+- Palavras do dono: "REGRA De contrato é por padrao 12 meses, renovado automaticamente apos este periodo caso nao haja manifestacao do cliente".
+- Efeito: `end_at` nulo = renovação automática; data final só quando o cliente (ou a K3G) encerra. Alertas em `/contratos/alertas` (renovação, reajuste, fim informado). A cobrança não muda. Suspenso ainda renova (suposição minha, a confirmar). PRD §4.
+
+## ADR-016 Comissão de parceiros (2026-10-24, dono) — E18
+- Respostas do dono: percentual **por contrato**; base = **valor mensal do contrato**; "No dia 16 é pago a comissão do que recebeu do mes anterior. Ex.: 16/10 é pago os 30% dos valores recebidos dos clientes no mes 09".
+- Implementação: cobrança entra no mês em que ficou totalmente paga (data da última baixa); fechamento mensal congela as linhas (imutáveis); pagamento é registrado à mão; mudar parceiro/percentual com recebimento fora de fechamento é bloqueado. Migração 0022.
+
+## ADR-017 Escopo da Cora: só boletos (2026-10-24, dono) — E19
+- Palavras do dono: "Nao vai ser feito nada de pagamento pela plataforma, apenas emissao de boletos, validacao de status dos boletos, acompanhamento se foi pago, se esta atrasado ou coisa assim. no maximo emissao de segunda via de boleto. mas nada de manusear o $$ na conta. (segurança)".
+- Depois: "pode autorizar a cancelar o boleto via plataforma (porem sob autorizacao de diretoria - limitacao de usuario)" e "tudo deve ficar registrado devidamente".
+- Escopo permitido (`CORA_SCOPE`): emitir, consultar situação, segunda via e **cancelar (somente diretoria, com motivo, tudo registrado)**. Proibido, estruturalmente (interfaces, testes): pagar, transferir, Pix enviado, saldo/extrato. A conciliação não usa a API da Cora.
+- Credenciais (client id, certificado e chave) em Integrações → Cora: cifradas (AES-256-GCM, chave `K3G_CREDENTIALS_KEY` em `.env.credentials`), escrita apenas, só diretoria, auditadas. Guardar não liga a emissão real (E10b segue BLOQUEADA até homologação + autorização escrita). Migração 0023.
+- Cancelamento de boleto: fluxo próprio na fase E20 (registro imutável de quem, quando, por quê e resultado; só diretoria).

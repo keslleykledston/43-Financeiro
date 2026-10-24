@@ -724,3 +724,26 @@ export const commissionLines = pgTable("commission_lines", {
   check("commission_lines_calc_chk", sql`${t.commissionAmount} = round(${t.baseAmount} * ${t.bps} / 10000.0, 2)`),
   check("commission_lines_day_chk", sql`extract(day from ${t.competenceMonth}) = 1`),
 ]);
+
+// E19 — credenciais de provedores (hoje só a Cora, apenas boletos). Os segredos ficam CIFRADOS (AES-256-GCM, ver src/lib/security/secretbox.ts) e a tela
+// nunca os mostra de volta: só impressão digital e validade do certificado. Guardar credenciais NÃO liga nada: a emissão real segue bloqueada (E10b).
+export const providerCredentials = pgTable("provider_credentials", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  provider: text("provider").notNull(), // cora
+  environment: text("environment").notNull(), // homologacao | producao
+  label: text("label"), // apelido da conta (não é segredo)
+  clientIdEnc: text("client_id_enc").notNull(),
+  certEnc: text("cert_enc").notNull(),
+  keyEnc: text("key_enc").notNull(),
+  certFingerprint: text("cert_fingerprint").notNull(), // SHA-256 do certificado (público)
+  certNotAfter: date("cert_not_after", { mode: "string" }).notNull(),
+  updatedBy: uuid("updated_by").notNull().references(() => users.id),
+}, (t) => [
+  uniqueIndex("provider_credentials_one_uq").on(t.companyId, t.provider, t.environment),
+  check("provider_credentials_provider_chk", sql`${t.provider} in ('cora')`),
+  check("provider_credentials_env_chk", sql`${t.environment} in ('homologacao', 'producao')`),
+  check("provider_credentials_label_chk", sql`${t.label} is null or char_length(${t.label}) between 2 and 60`),
+  check("provider_credentials_fp_chk", sql`${t.certFingerprint} ~ '^[0-9a-f]{64}$'`),
+  check("provider_credentials_sealed_chk", sql`${t.clientIdEnc} like 'v1.%' and ${t.certEnc} like 'v1.%' and ${t.keyEnc} like 'v1.%'`), // nunca texto puro
+]);

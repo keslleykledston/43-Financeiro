@@ -32,14 +32,7 @@ export function createMockProviders(): Providers {
       },
       async find(key) { const r = byKey.get(`boleto:${key}`); return r ? { providerRef: r, status: boletos.get(r)!, digitableLineMasked: "00000.00000 •••••.••••• •••••.••••• 0 00000000000000" } : null; },
       async status(r) { const s = boletos.get(r); if (!s) throw new Error("boleto_inexistente"); return s; },
-      async cancel(r) { if (!boletos.has(r)) throw new Error("boleto_inexistente"); boletos.set(r, "cancelado"); },
-    },
-    statement: {
-      mode: "mock",
-      async list(from, to) {
-        if (from > to) throw new RangeError("periodo_invalido");
-        return [{ externalId: ref("stmt", `${from}|${to}`), date: from, amountCents: 100000, description: "EXTRATO SIMULADO" }];
-      },
+      async cancel(r) { const s = boletos.get(r); if (!s) throw new Error("boleto_inexistente"); if (s === "pago") throw new Error("boleto_pago"); boletos.set(r, "cancelado"); },
     },
     nfse: {
       mode: "mock",

@@ -16,19 +16,15 @@ export interface WhatsappProvider {
 
 export type BoletoInput = { idempotencyKey: string; amountCents: number; dueDate: string; customerName: string; customerDocument: string };
 export type BoletoResult = { providerRef: string; status: "emitido" | "pago" | "cancelado"; digitableLineMasked: string };
+/** Cora: SOMENTE boletos (emitir, consultar situação, segunda via e cancelar — o cancelamento só pela diretoria, com motivo e registro). Sem pagamento, transferência, saldo/extrato (escopo do dono, 2026-10-24; ver CORA_SCOPE e ADR-017). */
 export interface BoletoProvider { // Cora (boletos v2)
   readonly mode: "mock" | "live";
   issue(i: BoletoInput): Promise<BoletoResult>;
   /** Reconsulta por chave de idempotência: já existe? (usada quando a resposta da emissão se perdeu). null = não existe. */
   find(idempotencyKey: string): Promise<BoletoResult | null>;
   status(ref: string): Promise<BoletoResult["status"]>;
+  /** Cancela um boleto EMITIDO e ainda sem pagamento. Só é chamado pelo fluxo de cancelamento da diretoria (E20). */
   cancel(ref: string): Promise<void>;
-}
-
-export type StatementLine = { externalId: string; date: string; amountCents: number; description: string };
-export interface StatementProvider { // Cora (extrato)
-  readonly mode: "mock" | "live";
-  list(from: string, to: string): Promise<StatementLine[]>;
 }
 
 export type NfseInput = { idempotencyKey: string; amountCents: number; competence: string; customerName: string; customerDocument: string; description: string };
@@ -39,4 +35,4 @@ export interface NfseProvider { // NFS-e da Cora (beta)
   status(ref: string): Promise<"processando" | "emitida" | "rejeitada">;
 }
 
-export type Providers = { email: EmailProvider; whatsapp: WhatsappProvider; boleto: BoletoProvider; statement: StatementProvider; nfse: NfseProvider };
+export type Providers = { email: EmailProvider; whatsapp: WhatsappProvider; boleto: BoletoProvider; nfse: NfseProvider };

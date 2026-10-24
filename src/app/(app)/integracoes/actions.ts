@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
 import { setCustomerMode } from "@/modules/crm/service";
 import { getCrmAdapter } from "@/modules/integrations/crm/factory";
+import { removeCoraCredentials, saveCoraCredentials } from "@/modules/providers/cora-config";
 import { applySync, previewSync, resolveConflict, saveConnection } from "@/modules/integrations/crm/sync";
 
 type Sample = Awaited<ReturnType<typeof previewSync>>;
@@ -57,4 +58,42 @@ export async function setModeAction(_: ModeState, fd: FormData): Promise<ModeSta
   catch (e) { return { error: msg(e) }; }
   revalidatePath("/integracoes"); revalidatePath("/clientes");
   return { saved: true };
+}
+
+export type CoraState = { error?: string; saved?: string } | undefined;
+const MAX_FILE = 16_384;
+/** Campo de texto OU arquivo (.pem/.crt). Nada do conteúdo é devolvido à tela nem registrado. */
+async function textOrFile(fd: FormData, text: string, file: string): Promise<string> {
+  const f = fd.get(file);
+  if (f instanceof File && f.size > 0) {
+    if (f.size > MAX_FILE) throw new Invalid("Arquivo grande demais");
+    return await f.text();
+  }
+  return bounded(fd, text, MAX_FILE);
+}
+const bounded = (fd: FormData, name: string, max: number): string => {
+  const v = String(fd.get(name) ?? "");
+  if (v.length > max) throw new Invalid("Texto grande demais");
+  return v;
+};
+
+export async function saveCoraAction(_: CoraState, fd: FormData): Promise<CoraState> {
+  try {
+    const c = await ctx();
+    const r = await saveCoraCredentials(db, c.userId, c.companyId, {
+      environment: bounded(fd, "environment", 20), label: bounded(fd, "label", 200), clientId: bounded(fd, "clientId", 400),
+      certificate: await textOrFile(fd, "certificate", "certificateFile"), privateKey: await textOrFile(fd, "privateKey", "privateKeyFile"),
+    });
+    revalidatePath("/integracoes");
+    return { saved: `Credenciais guardadas (cifradas). Certificado ${r.fingerprint}… válido até ${r.notAfter.split("-").reverse().join("/")}.` };
+  } catch (e) {
+    if (e instanceof Invalid || e instanceof Forbidden) return { error: e.message };
+    console.error("cora: falha inesperada ao guardar credenciais", e instanceof Error ? e.name : "erro"); // nunca o conteúdo
+    return { error: "Não foi possível guardar agora. Tente de novo; se persistir, avise o suporte." };
+  }
+}
+
+export async function removeCoraAction(fd: FormData) {
+  try { const c = await ctx(); await removeCoraCredentials(db, c.userId, c.companyId, String(fd.get("environment") ?? "")); } catch (e) { msg(e); }
+  revalidatePath("/integracoes");
 }

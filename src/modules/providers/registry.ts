@@ -36,8 +36,7 @@ export function resolveProviders(injected?: Providers, env: Record<string, strin
 }
 
 export const PROVIDER_CATALOG = [
-  { key: "cora-boleto", label: "Cora — boletos e Pix", note: "Aguardando credenciais (certificado mTLS + client-id)", flag: "CORA_LIVE_ENABLED" },
-  { key: "cora-extrato", label: "Cora — extrato e saldo", note: "Aguardando credenciais", flag: "CORA_LIVE_ENABLED" },
+  { key: "cora-boleto", label: "Cora — boletos (emitir, consultar situação, segunda via)", note: "Credenciais na seção «Cora — boletos» acima. Sem pagamentos, transferências nem leitura de saldo/extrato", flag: "CORA_LIVE_ENABLED" },
   { key: "cora-nfse", label: "NFS-e da Cora (beta)", note: "Confirmar cobertura do município e CNAEs", flag: "FISCAL_LIVE_ENABLED" },
   { key: "smtp", label: "E-mail (SMTP k3gsolutions.com.br)", note: "Falta SPF/DKIM/DMARC e remetente por empresa", flag: "EMAIL_EXTERNAL_ENABLED" },
   { key: "waha", label: "WhatsApp (WAHA, não oficial)", note: "Risco de bloqueio aceito; exige lista de opt-in e número dedicado", flag: "WHATSAPP_LIVE_ENABLED" },
