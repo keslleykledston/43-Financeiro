@@ -22,6 +22,9 @@ describe("planilha de boletos → contratos (dados fictícios)", () => {
     expect(monthOfSheet("JAN", 2026)).toBe("2026-01");
     expect(monthOfSheet("Out", 2026)).toBe("2026-10");
     expect(monthOfSheet("RESUMO", 2026)).toBeNull();
+    expect(monthOfSheet("Boletos JAN 2026", 2026)).toBe("2026-01");
+    expect(monthOfSheet("Boletos OUT 2026", 2026)).toBe("2026-10");
+    expect(monthOfSheet("Boletos", 2026)).toBeNull();
     expect(brl(120000)).toBe("1.200,00");
     expect(brl(5)).toBe("0,05");
   });
@@ -76,5 +79,21 @@ describe("planilha de boletos → contratos (dados fictícios)", () => {
     const entries = readWorkbook(withEmpty, 2026);
     expect(emptyLaterTabs(withEmpty, entries, 2026)).toEqual(["ABR"]);
     expect(consolidate(entries).find((c) => c.name === "BETA TELECOM SA")!.endAt).toBeNull();
+  });
+
+  it("layout real: blocos empilhados na mesma aba (Solutions em cima, Call embaixo) e aba \"Boletos JAN 2026\"", () => {
+    const rows: Cell[][] = [
+      ["K3G SOLUTIONS -  JANEIRO/ 2026"], ["DADOS DOS CLIENTES PARA EMISSÃO DE BOLETOS"],
+      ["QUANT.", "VENCIMENTO", "CLIENTE", "CNPJ", "VALOR BRUTO", "LÍQUIDO", "DATA PG", "OBSERVAÇÕES", "E-MAIL", "CONTATO FIN.", "SERVIÇO"],
+      [1, new Date(Date.UTC(2026, 0, 10)), "UM", "10.020.030/0001-13", 100, 95, null, "medina", "a@x.example", "Ana", "Link"],
+      [null, null, null, "TOTAL", 100, 95],
+      ["K3G CALL - JANEIRO / 2026"],
+      ["QUANT.", "VENCIMENTO", "CLIENTE", "CNPJ", "Plano", "Excedente", "Líquido", "DATA PG", "E-MAIL", "CONTATO FINANCEIRO", "Plano"],
+      [1, new Date(Date.UTC(2026, 0, 5)), "DOIS", "20.030.040/0001-93", 50, 5, 55, null, "b@x.example", "Bia", "Básico"],
+      [null, null, null, "TOTAL GERAL CALL", 55],
+    ];
+    const e = readWorkbook([{ name: "Boletos JAN 2026", rows }], 2026);
+    expect(e.map((x) => [x.block, x.month, x.name, x.dueDay])).toEqual([["solutions", "2026-01", "UM", 10], ["call", "2026-01", "DOIS", 5]]);
+    expect(e[1]).toMatchObject({ planoCents: 5000, excedenteCents: 500, netCents: 5500 });
   });
 });

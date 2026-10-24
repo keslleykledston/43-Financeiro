@@ -39,11 +39,13 @@ function fieldOf(label: string): Field | null {
   return null;
 }
 
-/** "JAN", "Jan/2026", "janeiro" → "2026-01". */
+/** "JAN", "Jan/2026", "janeiro", "Boletos JAN 2026" → "2026-01" (vale a primeira palavra que for nome de mês). */
 export function monthOfSheet(name: string, year: number): string | null {
-  const key = norm(name).slice(0, 3);
-  const m = MONTHS[key];
-  return m ? `${year}-${m}` : null;
+  for (const word of norm(name).split(/[^A-Z]+/)) {
+    const m = word.length >= 3 ? MONTHS[word.slice(0, 3)] : undefined;
+    if (m) return `${year}-${m}`;
+  }
+  return null;
 }
 
 export function cents(v: Cell): number | null {
