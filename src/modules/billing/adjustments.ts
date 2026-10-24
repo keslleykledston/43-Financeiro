@@ -1,13 +1,13 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
 import { auditLog, chargeAdjustments, charges, contracts } from "@/lib/db/schema";
-import { centsFromNumeric, numericFromCents, parseMoneyToCents } from "@/lib/money";
+import { MAX_CENTS, centsFromNumeric, numericFromCents, parseMoneyToCents } from "@/lib/money";
 import { Invalid, requirePerm } from "@/modules/identity/service";
 import { addMonths } from "./calendar";
 import { loadScheduledMany } from "./service";
 
 /**
- * Ajustes da competência (E05c): EXCEDENTE (K3G Call: calculado em outro sistema e lançado à mão), ACRÉSCIMO e DESCONTO.
+ * Ajustes da competência (E05c; remover = marcar como removido, o histórico fica): EXCEDENTE (K3G Call: calculado em outro sistema e lançado à mão), ACRÉSCIMO e DESCONTO.
  * O valor da cobrança na prévia do lote = valor do contrato + ajustes da competência. Travados quando a cobrança está em lote APROVADO
  * (para alterar, reabrir o lote). Serializam com o lote pelo mesmo lock de empresa, então a aprovação nunca perde um ajuste concorrente.
  */
@@ -28,7 +28,7 @@ export type AdjRow = { id: string; kind: AdjKind; description: string; amountCen
 export async function adjustmentsFor(x: DB, companyId: string, pairs: { contractId: string; competence: string }[]) {
   const out = new Map<string, { totalCents: number; items: AdjRow[] }>();
   if (pairs.length === 0) return out;
-  const rows = await x.select().from(chargeAdjustments).where(and(eq(chargeAdjustments.companyId, companyId), inArray(chargeAdjustments.contractId, [...new Set(pairs.map((p) => p.contractId))]),
+  const rows = await x.select().from(chargeAdjustments).where(and(eq(chargeAdjustments.companyId, companyId), isNull(chargeAdjustments.removedAt), inArray(chargeAdjustments.contractId, [...new Set(pairs.map((p) => p.contractId))]),
     inArray(chargeAdjustments.competenceMonth, [...new Set(pairs.map((p) => `${p.competence.slice(0, 7)}-01`))]))).orderBy(asc(chargeAdjustments.createdAt));
   for (const r of rows) {
     const k = key(r.contractId, r.competenceMonth); const e = out.get(k) ?? { totalCents: 0, items: [] };
@@ -77,7 +77,9 @@ export async function addAdjustment(db: DB, actorId: string, companyId: string, 
     if (locked) throw new Invalid("A cobrança desta competência já está em lote aprovado: reabra o lote para ajustar");
     const cur = (await adjustmentsFor(x, companyId, [{ contractId: i.contractId, competence: i.competence }])).get(key(i.contractId, i.competence));
     if ((cur?.items.length ?? 0) >= MAX_PER_COMPETENCE) throw new Invalid(`No máximo ${MAX_PER_COMPETENCE} ajustes por contrato e competência`);
-    if (base + (cur?.totalCents ?? 0) + signed(i.kind, cents) <= 0) throw new Invalid("O valor final da cobrança precisa continuar maior que zero");
+    const final = base + (cur?.totalCents ?? 0) + signed(i.kind, cents);
+    if (final <= 0) throw new Invalid("O valor final da cobrança precisa continuar maior que zero");
+    if (final > MAX_CENTS) throw new Invalid("O valor final da cobrança passa do limite suportado (R$ 99.999.999.999,99)");
     const [r] = await x.insert(chargeAdjustments).values({ companyId, contractId: i.contractId, competenceMonth: `${i.competence}-01`, kind: i.kind, description, amount: numericFromCents(cents), createdBy: actorId }).returning({ id: chargeAdjustments.id });
     await audit(x, companyId, actorId, "billing.adjustment.added", { adjustmentId: r.id, contractId: i.contractId, competence: i.competence, kind: i.kind });
     return r.id;
@@ -90,11 +92,11 @@ export async function removeAdjustment(db: DB, actorId: string, companyId: strin
   await db.transaction(async (tx) => {
     const x = tx as unknown as DB;
     await lockCompany(x, companyId);
-    const [a] = await x.select().from(chargeAdjustments).where(and(eq(chargeAdjustments.id, id), eq(chargeAdjustments.companyId, companyId)));
+    const [a] = await x.select().from(chargeAdjustments).where(and(eq(chargeAdjustments.id, id), eq(chargeAdjustments.companyId, companyId), isNull(chargeAdjustments.removedAt)));
     if (!a) throw new Invalid("Ajuste não encontrado");
     const [locked] = await x.select({ id: charges.id }).from(charges).where(and(eq(charges.companyId, companyId), eq(charges.contractId, a.contractId), eq(charges.competenceMonth, a.competenceMonth), eq(charges.status, "aprovada")));
     if (locked) throw new Invalid("A cobrança desta competência já está em lote aprovado: reabra o lote para ajustar");
-    await x.delete(chargeAdjustments).where(eq(chargeAdjustments.id, id));
+    await x.update(chargeAdjustments).set({ removedBy: actorId, removedAt: new Date(), updatedAt: new Date() }).where(eq(chargeAdjustments.id, id)); // não apaga: fica no histórico
     await audit(x, companyId, actorId, "billing.adjustment.removed", { adjustmentId: id, contractId: a.contractId, competence: a.competenceMonth.slice(0, 7), kind: a.kind });
   });
 }

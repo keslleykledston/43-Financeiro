@@ -249,6 +249,7 @@ export const charges = pgTable("charges", {
   amount: numeric("amount", { precision: 18, scale: 2 }).notNull(), // valor da cobrança = base + ajustes
   baseAmount: numeric("base_amount", { precision: 18, scale: 2 }).notNull(), // valor fixo do contrato no momento da prévia
   adjustmentAmount: numeric("adjustment_amount", { precision: 18, scale: 2 }).notNull().default("0"), // excedente/acréscimo (+) e desconto (−) da competência
+  adjustmentDetail: jsonb("adjustment_detail").notNull().default(sql`'[]'::jsonb`), // SNAPSHOT dos itens (tipo, descrição, valor) que compõem o ajuste: o aprovador aprova exatamente isto
   jointInvoice: boolean("joint_invoice").notNull().default(false),
   warnings: jsonb("warnings").notNull().default(sql`'[]'::jsonb`),
   status: text("status").notNull().default("previa"), // previa | aprovada | cancelada
@@ -641,8 +642,11 @@ export const chargeAdjustments = pgTable("charge_adjustments", {
   description: text("description").notNull(),
   amount: numeric("amount", { precision: 18, scale: 2 }).notNull(), // sempre positivo; o sinal vem do tipo
   createdBy: uuid("created_by").notNull().references(() => users.id),
+  removedBy: uuid("removed_by").references(() => users.id), // remover NÃO apaga: o ajuste fica no histórico, fora do cálculo
+  removedAt: timestamp("removed_at", { withTimezone: true }),
 }, (t) => [
   foreignKey({ columns: [t.companyId, t.contractId], foreignColumns: [contracts.companyId, contracts.id] }),
+  check("charge_adjustments_removed_chk", sql`(${t.removedBy} is null) = (${t.removedAt} is null)`),
   index("charge_adjustments_idx").on(t.companyId, t.contractId, t.competenceMonth),
   check("charge_adjustments_kind_chk", sql`${t.kind} in ('excedente', 'acrescimo', 'desconto')`),
   check("charge_adjustments_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),

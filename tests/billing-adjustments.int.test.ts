@@ -96,10 +96,17 @@ describe.skipIf(!enabled)("E05c ajustes da competência (excedente/acréscimo/de
     const g2 = (await getBatch(db, asstA, A, batchId))!;
     expect(g2.stale.any).toBe(false); expect(g2.hash).not.toBe(h0);
     expect(g2.charges.find((x) => x.contractId === k1)!.amountCents).toBe(291264);
-    // trocar por outro ajuste de mesmo total ainda é detectado como mudança (composição faz parte da assinatura)
+    // trocar os ITENS por outros de mesmo total é detectado: o aprovador não aprova uma composição diferente da que viu
     const id = (await listCompetence(db, contA, A, COMP)).find((r) => r.contractId === k1)!.adjustments[0].id;
     await removeAdjustment(db, asstA, A, id); await adj({ kind: "acrescimo", description: "Outro motivo", amount: "412,64" });
-    expect((await getBatch(db, asstA, A, batchId))!.stale.any).toBe(false); // mesmo total e mesmo líquido: nada mudou para cobrar
+    const g3 = (await getBatch(db, asstA, A, batchId))!;
+    expect(g3.stale).toMatchObject({ changed: 1, any: true });
+    await expect(approveBatch(db, dirA, A, batchId, g3.hash)).rejects.toThrow(/contratos mudaram/);
+    await generateBatch(db, asstA, A, D);
+    const g4 = (await getBatch(db, asstA, A, batchId))!;
+    expect(g4.stale.any).toBe(false); expect(g4.hash).not.toBe(g2.hash);
+    expect(g4.charges.find((x) => x.contractId === k1)!.adjustments.map((a) => a.description)).toEqual(["Outro motivo"]); // a tela mostra o snapshot salvo
+    await approveBatch(db, dirA, A, batchId, g4.hash);
   });
 
   it("aprovado trava: não adiciona, não remove, nem por SQL; reabrir libera; valor final nunca zera", async () => {
@@ -138,7 +145,19 @@ describe.skipIf(!enabled)("E05c ajustes da competência (excedente/acréscimo/de
     expect(logs.map((l) => l.action)).toEqual(["billing.adjustment.added", "billing.adjustment.removed"]);
     const txt = JSON.stringify(logs.map((l) => l.detail));
     for (const bad of ["SEGREDO", "412", "Cliente Um", "Excedente de minutos"]) expect(txt).not.toContain(bad);
-    expect(await n("charge_adjustments")).toBe(0);
+    expect(await n("charge_adjustments where removed_at is null")).toBe(0);
+    expect(await n("charge_adjustments")).toBe(1); // remover não apaga: o ajuste fica no histórico, fora do cálculo
+    const row = (await db.select().from(schema.chargeAdjustments))[0];
+    expect(row).toMatchObject({ description: "SEGREDO do cliente", amount: "412.64", removedBy: asstA });
+    await expect(removeAdjustment(db, asstA, A, id)).rejects.toThrow(/não encontrado/); // já removido
+    await expect(db.execute(sql`update charge_adjustments set removed_at = null, removed_by = null`)).rejects.toThrow(); // não volta
+    await expect(db.execute(sql`update charge_adjustments set description = 'x'`)).rejects.toThrow();
+    expect((await listCompetence(db, contA, A, COMP)).find((r) => r.contractId === k1)).toMatchObject({ adjustmentCents: 0, adjustments: [] });
+  });
+
+  it("teto do valor: ajuste que estouraria o limite é recusado ao lançar", async () => {
+    await expect(adj({ amount: "99.999.999.999,99" })).rejects.toThrow(/limite suportado/);
+    expect((await listCompetence(db, contA, A, COMP)).find((r) => r.contractId === k1)!.adjustments).toEqual([]);
   });
 
   it("aprovação × ajuste simultâneo: o ajuste espera a aprovação e depois é recusado (nunca fica ajuste sem cobrança correspondente)", async () => {

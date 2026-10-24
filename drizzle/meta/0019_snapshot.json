@@ -1,5 +1,5 @@
 {
-  "id": "681d1b78-5124-4f72-b7a0-d5202075845e",
+  "id": "75314c59-ba93-402d-b5c9-4c22cec2a39c",
   "prevId": "ee89689b-77de-4d17-a5e8-6ed73a269759",
   "version": "7",
   "dialect": "postgresql",
@@ -1455,6 +1455,18 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
+        },
+        "removed_by": {
+          "name": "removed_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "removed_at": {
+          "name": "removed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -1513,6 +1525,19 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "charge_adjustments_removed_by_users_id_fk": {
+          "name": "charge_adjustments_removed_by_users_id_fk",
+          "tableFrom": "charge_adjustments",
+          "tableTo": "users",
+          "columnsFrom": [
+            "removed_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "charge_adjustments_company_id_contract_id_contracts_company_id_id_fk": {
           "name": "charge_adjustments_company_id_contract_id_contracts_company_id_id_fk",
           "tableFrom": "charge_adjustments",
@@ -1533,6 +1558,10 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "charge_adjustments_removed_chk": {
+          "name": "charge_adjustments_removed_chk",
+          "value": "(\"charge_adjustments\".\"removed_by\" is null) = (\"charge_adjustments\".\"removed_at\" is null)"
+        },
         "charge_adjustments_kind_chk": {
           "name": "charge_adjustments_kind_chk",
           "value": "\"charge_adjustments\".\"kind\" in ('excedente', 'acrescimo', 'desconto')"
@@ -1643,6 +1672,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'0'"
+        },
+        "adjustment_detail": {
+          "name": "adjustment_detail",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
         },
         "joint_invoice": {
           "name": "joint_invoice",

@@ -18,10 +18,13 @@ export type BatchStatus = "rascunho" | "aprovado" | "cancelado";
 type Row = typeof charges.$inferSelect;
 
 const isoDate = isIsoDate;
-const sigOf = (v: { dueDate: string; issueDate: string; cents: number; adj: number; description: string; joint: boolean; warnings: readonly string[] }) => `${v.dueDate}|${v.issueDate}|${v.cents}|${v.adj}|${v.description}|${v.joint ? 1 : 0}|${[...v.warnings].sort().join(",")}`;
+const sigOf = (v: { dueDate: string; issueDate: string; cents: number; adj: number; det: string; description: string; joint: boolean; warnings: readonly string[] }) => `${v.dueDate}|${v.issueDate}|${v.cents}|${v.adj}|${v.det}|${v.description}|${v.joint ? 1 : 0}|${[...v.warnings].sort().join(",")}`;
+type DetailItem = { kind: string; description: string; amountCents: number };
+/** Assinatura dos ITENS do ajuste: aprovar uma composição diferente da vista (mesmo total, itens trocados) é detectado. */
+const detOf = (d: DetailItem[]) => JSON.stringify(d.map((x) => [x.kind, x.description, x.amountCents]));
 const keyOf = (contractId: string, competenceMonth: string) => `${contractId}|${competenceMonth.slice(0, 7)}`;
-const rowSig = (r: Row) => sigOf({ dueDate: r.dueDate, issueDate: r.issueDate, cents: centsFromNumeric(r.amount), adj: centsFromSignedNumeric(r.adjustmentAmount), description: r.description, joint: r.jointInvoice, warnings: r.warnings as string[] });
-const itemSig = (i: CalendarItem) => sigOf({ dueDate: i.dueDate!, issueDate: i.issueDate!, cents: i.amountCents, adj: i.adjustmentCents ?? 0, description: i.description, joint: i.jointInvoice, warnings: i.warnings });
+const rowSig = (r: Row) => sigOf({ dueDate: r.dueDate, issueDate: r.issueDate, cents: centsFromNumeric(r.amount), adj: centsFromSignedNumeric(r.adjustmentAmount), det: detOf(r.adjustmentDetail as DetailItem[]), description: r.description, joint: r.jointInvoice, warnings: r.warnings as string[] });
+const itemSig = (i: CalendarItem) => sigOf({ dueDate: i.dueDate!, issueDate: i.issueDate!, cents: i.amountCents, adj: i.adjustmentCents ?? 0, det: detOf(i.adjustmentDetail ?? []), description: i.description, joint: i.jointInvoice, warnings: i.warnings });
 
 /** Hash do conteúdo do lote: o aprovador aprova exatamente o que viu. */
 export const hashCharges = (rows: Row[]) => createHash("sha256").update(rows.map((r) => `${keyOf(r.contractId, r.competenceMonth)}|${rowSig(r)}`).sort().join("\n")).digest("hex");
@@ -37,7 +40,7 @@ async function eligible(x: DB, companyId: string, issueDate: string) {
   }
   // ajustes da competência (excedente, acréscimo, desconto): valor da cobrança = valor do contrato + ajustes
   const adj = await adjustmentsFor(x, companyId, items.map((i) => ({ contractId: i.contractId, competence: i.competenceMonth })));
-  for (const i of items) { const a = adj.get(keyOf(i.contractId, i.competenceMonth))?.totalCents ?? 0; i.baseCents = i.amountCents; i.adjustmentCents = a; i.amountCents = i.baseCents + a; }
+  for (const i of items) { const a = adj.get(keyOf(i.contractId, i.competenceMonth))?.totalCents ?? 0; i.baseCents = i.amountCents; i.adjustmentCents = a; i.amountCents = i.baseCents + a; i.adjustmentDetail = adj.get(keyOf(i.contractId, i.competenceMonth))?.items.map((x) => ({ kind: x.kind, description: x.description, amountCents: x.amountCents })) ?? []; }
   return { items, exceptions };
 }
 
@@ -97,7 +100,7 @@ export async function generateBatch(db: DB, actorId: string, companyId: string, 
       }
       want.add(k);
       const cur = ownBy.get(k);
-      const values = { dueDate: i.dueDate!, issueDate: i.issueDate!, description: i.description, amount: numericFromCents(i.amountCents), baseAmount: numericFromCents(i.baseCents ?? i.amountCents), adjustmentAmount: numericFromSignedCents(i.adjustmentCents ?? 0), jointInvoice: i.jointInvoice, warnings: i.warnings };
+      const values = { dueDate: i.dueDate!, issueDate: i.issueDate!, description: i.description, amount: numericFromCents(i.amountCents), baseAmount: numericFromCents(i.baseCents ?? i.amountCents), adjustmentAmount: numericFromSignedCents(i.adjustmentCents ?? 0), adjustmentDetail: i.adjustmentDetail ?? [], jointInvoice: i.jointInvoice, warnings: i.warnings };
       if (!cur) { await x.insert(charges).values({ companyId, batchId: b.id, contractId: i.contractId, customerId: i.customerId, competenceMonth: `${i.competenceMonth}-01`, ...values, status: "previa" }); added++; }
       else if (rowSig(cur) !== itemSig(i)) { await x.update(charges).set({ ...values, updatedAt: new Date() }).where(and(eq(charges.id, cur.id), eq(charges.companyId, companyId))); updated++; }
     }
@@ -131,12 +134,11 @@ export async function getBatch(db: DB, actorId: string, companyId: string, id: s
     .innerJoin(customers, and(eq(customers.id, charges.customerId), eq(customers.companyId, charges.companyId)))
     .where(and(eq(charges.companyId, companyId), eq(charges.batchId, b.id))).orderBy(asc(customers.legalName));
   const cs = rows.map((r) => r.c);
-  const adjs = await adjustmentsFor(db, companyId, rows.map((r) => ({ contractId: r.c.contractId, competence: r.c.competenceMonth })));
   const live = b.status === "cancelado" ? { items: [], exceptions: [] } : await eligible(db, companyId, b.issueDate);
   const d = diff(cs, live.items);
   return {
     batch: b,
-    charges: rows.map((r) => ({ ...r.c, amountCents: centsFromNumeric(r.c.amount), baseCents: centsFromNumeric(r.c.baseAmount), adjustmentCents: centsFromSignedNumeric(r.c.adjustmentAmount), adjustments: adjs.get(keyOf(r.c.contractId, r.c.competenceMonth))?.items ?? [], customerName: r.customerName })),
+    charges: rows.map((r) => ({ ...r.c, amountCents: centsFromNumeric(r.c.amount), baseCents: centsFromNumeric(r.c.baseAmount), adjustmentCents: centsFromSignedNumeric(r.c.adjustmentAmount), adjustments: (r.c.adjustmentDetail as DetailItem[]), customerName: r.customerName })),
     totalCents: cs.reduce((s, c) => s + centsFromNumeric(c.amount), 0),
     hash: hashCharges(cs),
     stale: b.status === "cancelado" ? { added: 0, removed: 0, changed: 0, any: false } : d, // contratos mudaram desde a prévia/aprovação

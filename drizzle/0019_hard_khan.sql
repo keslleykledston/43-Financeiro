@@ -9,6 +9,9 @@ CREATE TABLE "charge_adjustments" (
 	"description" text NOT NULL,
 	"amount" numeric(18, 2) NOT NULL,
 	"created_by" uuid NOT NULL,
+	"removed_by" uuid,
+	"removed_at" timestamp with time zone,
+	CONSTRAINT "charge_adjustments_removed_chk" CHECK (("charge_adjustments"."removed_by" is null) = ("charge_adjustments"."removed_at" is null)),
 	CONSTRAINT "charge_adjustments_kind_chk" CHECK ("charge_adjustments"."kind" in ('excedente', 'acrescimo', 'desconto')),
 	CONSTRAINT "charge_adjustments_amount_chk" CHECK ("charge_adjustments"."amount" > 0 and "charge_adjustments"."amount" <= 99999999999.99),
 	CONSTRAINT "charge_adjustments_text_chk" CHECK (char_length("charge_adjustments"."description") between 2 and 120),
@@ -19,10 +22,12 @@ ALTER TABLE "charges" ADD COLUMN "base_amount" numeric(18, 2);--> statement-brea
 UPDATE "charges" SET "base_amount" = "amount";--> statement-breakpoint
 ALTER TABLE "charges" ALTER COLUMN "base_amount" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "charges" ADD COLUMN "adjustment_amount" numeric(18, 2) DEFAULT '0' NOT NULL;--> statement-breakpoint
+ALTER TABLE "charges" ADD COLUMN "adjustment_detail" jsonb DEFAULT '[]'::jsonb NOT NULL;--> statement-breakpoint
 ALTER TABLE "payments" ADD COLUMN "interest_amount" numeric(18, 2) DEFAULT '0' NOT NULL;--> statement-breakpoint
 ALTER TABLE "payments" ADD COLUMN "discount_amount" numeric(18, 2) DEFAULT '0' NOT NULL;--> statement-breakpoint
 ALTER TABLE "charge_adjustments" ADD CONSTRAINT "charge_adjustments_company_id_companies_id_fk" FOREIGN KEY ("company_id") REFERENCES "public"."companies"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "charge_adjustments" ADD CONSTRAINT "charge_adjustments_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "charge_adjustments" ADD CONSTRAINT "charge_adjustments_removed_by_users_id_fk" FOREIGN KEY ("removed_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "charge_adjustments" ADD CONSTRAINT "charge_adjustments_company_id_contract_id_contracts_company_id_id_fk" FOREIGN KEY ("company_id","contract_id") REFERENCES "public"."contracts"("company_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "charge_adjustments_idx" ON "charge_adjustments" USING btree ("company_id","contract_id","competence_month");--> statement-breakpoint
 ALTER TABLE "charges" ADD CONSTRAINT "charges_composition_chk" CHECK ("charges"."amount" = "charges"."base_amount" + "charges"."adjustment_amount");--> statement-breakpoint
@@ -30,13 +35,18 @@ ALTER TABLE "payments" ADD CONSTRAINT "payments_extras_chk" CHECK ("payments"."i
 --> statement-breakpoint
 -- Ajustes da competência: sem edição; só entram/saem enquanto NÃO há cobrança aprovada da competência; no máximo 10 por contrato/competência.
 CREATE FUNCTION charge_adjustments_guard() RETURNS trigger AS $$
-DECLARE r charge_adjustments%ROWTYPE;
 BEGIN
-  IF TG_OP = 'UPDATE' THEN RAISE EXCEPTION 'adjustment_immutable'; END IF;
-  r := CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
-  IF EXISTS (SELECT 1 FROM charges WHERE company_id = r.company_id AND contract_id = r.contract_id AND competence_month = r.competence_month AND status = 'aprovada') THEN RAISE EXCEPTION 'adjustment_locked'; END IF;
-  IF TG_OP = 'INSERT' AND (SELECT count(*) FROM charge_adjustments WHERE company_id = r.company_id AND contract_id = r.contract_id AND competence_month = r.competence_month) >= 10 THEN RAISE EXCEPTION 'adjustment_too_many'; END IF;
-  RETURN r;
+  IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'adjustment_undeletable'; END IF;
+  IF TG_OP = 'UPDATE' THEN
+    -- só é possível MARCAR como removido (uma vez), sem tocar no conteúdo
+    IF OLD.removed_at IS NOT NULL OR NEW.removed_at IS NULL OR NEW.company_id <> OLD.company_id OR NEW.contract_id <> OLD.contract_id OR NEW.competence_month <> OLD.competence_month
+       OR NEW.kind <> OLD.kind OR NEW.description <> OLD.description OR NEW.amount <> OLD.amount OR NEW.created_by <> OLD.created_by THEN
+      RAISE EXCEPTION 'adjustment_immutable';
+    END IF;
+  END IF;
+  IF EXISTS (SELECT 1 FROM charges WHERE company_id = NEW.company_id AND contract_id = NEW.contract_id AND competence_month = NEW.competence_month AND status = 'aprovada') THEN RAISE EXCEPTION 'adjustment_locked'; END IF;
+  IF TG_OP = 'INSERT' AND (SELECT count(*) FROM charge_adjustments WHERE company_id = NEW.company_id AND contract_id = NEW.contract_id AND competence_month = NEW.competence_month AND removed_at IS NULL) >= 10 THEN RAISE EXCEPTION 'adjustment_too_many'; END IF;
+  RETURN NEW;
 END $$ LANGUAGE plpgsql;
 --> statement-breakpoint
 CREATE TRIGGER charge_adjustments_guard_trg BEFORE INSERT OR UPDATE OR DELETE ON charge_adjustments FOR EACH ROW EXECUTE FUNCTION charge_adjustments_guard();
