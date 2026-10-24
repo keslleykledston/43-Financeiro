@@ -16,6 +16,7 @@ export type Entry = {
   block: Block; month: string; // YYYY-MM da aba
   name: string; documentRaw: string; grossCents: number | null; netCents: number | null; planoCents: number | null; excedenteCents: number | null;
   dueDay: number | null; service: string; obs: string; email: string; contact: string;
+  sheet: string; row: number; // aba e linha (1 = primeira) de onde veio: rastreabilidade do histórico
   dueOn: string | null; paidOn: string | null; // datas completas (AAAA-MM-DD) do vencimento e do pagamento, quando a célula tem data; servem ao histórico
 };
 
@@ -79,8 +80,9 @@ export function isoDateOf(v: Cell): string | null {
   else if (typeof v === "number" && v > 20000 && v < 80000) d = new Date(Math.round((v - 25569) * 86400000));
   else if (typeof v === "string") {
     const a = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v.trim()), b = /^(\d{4})-(\d{2})-(\d{2})/.exec(v.trim());
-    if (a) d = new Date(Date.UTC(Number(a[3]), Number(a[2]) - 1, Number(a[1])));
-    else if (b) d = new Date(Date.UTC(Number(b[1]), Number(b[2]) - 1, Number(b[3])));
+    const real = (y: number, m: number, day: number) => { const t = new Date(Date.UTC(y, m - 1, day)); return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === day ? t : null; }; // 31/02 não vira março: é inválida
+    if (a) d = real(Number(a[3]), Number(a[2]), Number(a[1]));
+    else if (b) d = real(Number(b[1]), Number(b[2]), Number(b[3]));
   }
   if (!d) return null;
   const y = d.getUTCFullYear();
@@ -126,7 +128,7 @@ export function readSheet(sheet: Sheet, year: number): Entry[] {
         out.push({
           block, month, name, documentRaw: text(get("doc")), grossCents: gross, netCents: net, planoCents: plano, excedenteCents: cents(get("excedente")),
           dueDay: dayOf(get("due")), service: text(get("service")), obs: text(get("obs")), email: text(get("email")), contact: text(get("contact")),
-          dueOn: isoDateOf(get("due")), paidOn: isoDateOf(get("paid")),
+          sheet: sheet.name, row: i + 1, dueOn: isoDateOf(get("due")), paidOn: isoDateOf(get("paid")),
         });
       }
     });

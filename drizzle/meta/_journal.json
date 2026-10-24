@@ -197,6 +197,13 @@
       "when": 1792878439136,
       "tag": "0027_previous_meteorite",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1792881216282,
+      "tag": "0028_chief_millenium_guard",
+      "breakpoints": true
     }
   ]
 }

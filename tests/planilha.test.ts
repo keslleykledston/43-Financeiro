@@ -29,7 +29,7 @@ describe("planilha de boletos → contratos (dados fictícios)", () => {
     expect(isoDateOf(46036)).toBe("2026-01-14");
     expect(isoDateOf("14/01/2026")).toBe("2026-01-14");
     expect(isoDateOf("2026-01-14T00:00:00Z")).toBe("2026-01-14");
-    expect(isoDateOf("pago")).toBeNull(); expect(isoDateOf("")).toBeNull(); expect(isoDateOf(null)).toBeNull(); expect(isoDateOf(5)).toBeNull(); expect(isoDateOf("01/01/1900")).toBeNull();
+    expect(isoDateOf("31/02/2026")).toBeNull(); expect(isoDateOf("2026-02-30")).toBeNull(); expect(isoDateOf("29/02/2028")).toBe("2028-02-29"); expect(isoDateOf("pago")).toBeNull(); expect(isoDateOf("")).toBeNull(); expect(isoDateOf(null)).toBeNull(); expect(isoDateOf(5)).toBeNull(); expect(isoDateOf("01/01/1900")).toBeNull();
     expect(brl(120000)).toBe("1.200,00");
     expect(brl(5)).toBe("0,05");
     expect(firstEmail("a@x.com; b@x.com")).toBe("a@x.com");

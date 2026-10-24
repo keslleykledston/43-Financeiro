@@ -26,4 +26,6 @@
 **Git:** branch main; sem tag/force.
 **E22 (conta de e-mail SMTP + contabilidade/dados fiscais, migração 0026):** SANDBOX PASS 381 unit/int + 97 e2e; revisão Codex feita (0 P0/P1; 1 P2 corrigido, 2 P2 aceitos para o adaptador real, ver agent/reviews/2026-10-24-codex-e22-email-e-contabilidade.md); DEPLOYADO (migração 0026, backup k3gfinance-20261024T212714Z). Nada é enviado; nenhuma conta nem dado fiscal cadastrado ainda.
 **E23 (adaptador de e-mail REAL, canário, migração 0027):** SANDBOX PASS 401 unit/int + 98 e2e; revisão Codex feita (2 P1 + 1 P2 corrigidos, ver agent/reviews/2026-10-24-codex-e23-email-real-canario.md); DEPLOYADO (migração 0027, backup k3gfinance-20261024T220238Z, nodemailer 8 na imagem). **DESLIGADO** (ADR-020): EMAIL_EXTERNAL_ENABLED="false" no compose (verificado no container), 0 autorizações, 0 envios reais, 0 contas SMTP. Ligar só com autorização escrita do dono (docs/E10_GOLIVE.md).
+**H1 (histórico da planilha, staging + relatório, migração 0028):** implementado em 2026-10-24 (ADR-021). Falta: sandbox PASS, revisão Codex, deploy e importação (prévia → confirmar).
+**Cliente 19.534.417 LTDA (consulta ao CRM, só leitura, 2026-10-24):** no CRM: name "GR PLUS SOLUTIONS", razaoSocial "19.534.417 LTDA", CNPJ 19.534.417/0001-62, ACTIVE, Manaus/AM. Ou seja, o cadastro daqui é igual ao do CRM; não há "outro nome" no CRM.
 

@@ -900,3 +900,53 @@ export const emailSendLog = pgTable("email_send_log", {
   check("email_send_log_status_chk", sql`${t.status} in ('enviando', 'enviado', 'falhou', 'desconhecido')`),
   check("email_send_log_finished_chk", sql`(${t.status} = 'enviando') = (${t.finishedAt} is null)`),
 ]);
+
+// H1 — histórico a partir da planilha de boletos (docs/HISTORICO_E_CAIXA.md). STAGING imutável: cada linha da planilha como veio, por empresa. NÃO é cobrança nem
+// contrato: nada aqui alimenta lotes, régua, emissão, contas a receber ou painel. Serve ao relatório de divergências e (H2/H3, com autorização própria) à carga histórica.
+export const legacyImports = pgTable("legacy_imports", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  fileSha256: text("file_sha256").notNull(), // identifica o arquivo: reimportar o mesmo arquivo não duplica
+  fileLabel: text("file_label").notNull(),
+  year: integer("year").notNull(),
+  rowCount: integer("row_count").notNull(),
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+}, (t) => [
+  uniqueIndex("legacy_imports_file_uq").on(t.companyId, t.fileSha256),
+  unique("legacy_imports_company_id_uq").on(t.companyId, t.id),
+  check("legacy_imports_sha_chk", sql`${t.fileSha256} ~ '^[0-9a-f]{64}$'`),
+  check("legacy_imports_year_chk", sql`${t.year} between 2000 and 2100`),
+]);
+
+export const legacyBillingRows = pgTable("legacy_billing_rows", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  companyId: uuid("company_id").notNull(),
+  importId: uuid("import_id").notNull(),
+  sheet: text("sheet").notNull(), // nome da aba
+  rowNumber: integer("row_number").notNull(), // linha na aba (1 = primeira)
+  month: text("month").notNull(), // YYYY-MM da aba = mês do VENCIMENTO
+  customerName: text("customer_name").notNull(),
+  documentRaw: text("document_raw").notNull(),
+  document: text("document"), // normalizado e validado; nulo se faltando/inválido
+  customerId: uuid("customer_id"), // cliente da empresa com este documento, quando já existe (informativo)
+  block: text("block").notNull(), // solutions (valor bruto) | call (plano + excedente): decide como o valor da cobrança é calculado
+  amount: numeric("amount", { precision: 18, scale: 2 }).notNull(), // valor da cobrança pela regra do bloco (guardado, para o relatório não recalcular)
+  service: text("service"),
+  observation: text("observation"),
+  grossAmount: numeric("gross_amount", { precision: 18, scale: 2 }), // VALOR BRUTO (Solutions)
+  planAmount: numeric("plan_amount", { precision: 18, scale: 2 }), // Plano (Call)
+  excessAmount: numeric("excess_amount", { precision: 18, scale: 2 }), // Excedente (Call)
+  netAmount: numeric("net_amount", { precision: 18, scale: 2 }), // LÍQUIDO (o que entrou, com juros/descontos)
+  dueOn: date("due_on", { mode: "string" }),
+  paidOn: date("paid_on", { mode: "string" }),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.importId], foreignColumns: [legacyImports.companyId, legacyImports.id] }).onDelete("cascade"),
+  foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
+  uniqueIndex("legacy_rows_pos_uq").on(t.importId, t.sheet, t.rowNumber),
+  index("legacy_rows_company_month_idx").on(t.companyId, t.month),
+  check("legacy_rows_month_chk", sql`${t.month} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+  check("legacy_rows_block_chk", sql`${t.block} in ('solutions', 'call') and ${t.amount} >= 0`),
+  check("legacy_rows_amounts_chk", sql`coalesce(${t.grossAmount}, 0) >= 0 and coalesce(${t.planAmount}, 0) >= 0 and coalesce(${t.excessAmount}, 0) >= 0 and coalesce(${t.netAmount}, 0) >= 0`),
+]);
+

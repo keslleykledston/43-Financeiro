@@ -150,3 +150,10 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [ ] Tratamento de e-mail devolvido (bounce) e cabeçalhos de lista (List-Unsubscribe) antes de sair do canário.
 - [ ] Envio automático real pelo scheduler: hoje PROIBIDO de propósito (Codex E23 P1); só reabrir com decisão do dono depois do canário.
 
+## H1 — Histórico da planilha: staging + divergências (2026-10-24, ADR-021)
+- [x] Tabelas `legacy_imports`/`legacy_billing_rows` (migração 0028), script `ops-import-legacy`, tela /historico (por aba, caixa por mês de pagamento, divergências, CSV), artigo de ajuda.
+- [ ] Dono revisar as divergências (CSV) — principalmente CNPJ ausente/inválido, fora do cadastro, vencimento fora da aba, pagamentos >120 dias.
+- [ ] H2: linha do tempo de clientes/contratos (entrou, mudou valor/vencimento, suspenso, voltou, saiu) inferida do staging; corrigir início de vigência; gerar aditivos "inferidos da planilha".
+- [ ] H3: cobranças e baixas históricas (origin = 'historico', lote próprio fora da emissão/régua) — NOVA autorização escrita do dono.
+- [ ] H4: caixa por data de pagamento + conferência com extrato real da Cora (falta amostra CSV/OFX) e despesas (dono envia depois).
+
