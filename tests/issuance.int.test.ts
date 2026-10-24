@@ -342,4 +342,25 @@ describe.skipIf(!enabled)("E10 motor de emissão (simulado): reservar → chamar
     await expect(cancelIssuance(db, dirB, B, id)).rejects.toThrow(/ainda não foi enviada/);
     expect((await processIssuance(db, dirB, B, NOW, spy().p))).toMatchObject({ claimed: 0 });
   });
+
+  it("E26: o texto da nota e do boleto e o endereço do CLIENTE chegam ao provedor; sem texto vale a descrição do contrato; razão social segue na emissão", async () => {
+    await approvedBatch(); await on(false);
+    await db.update(schema.customers).set({ nfText: "Serviços de {{descricao}} — competência {{competencia}}", boletoText: "Vence {{vencimento}}. Não receber após 10 dias.", cep: "69000000", street: "Av. Exemplo", streetNumber: "100", cityName: "Manaus", cityIbge: "1302603", uf: "AM", tradeName: "Nome Fantasia" }).where(eq(schema.customers.id, cli1));
+    const seen: { boleto: unknown[]; nfse: unknown[] } = { boleto: [], nfse: [] };
+    const base = createMockProviders();
+    const p: Providers = { ...base, boleto: { ...base.boleto, issue: async (i) => { seen.boleto.push(i); return base.boleto.issue(i); } }, nfse: { ...base.nfse, issue: async (i) => { seen.nfse.push(i); return base.nfse.issue(i); } } };
+    const c1 = await chargeOf(cli1), c2 = await chargeOf(cli2);
+    for (const c of [c1, c2]) { await requestIssuance(db, gerA, A, c.id, "boleto"); await requestIssuance(db, gerA, A, c.id, "nfse"); }
+    await processIssuance(db, gerA, A, NOW, p);
+    const b1 = seen.boleto.find((x) => (x as { customerName: string }).customerName === "Cliente Um") as Record<string, unknown>;
+    const n1 = seen.nfse.find((x) => (x as { customerName: string }).customerName === "Cliente Um") as Record<string, unknown>;
+    const n2 = seen.nfse.find((x) => (x as { customerName: string }).customerName === "Cliente Dois") as Record<string, unknown>;
+    const b2 = seen.boleto.find((x) => (x as { customerName: string }).customerName === "Cliente Dois") as Record<string, unknown>;
+    expect(b1.instructions).toBe("Vence 14/10/2026. Não receber após 10 dias.");
+    expect(n1.description).toBe("Serviços de Monitoramento de redes — competência 09/2026");
+    expect(n1.customerAddress).toMatchObject({ cep: "69000000", street: "Av. Exemplo", number: "100", city: "Manaus", cityIbge: "1302603", uf: "AM" });
+    expect(n1.customerName).toBe("Cliente Um"); // razão social, não o fantasia
+    expect(n2.description).toBe("Monitoramento de redes"); expect(b2.instructions).toBeUndefined();
+  });
 });
+

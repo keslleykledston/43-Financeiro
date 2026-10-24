@@ -15,7 +15,7 @@ export interface WhatsappProvider {
   send(m: { to: string; text: string; idempotencyKey: string }): Promise<SendResult>;
 }
 
-export type BoletoInput = { idempotencyKey: string; amountCents: number; dueDate: string; customerName: string; customerDocument: string };
+export type BoletoInput = { idempotencyKey: string; amountCents: number; dueDate: string; customerName: string; customerDocument: string; /** texto/instruções do boleto deste cliente (E26), já com os campos preenchidos */ instructions?: string };
 export type BoletoResult = { providerRef: string; status: "emitido" | "pago" | "cancelado"; digitableLineMasked: string };
 /** Cora: SOMENTE boletos (emitir, consultar situação, segunda via e cancelar — o cancelamento só pela diretoria, com motivo e registro). Sem pagamento, transferência, saldo/extrato (escopo do dono, 2026-10-24; ver CORA_SCOPE e ADR-017). */
 export interface BoletoProvider { // Cora (boletos v2)
@@ -28,7 +28,9 @@ export interface BoletoProvider { // Cora (boletos v2)
   cancel(ref: string): Promise<void>;
 }
 
-export type NfseInput = { idempotencyKey: string; amountCents: number; competence: string; customerName: string; customerDocument: string; description: string };
+export type NfseAddress = { cep: string | null; street: string | null; number: string | null; complement: string | null; district: string | null; city: string | null; cityIbge: string | null; uf: string | null };
+/** `description` = texto da nota do cliente (E26) ou, sem ele, a descrição do contrato. `customerAddress` = endereço do tomador cadastrado no cliente. */
+export type NfseInput = { idempotencyKey: string; amountCents: number; competence: string; customerName: string; customerDocument: string; description: string; customerAddress?: NfseAddress };
 export interface NfseProvider { // NFS-e da Cora (beta)
   readonly mode: "mock" | "live";
   issue(i: NfseInput): Promise<{ providerRef: string; status: "processando" | "emitida" | "rejeitada" }>;

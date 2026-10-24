@@ -1,6 +1,6 @@
 import { CircleHelp, HandCoins, History, Landmark, FileText, LayoutDashboard, MessageSquare, Plug, Receipt, ReceiptText, Settings, Users, Wallet, type LucideIcon } from "lucide-react";
 
-export interface NavItem { label: string; href: string; icon: LucideIcon; soon?: boolean; mobile?: boolean }
+export interface NavItem { label: string; href: string; icon: LucideIcon; soon?: boolean; mobile?: boolean; /** outros caminhos que também marcam este item como ativo (ex.: /empresa dentro de Configurações) */ also?: string[] }
 
 /** `soon`: a tela existe com estado vazio útil, mas a entrega ainda não chegou (etiqueta "em breve"). */
 export const NAV: NavItem[] = [
@@ -16,5 +16,5 @@ export const NAV: NavItem[] = [
   { label: "Histórico", href: "/historico", icon: History },
   { label: "Integrações", href: "/integracoes", icon: Plug, mobile: true },
   { label: "Ajuda", href: "/ajuda", icon: CircleHelp },
-  { label: "Ajustes", href: "/configuracao", icon: Settings, mobile: true },
+  { label: "Configurações", href: "/configuracao", icon: Settings, mobile: true, also: ["/empresa", "/auditoria"] },
 ];

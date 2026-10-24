@@ -84,5 +84,5 @@ export async function noteAction(fd: FormData) {
   let err = "";
   try { const c = await ctx(); await addNote(db, c.userId, c.companyId, { customerId: partyId }, String(fd.get("body") ?? "")); } catch (e) { err = msg(e); }
   revalidatePath(`/clientes/${partyId}`);
-  redirect(`/clientes/${partyId}${err ? `?erro=${encodeURIComponent(err)}` : ""}#comentarios`);
+  redirect(`/clientes/${partyId}?${err ? `erro=${encodeURIComponent(err)}&` : ""}aba=anotacoes#comentarios`);
 }

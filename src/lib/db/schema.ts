@@ -95,12 +95,20 @@ export const customers = pgTable("customers", {
   // Nome para MOSTRAR (E25, pedido do dono): quando a razão social é só o número do CNPJ (ex.: "19.534.417 LTDA") e há nome fantasia, mostra o fantasia.
   // A razão social segue intacta em `legal_name` e é a usada em boleto/NFS-e. Coluna gerada: não se grava, só se lê.
   displayName: text("display_name").generatedAlwaysAs(sql`CASE WHEN legal_name ~* '^[0-9]{2}[.]?[0-9]{3}[.]?[0-9]{3}([/]?[0-9]{4}[-]?[0-9]{2})?( (ltda|s/?a|s[.]a[.]?|me|epp|eireli|slu))?[.]?$' AND coalesce(btrim(trade_name), '') <> '' THEN btrim(trade_name) ELSE legal_name END`).notNull(),
+  // E26 — ajustes do cliente que NÃO vêm do CRM (a sincronização não toca nestas colunas): endereço (tomador da NFS-e) e textos da nota fiscal e do boleto.
+  cep: text("cep"), street: text("street"), streetNumber: text("street_number"), complement: text("complement"), district: text("district"),
+  cityName: text("city_name"), cityIbge: text("city_ibge"), uf: text("uf"),
+  nfText: text("nf_text"), // texto (discriminação do serviço) da nota fiscal deste cliente; aceita {{competencia}}, {{valor}}… ; vazio = usa a descrição do contrato
+  boletoText: text("boleto_text"), // instruções/mensagem do boleto deste cliente (mesmos campos)
 }, (t) => [
   uniqueIndex("customers_company_doc_uq").on(t.companyId, t.document).where(sql`${t.archivedAt} is null`),
   uniqueIndex("customers_company_source_ext_uq").on(t.companyId, t.source, t.externalId).where(sql`${t.externalId} is not null`),
   index("customers_company_name_idx").on(t.companyId, t.legalName),
   unique("customers_company_id_uq").on(t.companyId, t.id), // alvo da FK composta dos contatos
   check("customers_status_chk", sql`${t.status} in ('ativo', 'suspenso', 'cancelado')`),
+  check("customers_extras_chk", sql`(${t.cep} is null or ${t.cep} ~ '^[0-9]{8}$') and (${t.cityIbge} is null or ${t.cityIbge} ~ '^[0-9]{7}$') and (${t.uf} is null or ${t.uf} ~ '^[A-Z]{2}$')
+    and char_length(${t.street}) <= 160 and char_length(${t.streetNumber}) <= 20 and char_length(${t.complement}) <= 80 and char_length(${t.district}) <= 80 and char_length(${t.cityName}) <= 80
+    and char_length(${t.nfText}) <= 1000 and char_length(${t.boletoText}) <= 400`),
 ]);
 
 export const vendors = pgTable("vendors", partyColumns(), (t) => [

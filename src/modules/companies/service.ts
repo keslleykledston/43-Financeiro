@@ -12,17 +12,16 @@ export const companyProfileSchema = z.object({
   legalName: opt(200, "Razão social muito longa (máximo 200)"),
   cnpj: opt(30, "CNPJ inválido"),
   financeEmail: opt(200, "E-mail muito longo").refine((v) => v === null || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "E-mail financeiro inválido"),
-  address: opt(300, "Endereço muito longo (máximo 300)"),
 });
 
-export const FIELD_LABEL = { name: "nome", legalName: "razão social", cnpj: "CNPJ", financeEmail: "e-mail financeiro", address: "endereço" } as const;
+export const FIELD_LABEL = { name: "nome", legalName: "razão social", cnpj: "CNPJ", financeEmail: "e-mail financeiro" } as const;
 const pgCode = (e: unknown) => (e as { code?: string })?.code ?? (e as { cause?: { code?: string } })?.cause?.code;
 
 export async function getCompanyProfile(db: DB, actorId: string, companyId: string) {
   await requirePerm(db, actorId, companyId, "company.manage");
   const [c] = await db.select().from(companies).where(eq(companies.id, companyId));
   if (!c) throw new Invalid("Empresa não encontrada");
-  return { name: c.name, legalName: c.legalName, cnpj: c.cnpj, cnpjFormatted: c.cnpj && /^[0-9A-Z]{14}$/i.test(c.cnpj) ? formatDocument("cnpj", c.cnpj.toUpperCase()) : c.cnpj, financeEmail: c.financeEmail, address: c.address };
+  return { name: c.name, legalName: c.legalName, cnpj: c.cnpj, cnpjFormatted: c.cnpj && /^[0-9A-Z]{14}$/i.test(c.cnpj) ? formatDocument("cnpj", c.cnpj.toUpperCase()) : c.cnpj, financeEmail: c.financeEmail };
 }
 
 export async function updateCompanyProfile(db: DB, actorId: string, companyId: string, input: unknown) {
@@ -40,7 +39,7 @@ export async function updateCompanyProfile(db: DB, actorId: string, companyId: s
       const x = tx as unknown as DB;
       const [cur] = await x.select().from(companies).where(eq(companies.id, companyId)).for("update");
       if (!cur) throw new Invalid("Empresa não encontrada");
-      const next = { name: p.data.name, legalName: p.data.legalName, cnpj, financeEmail: p.data.financeEmail, address: p.data.address };
+      const next = { name: p.data.name, legalName: p.data.legalName, cnpj, financeEmail: p.data.financeEmail }; // o endereço da empresa fica na seção "Endereço" (company_fiscal)
       const changed = (Object.keys(next) as (keyof typeof next)[]).filter((k) => (cur[k] ?? null) !== next[k]);
       if (changed.length === 0) return { changed: [] as string[] };
       await x.update(companies).set({ ...next, updatedAt: new Date() }).where(and(eq(companies.id, companyId)));

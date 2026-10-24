@@ -14,7 +14,7 @@ export async function saveCompanyAction(_: CompanyState, fd: FormData): Promise<
     const c = await requireContext();
     if (!c.current) throw new Forbidden();
     const r = await updateCompanyProfile(db, c.user.id, c.current.id, {
-      name: fd.get("name"), legalName: fd.get("legalName"), cnpj: fd.get("cnpj"), financeEmail: fd.get("financeEmail"), address: fd.get("address"),
+      name: fd.get("name"), legalName: fd.get("legalName"), cnpj: fd.get("cnpj"), financeEmail: fd.get("financeEmail")
     });
     revalidatePath("/", "layout");
     return { saved: r.changed.length ? `Salvo: ${r.changed.join(", ")}.` : "Nada mudou." };

@@ -26,10 +26,10 @@ test("E22 — conta de e-mail em Integrações: valida, guarda cifrada e nunca m
 
 test("E22 — Dados da empresa: contador e dados fiscais, com a lista do que falta", async ({ page }) => {
   await page.goto("/empresa");
-  await expect(page.getByRole("heading", { name: "Contabilidade e dados fiscais" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Endereço, contabilidade e dados fiscais" })).toBeVisible();
   await page.getByLabel("Nome do contador / escritório").fill("Escritório Contábil Teste");
   await page.getByLabel("CPF ou CNPJ").fill("11.111.111/1111-11");
-  await page.getByRole("button", { name: "Salvar contabilidade e dados fiscais" }).click();
+  await page.getByRole("button", { name: "Salvar endereço, contabilidade e dados fiscais" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "CPF/CNPJ do contador inválido" })).toBeVisible();
 
   await page.goto("/empresa");
@@ -38,7 +38,7 @@ test("E22 — Dados da empresa: contador e dados fiscais, com a lista do que fal
   await page.getByLabel("CNAE principal").fill("6190601");
   await page.getByLabel("Código do serviço (LC 116)").fill("1.07");
   await page.getByLabel("Alíquota do ISS (%)").fill("2,5");
-  await page.getByRole("button", { name: "Salvar contabilidade e dados fiscais" }).click();
+  await page.getByRole("button", { name: "Salvar endereço, contabilidade e dados fiscais" }).click();
   await expect(page.getByText(/Salvo: .*CNAE/)).toBeVisible();
   await page.reload();
   await expect(page.getByText("Falta para a NFS-e:")).toBeVisible();

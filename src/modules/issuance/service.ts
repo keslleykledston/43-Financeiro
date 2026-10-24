@@ -4,6 +4,7 @@ import { auditLog, billingBatches, issuanceRequests, issuanceSettings } from "@/
 import { centsFromNumeric } from "@/lib/money";
 import { Invalid, requirePerm } from "@/modules/identity/service";
 import { localParts } from "@/modules/messaging/window";
+import { issuanceTexts } from "./texts";
 import { resolveProviders } from "@/modules/providers/registry";
 import type { Providers } from "@/modules/providers/types";
 
@@ -158,7 +159,7 @@ export async function processIssuance(db: DB, actorId: string, companyId: string
         else if (s === "rejeitada") { await record({ status: "falhou", externalStatus: s, lastError: "nfse_rejeitada" }, ["processando"]); out.failed++; }
         continue;
       }
-      const [d] = (await db.execute(sql`select c.amount::text, c.due_date::text, c.competence_month::text, c.description, c.status cs, cu.legal_name, cu.document, coalesce((select sum(p.amount) from payments p where p.company_id = c.company_id and p.charge_id = c.id and p.status = 'ativo'), 0) >= c.amount settled
+      const [d] = (await db.execute(sql`select c.amount::text, c.due_date::text, c.competence_month::text, c.description, c.status cs, cu.legal_name, cu.document, cu.nf_text, cu.boleto_text, cu.cep, cu.street, cu.street_number, cu.complement, cu.district, cu.city_name, cu.city_ibge, cu.uf, c.issue_date::text issue_date, (select name from companies where id = c.company_id) company_name, coalesce((select sum(p.amount) from payments p where p.company_id = c.company_id and p.charge_id = c.id and p.status = 'ativo'), 0) >= c.amount settled
         from charges c join customers cu on cu.company_id = c.company_id and cu.id = c.customer_id where c.company_id = ${companyId} and c.id = ${r.chargeId}`)) as unknown as Row[];
       if (!d || d.cs !== "aprovada" || d.settled) { await record({ status: "cancelado", lastError: "cobranca_indisponivel" }, ["enviando"]); out.skipped++; continue; } // quitou/cancelou entre a solicitação e o envio
       // reconsulta ANTES de reemitir (resposta anterior se perdeu)
@@ -172,11 +173,15 @@ export async function processIssuance(db: DB, actorId: string, companyId: string
         }
       }
       const cents = centsFromNumeric(String(d.amount));
+      // E26: texto da nota e do boleto deste cliente (campos {{…}} preenchidos); sem texto, vale a descrição do contrato
+      const texts = issuanceTexts({ nfText: d.nf_text == null ? null : String(d.nf_text), boletoText: d.boleto_text == null ? null : String(d.boleto_text), contractDescription: String(d.description), customerName: String(d.legal_name), companyName: String(d.company_name), amountCents: cents, dueDate: String(d.due_date), competenceMonth: String(d.competence_month), issueDate: String(d.issue_date) });
       if (r.kind === "boleto") {
-        const res = await prov.boleto.issue({ idempotencyKey: r.idempotencyKey, amountCents: cents, dueDate: String(d.due_date), customerName: String(d.legal_name), customerDocument: String(d.document ?? "") });
+        const res = await prov.boleto.issue({ idempotencyKey: r.idempotencyKey, amountCents: cents, dueDate: String(d.due_date), customerName: String(d.legal_name), customerDocument: String(d.document ?? ""), instructions: texts.boletoInstructions });
         await record({ status: "emitido", externalRef: res.providerRef, externalStatus: res.status, lastError: null }, ["enviando"]); out.issued++;
       } else {
-        const res = await prov.nfse.issue({ idempotencyKey: r.idempotencyKey, amountCents: cents, competence: String(d.competence_month).slice(0, 7), customerName: String(d.legal_name), customerDocument: String(d.document ?? ""), description: String(d.description) });
+        const s = (k: string) => (d[k] == null ? null : String(d[k]));
+        const res = await prov.nfse.issue({ idempotencyKey: r.idempotencyKey, amountCents: cents, competence: String(d.competence_month).slice(0, 7), customerName: String(d.legal_name), customerDocument: String(d.document ?? ""), description: texts.nfDescription,
+          customerAddress: { cep: s("cep"), street: s("street"), number: s("street_number"), complement: s("complement"), district: s("district"), city: s("city_name"), cityIbge: s("city_ibge"), uf: s("uf") } });
         const fin = res.status === "emitida" ? "emitido" : res.status === "processando" ? "processando" : "falhou";
         await record({ status: fin, externalRef: res.providerRef, externalStatus: res.status, lastError: fin === "falhou" ? "nfse_rejeitada" : null }, ["enviando"]);
         if (fin === "emitido") out.issued++; else if (fin === "processando") out.processing++; else out.failed++;

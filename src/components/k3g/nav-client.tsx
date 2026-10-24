@@ -7,7 +7,7 @@ import { AppLink } from "./app-link";
 import { NAV, type NavItem } from "./nav";
 import { SoonTag } from "./primitives";
 
-const isActive = (p: string, h: string) => (h === "/" ? p === "/" : p.startsWith(h));
+const isActive = (p: string, h: string, also: string[] = []) => (h === "/" ? p === "/" : [h, ...also].some((x) => p === x || p.startsWith(x + "/")));
 
 function NavLinkItem({ item, active, onNavigate }: { item: NavItem; active: boolean; onNavigate?: () => void }) {
   const Icon = item.icon;
@@ -25,7 +25,7 @@ export function SideNav() {
   const p = usePathname();
   return (
     <nav aria-label="Principal" className="mt-4 flex flex-col gap-1">
-      {NAV.map((n) => <NavLinkItem key={n.href} item={n} active={isActive(p, n.href)} />)}
+      {NAV.map((n) => <NavLinkItem key={n.href} item={n} active={isActive(p, n.href, n.also)} />)}
     </nav>
   );
 }
@@ -38,7 +38,7 @@ export function BottomNav() {
     <>
       <nav aria-label="Principal (móvel)" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t bg-card lg:hidden">
         {items.map((n) => {
-          const Icon = n.icon; const active = isActive(p, n.href);
+          const Icon = n.icon; const active = isActive(p, n.href, n.also);
           return (
             <AppLink key={n.href} href={n.href} aria-current={active ? "page" : undefined}
               className={cn("flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-medium", active ? "text-primary" : "text-muted-foreground")}>
@@ -58,7 +58,7 @@ export function BottomNav() {
           <button type="button" onClick={() => dlg.current?.close()} aria-label="Fechar menu" className="inline-flex size-9 items-center justify-center rounded-md hover:bg-accent"><X className="size-4" aria-hidden /></button>
         </div>
         <nav aria-label="Menu completo" className="flex flex-col gap-1 pb-4">
-          {NAV.map((n) => <NavLinkItem key={n.href} item={n} active={isActive(p, n.href)} onNavigate={() => dlg.current?.close()} />)}
+          {NAV.map((n) => <NavLinkItem key={n.href} item={n} active={isActive(p, n.href, n.also)} onNavigate={() => dlg.current?.close()} />)}
         </nav>
       </dialog>
     </>

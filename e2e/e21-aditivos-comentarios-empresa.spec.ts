@@ -13,6 +13,7 @@ test("E21 — aditivo com aprovação na hora, comentários só de acréscimo e 
   await expect(page.getByRole("heading", { name: NOME })).toBeVisible();
 
   await test.step("comentário no cliente", async () => {
+    await page.getByRole("tab", { name: /^Anotações/ }).click();
     await page.getByLabel("Novo comentário").fill("Cliente pontual, paga sempre no vencimento.");
     await page.getByRole("button", { name: "Adicionar comentário" }).click();
     await expect(page.getByText("Cliente pontual, paga sempre no vencimento.")).toBeVisible();
@@ -65,7 +66,6 @@ test("E21 — aditivo com aprovação na hora, comentários só de acréscimo e 
     await expect(page.getByRole("alert").filter({ hasText: "CNPJ inválido" })).toBeVisible();
     await page.goto("/empresa");
     await page.getByLabel("Razão social").fill(`Razão Social Teste ${run} Ltda`);
-    await page.getByLabel("Endereço").fill("Rua Teste, 123 — Manaus/AM");
     await page.getByRole("button", { name: "Salvar", exact: true }).click();
     await expect(page.getByText(/Salvo: .*razão social/)).toBeVisible();
     await page.getByRole("link", { name: "Ajuda desta tela" }).click();

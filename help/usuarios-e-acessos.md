@@ -1,6 +1,6 @@
 # Usuários e acessos
 
-**Onde:** menu *Ajustes*.
+**Onde:** menu **Configurações → Usuários e acessos**.
 
 - Cada pessoa tem um papel **por empresa**. Quem não é membro de uma empresa não vê nada dela.
 - **Papéis:** Diretoria (gere acessos e vê financeiro), Gerente e Assistente e Contabilidade (veem financeiro), Admin técnico (gere acessos, não vê dados financeiros).

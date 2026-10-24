@@ -42,6 +42,7 @@ test("E03 — cadastro, validação, duplicidade, contatos, histórico, busca, a
     await page.getByLabel("Nome fantasia (opcional)").fill("Acme");
     await page.getByRole("button", { name: "Salvar" }).click();
     await expect(page.getByText("Alterações salvas.")).toBeVisible();
+    await page.getByRole("tab", { name: /^Contatos/ }).click();
     await page.getByLabel("Nome do contato").fill("Maria Financeiro");
     await page.getByLabel("E-mail do contato").fill("maria@acme.test");
     await page.getByLabel(/Contato financeiro/).check();
@@ -133,7 +134,7 @@ test("E03 — cadastro, validação, duplicidade, contatos, histórico, busca, a
 
 test("E03 — contabilidade vê e exporta, mas não cadastra", async ({ page, browser }) => {
   const email = `contab-${Date.now()}@sandbox.test`, senha = "Contab-Senha-789!";
-  await page.goto("/configuracao");
+  await page.goto("/configuracao?aba=usuarios");
   await page.getByLabel("E-mail").fill(email);
   await page.getByLabel("Papel").selectOption({ label: "Contabilidade" });
   await page.getByRole("button", { name: "Convidar" }).click();

@@ -7,6 +7,7 @@ import { listAudit, listAuditActors } from "@/modules/identity/audit";
 import { Callout, PageHeader, SectionCard } from "@/components/k3g/primitives";
 import { EmptyState } from "@/components/k3g/states";
 import { AppLink } from "@/components/k3g/app-link";
+import { SettingsTabs } from "@/components/k3g/settings-tabs";
 import { buttonClass, inputClass, selectClass } from "@/components/k3g/button";
 
 type SP = { q?: string; quem?: string; de?: string; ate?: string; p?: string };
@@ -24,6 +25,7 @@ export default async function Auditoria({ searchParams }: { searchParams: Promis
 
   return (
     <div className="space-y-5">
+      <SettingsTabs role={role} current="atividades" />
       <PageHeader title="Registro de atividades" description={`${ctx.current.name} · quem fez o quê e quando. Guarda só identificadores e contagens, nunca senhas ou valores sigilosos.`} />
       <SectionCard title="Atividades">
         <form method="get" className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">

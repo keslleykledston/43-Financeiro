@@ -143,15 +143,15 @@ describe.skipIf(!enabled)("E21 — aditivos, comentários e dados da empresa (DB
     it("só a diretoria lê e edita; valida CNPJ e e-mail; grava só os nomes dos campos no registro", async () => {
       for (const u of [gerA, asstA, contA, techA]) { await expect(getCompanyProfile(db, u, A)).rejects.toBeInstanceOf(Forbidden); await expect(updateCompanyProfile(db, u, A, { name: "X" })).rejects.toBeInstanceOf(Forbidden); }
       const bad = (o: Record<string, unknown>, re: RegExp) => expect(updateCompanyProfile(db, dirA, A, { name: "Empresa A", ...o })).rejects.toThrow(re);
-      await bad({ name: "" }, /Informe o nome/); await bad({ cnpj: "11.111.111/1111-11" }, /CNPJ inválido/); await bad({ cnpj: "529.982.247-25" }, /CNPJ inválido/); await bad({ financeEmail: "sem-arroba" }, /E-mail financeiro inválido/); await bad({ address: "x".repeat(301) }, /Endereço muito longo/);
-      const r = await updateCompanyProfile(db, dirA, A, { name: "K3G Solutions", legalName: "K3G Solutions Ltda", cnpj: "11.222.333/0001-81", financeEmail: "fin@k3g.example", address: "Rua X, 1" });
-      expect(r.changed).toEqual(["nome", "razão social", "CNPJ", "e-mail financeiro", "endereço"]);
+      await bad({ name: "" }, /Informe o nome/); await bad({ cnpj: "11.111.111/1111-11" }, /CNPJ inválido/); await bad({ cnpj: "529.982.247-25" }, /CNPJ inválido/); await bad({ financeEmail: "sem-arroba" }, /E-mail financeiro inválido/);
+      const r = await updateCompanyProfile(db, dirA, A, { name: "K3G Solutions", legalName: "K3G Solutions Ltda", cnpj: "11.222.333/0001-81", financeEmail: "fin@k3g.example" });
+      expect(r.changed).toEqual(["nome", "razão social", "CNPJ", "e-mail financeiro"]);
       const p = await getCompanyProfile(db, dirA, A);
       expect(p).toMatchObject({ name: "K3G Solutions", legalName: "K3G Solutions Ltda", cnpj: "11222333000181", cnpjFormatted: "11.222.333/0001-81", financeEmail: "fin@k3g.example" });
       const log = await db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "company.updated"));
       expect(log).toHaveLength(1);
-      expect(JSON.stringify(log[0].detail)).not.toMatch(/11222333|fin@k3g|Rua X|Ltda/);
-      expect((await updateCompanyProfile(db, dirA, A, { name: "K3G Solutions", legalName: "K3G Solutions Ltda", cnpj: "11222333000181", financeEmail: "fin@k3g.example", address: "Rua X, 1" })).changed).toEqual([]); // nada mudou: sem evento novo
+      expect(JSON.stringify(log[0].detail)).not.toMatch(/11222333|fin@k3g|Ltda/);
+      expect((await updateCompanyProfile(db, dirA, A, { name: "K3G Solutions", legalName: "K3G Solutions Ltda", cnpj: "11222333000181", financeEmail: "fin@k3g.example" })).changed).toEqual([]); // nada mudou: sem evento novo
       expect(await db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "company.updated"))).toHaveLength(1);
     });
 

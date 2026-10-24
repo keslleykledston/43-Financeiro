@@ -35,3 +35,13 @@ Busque por nome, nome fantasia ou documento (com ou sem pontuação). Use as aba
 ## Validador de CPF/CNPJ
 Ao digitar o documento no cadastro, o sistema confere os **dígitos verificadores** na hora: verde = válido (mostra o formato certo); vermelho = não confere. Quando o erro parece digitação (por exemplo, dois dígitos finais trocados), aparece a **sugestão** com um clique. O servidor confere de novo ao salvar. CNPJ alfanumérico também é aceito. Clientes que vêm do CRM continuam somente leitura aqui (a correção é no CRM); para o histórico da planilha use *Histórico → Corrigir CNPJ/CPF*.
 
+## Editar o cliente (tudo na mesma caixa)
+Abra **Clientes → o cliente**: a caixa **Editar** reúne, em abas, tudo o que é ajuste do cadastro:
+- **Dados:** razão social, nome fantasia, CPF/CNPJ (com o validador) e situação.
+- **Endereço:** CEP, logradouro, número, complemento, bairro, município, código IBGE e UF. É o endereço do cliente como tomador da nota fiscal.
+- **Nota fiscal e boleto:** o **texto da nota fiscal** (a descrição do serviço que vai na NFS-e) e o **texto do boleto** (instruções que saem no boleto). Em branco, vale o padrão (descrição do contrato na nota; nenhuma instrução no boleto). Dá para usar os campos `{{cliente}}`, `{{empresa}}`, `{{valor}}`, `{{vencimento}}`, `{{competencia}}`, `{{descricao}}` e `{{emissao}}`; só texto simples, sem HTML. Na emissão (hoje simulada) esses textos e o endereço já seguem para o provedor.
+- **Anotações:** o registro de observações do cliente (só de acréscimo: não dá para editar nem apagar).
+- **Contatos:** quem recebe as cobranças (marque o contato financeiro).
+**Cliente vindo do CRM:** a aba *Dados* mostra razão social, CNPJ e situação só para leitura (a sincronização os sobrescreveria; corrija no CRM). Endereço, textos, anotações e contatos são só daqui e **continuam editáveis**; a sincronização não os altera.
+Quem pode editar: quem altera cadastros (diretoria, gerente, assistente). Cada alteração entra no registro de atividades (só os **nomes** dos campos, nunca o conteúdo).
+

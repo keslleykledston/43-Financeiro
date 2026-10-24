@@ -15,7 +15,7 @@ async function entrar(browser: Browser, email: string, senha: string) {
 // Usa um usuário convidado (nunca o admin compartilhado do auth.setup, para não invalidar os outros specs).
 test("Minha conta — trocar a própria senha ponta a ponta", async ({ page, browser }) => {
   const email = `conta-${Date.now()}@sandbox.test`;
-  await page.goto("/configuracao");
+  await page.goto("/configuracao?aba=usuarios");
   await page.getByLabel("E-mail").fill(email);
   await page.getByLabel("Papel").selectOption({ label: "Assistente" });
   await page.getByRole("button", { name: "Convidar" }).click();
@@ -67,7 +67,7 @@ test("Minha conta — trocar a própria senha ponta a ponta", async ({ page, bro
 
 test("Minha conta — 'Sair em todos os dispositivos' derruba a sessão (usuário convidado, não o admin compartilhado)", async ({ page, browser }) => {
   const email = `sessoes-${Date.now()}@sandbox.test`;
-  await page.goto("/configuracao");
+  await page.goto("/configuracao?aba=usuarios");
   await page.getByLabel("E-mail").fill(email);
   await page.getByLabel("Papel").selectOption({ label: "Assistente" });
   await page.getByRole("button", { name: "Convidar" }).click();

@@ -1,7 +1,7 @@
 # Registro de atividades
 
 **Quem acessa:** diretoria e admin técnico. Os demais papéis não veem a tela.
-**Onde:** Ajustes → **Registro de atividades** (ou `/auditoria`).
+**Onde:** **Configurações → Registro de atividades** (ou `/auditoria`).
 
 ## Para que serve
 Mostra **quem fez o quê e quando** na empresa selecionada: entradas no sistema, trocas de senha, convites, contratos criados ou importados, lotes aprovados, pagamentos registrados, conciliações. Serve para conferir uma alteração e para investigar qualquer coisa estranha.

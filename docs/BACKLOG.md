@@ -160,3 +160,10 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [ ] Usar as correções de CNPJ no passo de contratos: os 4+1 clientes "CNPJ inválido" não importados em E14 podem virar contratos em rascunho depois de corrigidos (precisa de decisão do dono).
 - [ ] Edição de cliente vindo do CRM (hoje somente leitura): precisaria de "correção local" que a sincronização respeite; só se o dono pedir.
 
+## E26 — Cliente: caixa Editar; Configurações da empresa (2026-10-24, ADR-022)
+- [x] Cliente > Editar em abas (dados com validador de CNPJ, endereço, texto da nota fiscal e do boleto, anotações, contatos); migração 0030; textos/endereço chegam ao provedor simulado.
+- [x] Menu Configurações (Empresa · Usuários e acessos · Registro de atividades); Empresa agrupa cadastro, endereço, contabilidade e dados fiscais.
+- [ ] Mapear `instructions` (boleto) e `customerAddress`/`description` (NFS-e) nos adaptadores reais da Cora (E10b).
+- [ ] Texto da nota/boleto por CONTRATO (hoje é por cliente) se o dono precisar de texto diferente por contrato.
+- [ ] Remover a coluna `companies.address` (sem uso) em limpeza futura.
+

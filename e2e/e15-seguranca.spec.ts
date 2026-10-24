@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 test("Registro de atividades — diretoria vê eventos, filtra por tipo e some o que não bate", async ({ page }) => {
-  await page.goto("/configuracao");
+  await page.goto("/configuracao?aba=usuarios");
   await page.getByRole("link", { name: "Registro de atividades" }).click();
   await expect(page.getByRole("heading", { name: "Registro de atividades" })).toBeVisible();
   // outros specs geram muitas atividades (a 1ª página pode não ter logins): o login do admin do sandbox está registrado, então filtra por ele

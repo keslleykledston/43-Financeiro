@@ -4,7 +4,7 @@ const SENHA = "Convidado-Senha-456";
 const novoEmail = () => `gerente-${Date.now()}@sandbox.test`;
 
 async function convidar(page: import("@playwright/test").Page, email: string, papel: string) {
-  await page.goto("/configuracao");
+  await page.goto("/configuracao?aba=usuarios");
   await page.getByLabel("E-mail").fill(email);
   await page.getByLabel("Papel").selectOption({ label: papel });
   await page.getByRole("button", { name: "Convidar" }).click();
@@ -58,7 +58,7 @@ test("E02 — convite ponta a ponta, papéis, isolamento e remoção", async ({ 
   const { ctx, page: gp } = await entrar(browser, email);
   await expect(gp.getByRole("heading", { name: "Visão executiva" })).toBeVisible();
   await expect(gp.getByLabel("Empresa").locator("option")).toHaveText(["K3G Solutions"]);
-  await gp.goto("/configuracao");
+  await gp.goto("/configuracao?aba=usuarios");
   await expect(gp.getByRole("heading", { name: "Usuários e acessos" })).toBeVisible();
   await expect(gp.getByRole("button", { name: "Convidar" })).toHaveCount(0);
   await expect(gp.getByRole("button", { name: "Remover" })).toHaveCount(0);
@@ -69,7 +69,7 @@ test("E02 — convite ponta a ponta, papéis, isolamento e remoção", async ({ 
   await expect(gp.getByText("K3G Solutions · ")).toBeVisible();
 
   // admin remove -> gerente perde o acesso na próxima requisição
-  await page.goto("/configuracao");
+  await page.goto("/configuracao?aba=usuarios");
   await page.locator("li", { hasText: email }).getByRole("button", { name: "Remover" }).click();
   await expect(page.locator("li", { hasText: email })).toHaveCount(0);
   await gp.goto("/");
@@ -78,6 +78,6 @@ test("E02 — convite ponta a ponta, papéis, isolamento e remoção", async ({ 
 });
 
 test("E02 — admin técnico não pode conceder papel acima do permitido e não se remove", async ({ page }) => {
-  await page.goto("/configuracao");
+  await page.goto("/configuracao?aba=usuarios");
   await expect(page.locator("li", { hasText: "admin@sandbox.test" }).getByRole("button", { name: "Remover" })).toHaveCount(0);
 });

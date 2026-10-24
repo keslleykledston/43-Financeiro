@@ -33,6 +33,9 @@ export function FiscalForm({ v }: { v: FiscalValues }) {
         {f("serviceCode", "Código do serviço (LC 116)", v.serviceCode, { hint: "Ex.: 1.07", max: 10 })}
         {f("issRate", "Alíquota do ISS (%)", pct(v.issRateBps), { hint: "De 0 a 5, ex.: 2 ou 2,5", max: 10 })}
         <label className="flex items-center gap-2 self-end pb-2 text-sm"><input type="checkbox" name="issWithheld" defaultChecked={v.issWithheld} /> ISS retido pelo tomador (padrão)</label>
+      </fieldset>
+      <fieldset className="grid gap-4 sm:grid-cols-2">
+        <legend className="mb-1 font-semibold">Endereço da empresa</legend>
         {f("street", "Logradouro", v.street, { full: true })}
         {f("streetNumber", "Número", v.streetNumber, { max: 20 })}
         {f("complement", "Complemento", v.complement, { max: 80 })}
@@ -45,7 +48,7 @@ export function FiscalForm({ v }: { v: FiscalValues }) {
       </fieldset>
       {s?.error && <p role="alert" className="text-sm text-negative-foreground">{s.error}</p>}
       {s?.saved && <p role="status" className="text-sm text-positive-foreground">{s.saved}</p>}
-      <button disabled={pending} className={buttonClass("primary")}>{pending ? "Salvando…" : "Salvar contabilidade e dados fiscais"}</button>
+      <button disabled={pending} className={buttonClass("primary")}>{pending ? "Salvando…" : "Salvar endereço, contabilidade e dados fiscais"}</button>
     </form>
   );
 }
