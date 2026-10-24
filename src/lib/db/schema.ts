@@ -803,3 +803,60 @@ export const boletoCancellations = pgTable("boleto_cancellations", {
   check("boleto_cancellations_attempts_chk", sql`${t.attempts} between 1 and 20`),
   check("boleto_cancellations_resolved_chk", sql`(${t.status} in ('cancelado', 'falhou')) = (${t.resolvedAt} is not null)`),
 ]);
+
+// E22 — conta de e-mail (SMTP) por empresa. Usuário e senha CIFRADOS (mesmo cofre da Cora) e escrita apenas; host/porta/remetente não são segredo.
+// Guardar NÃO liga o envio: EMAIL_EXTERNAL_ENABLED segue desligada e não existe adaptador real (E10b).
+export const emailAccounts = pgTable("email_accounts", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  host: text("host").notNull(),
+  port: integer("port").notNull(),
+  security: text("security").notNull(), // ssl (porta 465) | starttls
+  fromEmail: text("from_email").notNull(),
+  fromName: text("from_name"),
+  replyTo: text("reply_to"),
+  userEnc: text("user_enc").notNull(),
+  passEnc: text("pass_enc").notNull(),
+  updatedBy: uuid("updated_by").notNull().references(() => users.id),
+}, (t) => [
+  uniqueIndex("email_accounts_company_uq").on(t.companyId),
+  check("email_accounts_port_chk", sql`${t.port} in (25, 465, 587, 2525)`),
+  check("email_accounts_security_chk", sql`${t.security} in ('ssl', 'starttls') and (${t.security} = 'ssl') = (${t.port} = 465)`),
+  check("email_accounts_text_chk", sql`char_length(${t.host}) <= 253 and char_length(${t.fromEmail}) <= 200 and char_length(${t.fromName}) <= 80 and char_length(${t.replyTo}) <= 200`),
+  check("email_accounts_sealed_chk", sql`${t.userEnc} like 'v1.%' and ${t.passEnc} like 'v1.%'`), // nunca texto puro
+]);
+
+// E22 — dados da contabilidade (contador/escritório) e dados fiscais da empresa para a NFS-e. Não são segredos. Edição só pela diretoria (company.manage).
+export const companyFiscal = pgTable("company_fiscal", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  accountantName: text("accountant_name"),
+  accountantDocument: text("accountant_document"), // CPF ou CNPJ, só dígitos/letras
+  accountantCrc: text("accountant_crc"),
+  accountantContact: text("accountant_contact"),
+  accountantEmail: text("accountant_email"),
+  accountantPhone: text("accountant_phone"),
+  accountantNotes: text("accountant_notes"),
+  taxRegime: text("tax_regime"), // mei | simples | presumido | real
+  municipalRegistration: text("municipal_registration"),
+  cnae: text("cnae"), // 7 dígitos
+  serviceCode: text("service_code"), // item da LC 116 (ex.: 1.07)
+  issRateBps: integer("iss_rate_bps"), // alíquota do ISS em pontos-base (200 = 2%)
+  issWithheld: boolean("iss_withheld").notNull().default(false),
+  cityName: text("city_name"),
+  cityIbge: text("city_ibge"), // 7 dígitos
+  uf: text("uf"),
+  cep: text("cep"), // 8 dígitos
+  street: text("street"),
+  streetNumber: text("street_number"),
+  complement: text("complement"),
+  district: text("district"),
+  phone: text("phone"),
+  updatedBy: uuid("updated_by").references(() => users.id),
+}, (t) => [
+  uniqueIndex("company_fiscal_company_uq").on(t.companyId),
+  check("company_fiscal_regime_chk", sql`${t.taxRegime} is null or ${t.taxRegime} in ('mei', 'simples', 'presumido', 'real')`),
+  check("company_fiscal_iss_chk", sql`${t.issRateBps} is null or ${t.issRateBps} between 0 and 500`),
+  check("company_fiscal_formats_chk", sql`(${t.cnae} is null or ${t.cnae} ~ '^[0-9]{7}$') and (${t.cityIbge} is null or ${t.cityIbge} ~ '^[0-9]{7}$') and (${t.cep} is null or ${t.cep} ~ '^[0-9]{8}$') and (${t.uf} is null or ${t.uf} ~ '^[A-Z]{2}$')`),
+  check("company_fiscal_len_chk", sql`char_length(${t.accountantName}) <= 160 and char_length(${t.accountantDocument}) <= 20 and char_length(${t.accountantCrc}) <= 30 and char_length(${t.accountantContact}) <= 120 and char_length(${t.accountantEmail}) <= 200 and char_length(${t.accountantPhone}) <= 30 and char_length(${t.accountantNotes}) <= 500 and char_length(${t.municipalRegistration}) <= 30 and char_length(${t.serviceCode}) <= 10 and char_length(${t.cityName}) <= 80 and char_length(${t.street}) <= 160 and char_length(${t.streetNumber}) <= 20 and char_length(${t.complement}) <= 80 and char_length(${t.district}) <= 80 and char_length(${t.phone}) <= 30`),
+]);

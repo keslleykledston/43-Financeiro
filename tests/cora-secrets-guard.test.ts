@@ -6,6 +6,17 @@ import { join } from "node:path";
 const AUTHORIZED: string[] = [];
 const walk = (d: string): string[] => readdirSync(d).flatMap((n) => { const p = join(d, n); return statSync(p).isDirectory() ? walk(p) : /\.(ts|tsx)$/.test(n) ? [p] : []; });
 
+describe("segredos do e-mail (SMTP) em claro", () => {
+  it("nenhum arquivo de src/ importa email-secrets; a config nunca lê as credenciais em claro", () => {
+    const offenders = walk("src").filter((f) => !f.endsWith("email-secrets.ts") && /email-secrets/.test(readFileSync(f, "utf8")));
+    expect(offenders.filter((f) => !f.endsWith("email-config.ts"))).toEqual([]); // email-config importa só a função de contexto (emailContext)
+    expect(readFileSync("src/modules/providers/email-config.ts", "utf8")).not.toMatch(/readEmailCredentials/);
+  });
+  it("cliente (use client) nunca importa módulos de credenciais de e-mail", () => {
+    for (const f of walk("src").filter((x) => /^["']use client["']/.test(readFileSync(x, "utf8")))) expect(readFileSync(f, "utf8")).not.toMatch(/email-secrets|email-config|secretbox/);
+  });
+});
+
 describe("segredos da Cora em claro", () => {
   it("nenhum arquivo de src/ (telas, ações, serviços) importa cora-secrets", () => {
     const offenders = walk("src").filter((f) => !f.endsWith("cora-secrets.ts") && /cora-secrets/.test(readFileSync(f, "utf8")) && !AUTHORIZED.includes(f.replace(/\\/g, "/")));

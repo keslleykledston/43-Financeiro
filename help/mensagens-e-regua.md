@@ -49,4 +49,4 @@ Cada etapa sai por **e-mail** e **WhatsApp**.
 - Quem altera a configuração: diretoria e gerente.
 
 ## Provedores
-Em *Integrações → Provedores* aparecem Cora (boletos/Pix e extrato), NFS-e da Cora (beta), SMTP e WAHA. Todos **simulados**. Se alguma chave de envio real for ligada no servidor sem existir adaptador homologado, o sistema **recusa enviar** e mostra um aviso.
+Em *Integrações → Provedores* aparecem Cora (somente boletos), NFS-e da Cora (beta), SMTP e WAHA. Todos **simulados**. Se alguma chave de envio real for ligada no servidor sem existir adaptador homologado, o sistema **recusa enviar** e mostra um aviso.

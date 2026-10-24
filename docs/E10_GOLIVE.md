@@ -11,8 +11,8 @@
 
 ## O que o USUÁRIO precisa providenciar (nada disso está no Git nem no chat)
 1. **Cora:** client-id, certificado e chave mTLS por CNPJ, habilitação de boletos v2/extrato/webhooks e da NFS-e (beta). Confirmar limites e idempotência na homologação.
-2. **NFS-e:** confirmar cobertura do município e CNAEs dos dois CNPJs; calendário fiscal aprovado por quem responde pela contabilidade.
-3. **E-mail:** credenciais SMTP, SPF/DKIM/DMARC do domínio, remetente por empresa, tratamento de devolução.
+2. **NFS-e:** dados fiscais e do contador preenchidos em Dados da empresa (pronto desde a E22); confirmar cobertura do município e CNAEs dos dois CNPJs; calendário fiscal aprovado por quem responde pela contabilidade.
+3. **E-mail:** conta SMTP cadastrada em Integrações → E-mail (SMTP) (pronto desde a E22; guardar não liga o envio), SPF/DKIM/DMARC do domínio, remetente por empresa, tratamento de devolução.
 4. **WhatsApp (WAHA):** chave, número dedicado, lista de **opt-in** revisada, janelas e limites aprovados.
 5. **Autorização escrita da diretoria**, por provedor e por empresa, com limites de envio.
 

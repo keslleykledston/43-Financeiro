@@ -131,3 +131,13 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [ ] Cliente do CRM: correção de nome/CNPJ continua no CRM (somente leitura aqui); aguardando o dono dizer o que está errado em "19.534.417 LTDA".
 - [ ] H1 (histórico a partir das abas da planilha) — aguarda "pode seguir" e respostas (docs/HISTORICO_E_CAIXA.md §6).
 - [ ] Endurecer o papel de banco da aplicação (sem TRUNCATE/DDL; papel de migração separado) — protege as tabelas só-de-acréscimo (notes, commission_*, boleto_cancellations). Ver review E21 #2.
+
+## E22 — Conta de e-mail e dados da contabilidade/fiscais (pedido do dono, 2026-10-24, ADR-019)
+- [x] Integrações → "E-mail (SMTP)": servidor, porta, segurança, remetente, resposta, usuário/senha cifrados (escrita apenas), só diretoria (migração 0026).
+- [x] Dados da empresa → "Contabilidade e dados fiscais": contador/escritório + dados fiscais da NFS-e, com lista do que falta; item novo no portão.
+- [ ] Adaptador SMTP real + enviar com o boleto (E10b-1), canário interno; SPF/DKIM/DMARC e bounce.
+- [ ] Certificado digital A1 / credenciais de prefeitura, se a NFS-e da Cora exigir (cofre; fase própria).
+- [ ] Papel "contabilidade" ver (somente leitura) os dados fiscais da empresa.
+
+- [ ] (Codex E22 P2) Adaptador SMTP real: resolver DNS (A/AAAA) na hora de conectar, bloquear faixas internas/loopback/link-local, proteger contra DNS rebinding e restringir o egress do container. A validação atual só barra IP literal e nomes internos comuns.
+- [ ] (Codex E22 P2) Código do serviço (LC 116) só confere o formato: validar contra a lista aceita pela prefeitura quando a NFS-e for ligada; até lá, confirmar com o contador.

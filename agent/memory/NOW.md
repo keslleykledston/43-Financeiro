@@ -24,3 +24,5 @@
 **Próxima ação:** (3) E09 adapters (mocks) + agendador; (4) E10 real por provedor só com credenciais + autorização; depois E07, E08, E11, E12.
 **Bloqueios:** nenhum.
 **Git:** branch main; sem tag/force.
+**E22 (conta de e-mail SMTP + contabilidade/dados fiscais, migração 0026):** SANDBOX PASS 381 unit/int + 97 e2e; revisão Codex feita (0 P0/P1; 1 P2 corrigido, 2 P2 aceitos para o adaptador real, ver agent/reviews/2026-10-24-codex-e22-email-e-contabilidade.md); DEPLOYADO (migração 0026, backup k3gfinance-20261024T212714Z). Nada é enviado; nenhuma conta nem dado fiscal cadastrado ainda.
+

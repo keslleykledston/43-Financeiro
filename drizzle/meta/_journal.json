@@ -183,6 +183,13 @@
       "when": 1792873069340,
       "tag": "0025_natural_nehzno",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792876446421,
+      "tag": "0026_absent_thunderbolts",
+      "breakpoints": true
     }
   ]
 }

@@ -53,3 +53,7 @@ Em *Integrações → Origem dos clientes* a diretoria escolhe, **para cada empr
 
 ## Cora (boletos)
 Credenciais e o que a integração com a Cora faz: veja `cora-boletos.md`.
+
+## Outras seções desta tela
+- **Cora — boletos:** veja o artigo *Cora: boletos (credenciais e escopo)* (`cora-boletos`).
+- **E-mail (SMTP):** conta usada para enviar cobranças; veja o artigo *Conta de e-mail (SMTP)* (`conta-de-email`). Guardar a conta não liga o envio.

@@ -1,4 +1,4 @@
-# Dados da empresa, aditivos e comentários
+# Dados da empresa, contabilidade, aditivos e comentários
 
 **Quem acessa:** os **dados da empresa** só a diretoria edita. **Aditivos**: quem altera contratos propõe, gerente/diretoria aprovam (a diretoria também pode aprovar na hora). **Comentários**: quem altera contratos ou cadastros escreve; quem lê o cadastro lê.
 **Onde:** Ajustes → *Dados da empresa*; dentro de cada contrato (*Aditivo ou ajuste de valor* e *Comentários*); dentro de cada cliente (*Comentários*).
@@ -8,6 +8,14 @@
 2. Edite nome, razão social, CNPJ, e-mail do financeiro e endereço → *Salvar*.
 3. O CNPJ é conferido pelos dígitos verificadores e não pode repetir em outra empresa. Trocar o CNPJ **não** altera nada na Cora: confira se a conta cadastrada é a desse CNPJ.
 4. Cada alteração entra no *Registro de atividades* (só diz **quais campos** mudaram, não os valores).
+
+## Contabilidade e dados fiscais (contador, NFS-e)
+Na mesma tela, bloco **Contabilidade e dados fiscais** (só diretoria):
+- **Contador ou escritório:** nome, CPF/CNPJ (conferido pelos dígitos), CRC, pessoa de contato, telefone, e-mail e observações (prazo de fechamento, quem emite as notas).
+- **Dados fiscais da empresa para a nota (NFS-e):** regime tributário, inscrição municipal, CNAE principal (7 dígitos), código do serviço (LC 116, ex.: 1.07), alíquota do ISS, ISS retido, endereço completo, CEP, município, código IBGE (Manaus: 1302603) e UF.
+- No topo do bloco o sistema mostra **o que ainda falta** para a NFS-e e para a contabilidade. Mande essa lista ao contador: quando ela some, a empresa está pronta, do lado dos dados.
+- **Guardar não emite nota nem fala com a prefeitura.** A emissão real é outra fase e depende de autorização.
+- Não guardamos senha de portal de prefeitura. Se a NFS-e exigir certificado digital da empresa, entra numa fase própria, no cofre.
 
 ## Aditivo e ajuste de valor em contrato
 Abra o contrato → **Aditivo ou ajuste de valor**:

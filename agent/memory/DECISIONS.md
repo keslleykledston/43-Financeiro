@@ -92,3 +92,10 @@ Calendário (`src/modules/billing/calendar.ts`, funções puras testadas contra 
 - Dados da empresa: permissão nova `company.manage` (só diretoria); CNPJ validado (inclui alfanumérico) e único; auditoria grava só os nomes dos campos alterados.
 - Cliente do CRM continua somente leitura (a sincronização sobrescreveria). Correção de nome/CNPJ vai no CRM.
 
+## ADR-019 Conta de e-mail por empresa e dados da contabilidade/fiscais (2026-10-24, pedido do dono) — E22
+- Pedido: em Integrações, os campos da conta de e-mail para envio; em Dados da empresa, os dados do contador/escritório "e o que precisar para não depender".
+- E-mail: tabela `email_accounts` (uma por empresa). Usuário e senha CIFRADOS no mesmo cofre da Cora (AAD `empresa|smtp|campo`), escrita apenas; servidor, porta, segurança e remetente aparecem. Em branco = mantém. Só diretoria (`providers.credentials`). Leitura em claro só em `email-secrets.ts`, protegido por teste de guarda (nenhum outro arquivo importa). Guardar NÃO liga o envio.
+- Segurança do servidor digitado: só nome público (sem IP/localhost/nomes internos) e portas 465/587/2525/25, com segurança coerente com a porta (SSL só na 465); impede usar a tela para varrer a rede interna quando o adaptador real existir. Nome do remetente sem aspas, < >, @, ; ou quebra de linha (injeção de cabeçalho). Sem botão de "enviar teste": nada sai antes da autorização escrita (E10b).
+- Contabilidade/fiscal: tabela `company_fiscal` (contador: nome, CPF/CNPJ validado, CRC, contato, e-mail, telefone, observações; fiscal: regime, inscrição municipal, CNAE, código LC 116, alíquota ISS, ISS retido, endereço estruturado, IBGE). Só diretoria (`company.manage`). O painel lista, campo a campo, o que falta para a NFS-e e para a contabilidade, e o portão de emissão ganhou o item "dados fiscais preenchidos". Não emite nota nem fala com a prefeitura.
+- Não guardamos senha de portal de prefeitura nem certificado digital A1 da empresa (se a NFS-e exigir, será fase própria com o mesmo cofre).
+

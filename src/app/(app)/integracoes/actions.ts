@@ -6,6 +6,7 @@ import { Forbidden, Invalid } from "@/modules/identity/service";
 import { setCustomerMode } from "@/modules/crm/service";
 import { getCrmAdapter } from "@/modules/integrations/crm/factory";
 import { removeCoraCredentials, saveCoraCredentials } from "@/modules/providers/cora-config";
+import { removeEmailAccount, saveEmailAccount } from "@/modules/providers/email-config";
 import { applySync, previewSync, resolveConflict, saveConnection } from "@/modules/integrations/crm/sync";
 
 type Sample = Awaited<ReturnType<typeof previewSync>>;
@@ -95,5 +96,30 @@ export async function saveCoraAction(_: CoraState, fd: FormData): Promise<CoraSt
 
 export async function removeCoraAction(fd: FormData) {
   try { const c = await ctx(); await removeCoraCredentials(db, c.userId, c.companyId, String(fd.get("environment") ?? "")); } catch (e) { msg(e); }
+  revalidatePath("/integracoes");
+}
+
+export type EmailState = { error?: string; saved?: string; values?: Record<string, string> } | undefined;
+
+/** Usuário e senha em branco mantêm os atuais. Nada do que foi digitado volta para a tela nem vai para o registro. */
+export async function saveEmailAction(_: EmailState, fd: FormData): Promise<EmailState> {
+  try {
+    const c = await ctx();
+    const r = await saveEmailAccount(db, c.userId, c.companyId, {
+      host: bounded(fd, "host", 300), port: bounded(fd, "port", 10), security: bounded(fd, "security", 20), fromEmail: bounded(fd, "fromEmail", 300),
+      fromName: bounded(fd, "fromName", 200), replyTo: bounded(fd, "replyTo", 300), user: bounded(fd, "user", 300), password: bounded(fd, "password", 600),
+    });
+    revalidatePath("/integracoes");
+    return { saved: r.replaced ? "Conta de e-mail atualizada (usuário e senha em branco mantêm os atuais)." : "Conta de e-mail guardada (usuário e senha cifrados). Nenhum e-mail é enviado." };
+  } catch (e) {
+    // devolve só o que NÃO é segredo (usuário e senha são sempre limpos), para a pessoa não redigitar o resto
+    if (e instanceof Invalid || e instanceof Forbidden) return { error: e.message, values: Object.fromEntries(["host", "port", "security", "fromEmail", "fromName", "replyTo"].map((k) => [k, String(fd.get(k) ?? "").slice(0, 300)])) };
+    console.error("email: falha inesperada ao guardar a conta", e instanceof Error ? e.name : "erro"); // nunca o conteúdo
+    return { error: "Não foi possível guardar agora. Tente de novo; se persistir, avise o suporte." };
+  }
+}
+
+export async function removeEmailAction() {
+  try { const c = await ctx(); await removeEmailAccount(db, c.userId, c.companyId); } catch (e) { msg(e); }
   revalidatePath("/integracoes");
 }

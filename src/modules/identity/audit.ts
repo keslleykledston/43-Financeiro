@@ -19,7 +19,7 @@ export const ACTION_LABEL: Record<string, string> = {
   "commission.contract_set": "Definiu comissão de parceiro no contrato", "commission.closed": "Fechou comissão do mês", "commission.paid": "Registrou pagamento de comissão", "commission.cancelled": "Cancelou fechamento de comissão",
   "provider.credentials_saved": "Guardou credenciais de provedor", "provider.credentials_removed": "Removeu credenciais de provedor",
   "contract.change_proposed": "Propôs aditivo/alteração de contrato", "contract.version_approved": "Aprovou aditivo/alteração de contrato", "contract.version_rejected": "Rejeitou alteração de contrato", "contract.draft_updated": "Corrigiu contrato em rascunho", "contract.status_changed": "Mudou a situação do contrato",
-  "note.added": "Registrou comentário", "company.updated": "Alterou dados da empresa",
+  "note.added": "Registrou comentário", "company.updated": "Alterou dados da empresa", "company.fiscal_updated": "Alterou dados fiscais/contabilidade da empresa", "provider.email_saved": "Guardou conta de e-mail (SMTP)", "provider.email_removed": "Removeu conta de e-mail (SMTP)",
   "party.created": "Criou cadastro", "party.updated": "Alterou cadastro", "party.archived": "Arquivou cadastro",
 };
 

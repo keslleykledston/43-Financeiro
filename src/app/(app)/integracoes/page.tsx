@@ -13,7 +13,11 @@ import { readiness } from "@/modules/providers/readiness";
 import { getCoraStatus, hasCoraCredentials } from "@/modules/providers/cora-config";
 import { CORA_SCOPE, ENV_LABEL } from "@/modules/providers/cora";
 import { CoraForm } from "./cora-form";
-import { removeCoraAction } from "./actions";
+import { EmailForm } from "./email-form";
+import { getEmailStatus, hasEmailAccount } from "@/modules/providers/email-config";
+import { SECURITY_LABEL } from "@/modules/providers/email";
+import { nfseProfileComplete } from "@/modules/companies/fiscal";
+import { removeCoraAction, removeEmailAction } from "./actions";
 
 const REASON: Record<string, string> = { duplicate_document: "Já existe um cadastro local com este documento", document_collision: "O documento colide com outro cadastro ativo", ambiguous_company: "Não foi possível saber a qual empresa pertence" };
 const fmt = (d: Date) => d.toLocaleString("pt-BR", { timeZone: "America/Manaus" });
@@ -30,6 +34,9 @@ export default async function Integracoes() {
   const coraAccess = can(role, "providers.credentials");
   const cora = coraAccess ? await getCoraStatus(db, ctx.user.id, ctx.current.id) : [];
   const coraInDb = coraAccess ? await hasCoraCredentials(db, ctx.user.id, ctx.current.id) : false;
+  const email = coraAccess ? await getEmailStatus(db, ctx.user.id, ctx.current.id) : null;
+  const emailInDb = coraAccess ? await hasEmailAccount(db, ctx.user.id, ctx.current.id) : false;
+  const fiscalComplete = can(role, "company.manage") ? await nfseProfileComplete(db, ctx.user.id, ctx.current.id) : false;
   const master = process.env.CRM_SYNC_ENABLED === "true";
   const configured = !!process.env.CRM_BASE_URL && !!process.env.CRM_API_TOKEN;
   return (
@@ -107,6 +114,21 @@ export default async function Integracoes() {
           <CoraForm />
         </>) : <p className="text-sm text-muted-foreground">As credenciais da Cora são cadastradas somente pela diretoria.</p>}
       </section>
+      <section className="rounded-lg border bg-card p-5" aria-labelledby="email-h">
+        <h2 id="email-h" className="mb-1 font-semibold">E-mail (SMTP) — envio de cobranças</h2>
+        <p className="mb-3 text-sm text-muted-foreground">Conta do domínio usada para enviar lembretes e cobranças desta empresa. Cada empresa tem a sua.</p>
+        {coraAccess && email ? (<>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <p className="text-xs text-muted-foreground">{email.configured ? <>Configurada · {email.host}:{email.port} · {SECURITY_LABEL[email.security]} · remetente {email.fromName ? `${email.fromName} ` : ""}&lt;{email.fromEmail}&gt;{email.replyTo ? ` · respostas para ${email.replyTo}` : ""} · usuário e senha guardados (cifrados)</> : "Nenhuma conta cadastrada"}</p>
+            <div className="flex items-center gap-2">
+              <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${email.configured ? "bg-positive-soft text-positive-foreground" : "bg-muted"}`}>{email.configured ? "Guardada" : "Pendente"}</span>
+              {email.configured && <form action={removeEmailAction}><button className="rounded-md px-2.5 py-1 text-xs text-negative-foreground ring-1 ring-border">Remover</button></form>}
+            </div>
+          </div>
+          <p className="mb-3 rounded-md bg-muted p-3 text-xs text-muted-foreground">Guardar a conta <strong>não liga o envio</strong>: nenhum e-mail sai até a fase do envio real, a homologação (SPF, DKIM e DMARC do domínio) e a sua autorização escrita. Por segurança só aceitamos o <strong>nome público</strong> do servidor (sem IP) e as portas 465, 587, 2525 ou 25.</p>
+          <EmailForm current={email.configured ? { host: email.host, port: email.port, security: email.security, fromEmail: email.fromEmail, fromName: email.fromName ?? "", replyTo: email.replyTo ?? "" } : null} />
+        </>) : <p className="text-sm text-muted-foreground">A conta de e-mail é cadastrada somente pela diretoria.</p>}
+      </section>
       <section className="rounded-lg border bg-card p-5">
         <h2 className="mb-1 font-semibold">Provedores de cobrança e mensagens</h2>
         <p className="mb-3 text-sm text-muted-foreground">Hoje todos funcionam em <strong>modo simulado</strong>: nada é emitido nem enviado de verdade. Cada provedor real entra numa fase própria, só com credenciais fora do Git, homologação e autorização.</p>
@@ -124,7 +146,7 @@ export default async function Integracoes() {
         <h2 className="mb-1 font-semibold">Portão da emissão real (checklist)</h2>
         <p className="mb-3 text-sm text-muted-foreground">Enquanto algum item estiver pendente, a emissão e o envio reais permanecem <strong>bloqueados</strong>. O sistema só confere se os arquivos de segredo existem; nunca lê o conteúdo. Detalhes em <code>docs/E10_GOLIVE.md</code>.</p>
         <ul className="divide-y divide-border text-sm">
-          {readiness(process.env, { coraInDb }).filter((r) => coraAccess || r.key !== "cora-creds").map((r) => (
+          {readiness(process.env, { coraInDb, emailInDb, fiscalComplete }).filter((r) => (coraAccess || (r.key !== "cora-creds" && r.key !== "smtp-creds")) && (can(role, "company.manage") || r.key !== "fiscal-profile")).map((r) => (
             <li key={r.key} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
               <div><p className="font-medium">{r.label}</p><p className="text-xs text-muted-foreground">{r.detail}</p></div>
               <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${r.state === "ok" ? "bg-positive-soft text-positive-foreground" : r.state === "alerta" ? "bg-negative-soft text-negative-foreground" : "bg-muted"}`}>{r.state === "ok" ? "OK" : r.state === "alerta" ? "Atenção" : "Pendente"}</span>

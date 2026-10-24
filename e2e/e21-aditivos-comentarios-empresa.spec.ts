@@ -60,13 +60,13 @@ test("E21 — aditivo com aprovação na hora, comentários só de acréscimo e 
   await test.step("dados da empresa: valida e salva; o '?' leva ao artigo", async () => {
     await page.goto("/empresa");
     await expect(page.getByRole("heading", { name: "Dados da empresa" })).toBeVisible();
-    await page.getByLabel("CNPJ").fill("11.111.111/1111-11");
-    await page.getByRole("button", { name: "Salvar" }).click();
+    await page.getByLabel("CNPJ", { exact: true }).fill("11.111.111/1111-11");
+    await page.getByRole("button", { name: "Salvar", exact: true }).click();
     await expect(page.getByRole("alert").filter({ hasText: "CNPJ inválido" })).toBeVisible();
     await page.goto("/empresa");
     await page.getByLabel("Razão social").fill(`Razão Social Teste ${run} Ltda`);
     await page.getByLabel("Endereço").fill("Rua Teste, 123 — Manaus/AM");
-    await page.getByRole("button", { name: "Salvar" }).click();
+    await page.getByRole("button", { name: "Salvar", exact: true }).click();
     await expect(page.getByText(/Salvo: .*razão social/)).toBeVisible();
     await page.getByRole("link", { name: "Ajuda desta tela" }).click();
     await expect(page).toHaveURL(/\/ajuda\/dados-da-empresa$/);
