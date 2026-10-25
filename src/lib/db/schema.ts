@@ -1065,6 +1065,50 @@ export const emailSendLog = pgTable("email_send_log", {
 
 // H1 — histórico a partir da planilha de boletos (docs/HISTORICO_E_CAIXA.md). STAGING imutável: cada linha da planilha como veio, por empresa. NÃO é cobrança nem
 // contrato: nada aqui alimenta lotes, régua, emissão, contas a receber ou painel. Serve ao relatório de divergências e (H2/H3, com autorização própria) à carga histórica.
+// D3 — staging do histórico de DESPESAS (planilha Despesas__2026). Imutável como o H1; NÃO cria conta a pagar, sócio, lançamento nem fornecedor.
+export const expenseImports = pgTable("expense_imports", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  fileSha256: text("file_sha256").notNull(),
+  fileLabel: text("file_label").notNull(),
+  year: integer("year").notNull(),
+  rowCount: integer("row_count").notNull(),
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+}, (t) => [
+  uniqueIndex("expense_imports_file_uq").on(t.companyId, t.fileSha256),
+  unique("expense_imports_company_id_uq").on(t.companyId, t.id),
+  check("expense_imports_sha_chk", sql`${t.fileSha256} ~ '^[0-9a-f]{64}$'`),
+  check("expense_imports_year_chk", sql`${t.year} between 2000 and 2100`),
+]);
+
+export const expenseImportRows = pgTable("expense_import_rows", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  companyId: uuid("company_id").notNull(),
+  importId: uuid("import_id").notNull(),
+  sheet: text("sheet").notNull(),
+  rowNumber: integer("row_number").notNull(),
+  month: text("month").notNull(), // YYYY-MM da aba
+  block: text("block").notNull(), // empresa | casa | cartao (fatura, só referência) | dizimo
+  description: text("description").notNull(),
+  dueOn: date("due_on", { mode: "string" }),
+  amount: numeric("amount", { precision: 18, scale: 2 }), // VALOR (o que a conta pedia)
+  paidAmount: numeric("paid_amount", { precision: 18, scale: 2 }), // VALOR / PG
+  paidOn: date("paid_on", { mode: "string" }),
+  paidRaw: text("paid_raw"), // texto da data de pagamento quando não é data ("19/02", "10,15/04")
+  installmentNo: integer("installment_no"),
+  installmentsTotal: integer("installments_total"),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.importId], foreignColumns: [expenseImports.companyId, expenseImports.id] }).onDelete("cascade"),
+  uniqueIndex("expense_rows_pos_uq").on(t.importId, t.sheet, t.rowNumber, t.block),
+  index("expense_rows_company_month_idx").on(t.companyId, t.month),
+  check("expense_rows_month_chk", sql`${t.month} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+  check("expense_rows_block_chk", sql`${t.block} in ('empresa', 'casa', 'cartao', 'dizimo')`),
+  check("expense_rows_amounts_chk", sql`coalesce(${t.amount}, 0) >= 0 and coalesce(${t.paidAmount}, 0) >= 0`),
+  check("expense_rows_text_chk", sql`char_length(${t.description}) between 1 and 200 and (${t.paidRaw} is null or char_length(${t.paidRaw}) <= 40)`),
+  check("expense_rows_inst_chk", sql`(${t.installmentNo} is null) = (${t.installmentsTotal} is null) and (${t.installmentNo} is null or (${t.installmentNo} between 1 and ${t.installmentsTotal} and ${t.installmentsTotal} between 2 and 999))`),
+]);
+
 export const legacyImports = pgTable("legacy_imports", {
   ...base,
   companyId: uuid("company_id").notNull().references(() => companies.id),

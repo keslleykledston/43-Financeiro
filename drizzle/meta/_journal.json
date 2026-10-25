@@ -239,6 +239,13 @@
       "when": 1792953963966,
       "tag": "0033_normal_retro_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792956717430,
+      "tag": "0034_chief_payback",
+      "breakpoints": true
     }
   ]
 }

@@ -22,7 +22,8 @@ export default async function Historico({ searchParams }: { searchParams: Promis
   const canImport = can(role, "history.import"), canFix = can(role, "history.fix");
   return (
     <div className="max-w-4xl space-y-5">
-      <PageHeader title="Histórico da planilha" description={`${ctx.current.name} · as linhas da planilha de boletos como vieram, e o que precisa de revisão.`} />
+      <PageHeader title="Histórico da planilha" description={`${ctx.current.name} · as linhas da planilha de boletos como vieram, e o que precisa de revisão.`}
+        actions={can(role, "partners.read") ? <a href="/historico/despesas" className={buttonClass("outline")}>Histórico de despesas</a> : undefined} />
       <Callout tone="info">Esta tela só <strong>lê</strong> e mede. Nada daqui cria ou altera clientes, contratos, cobranças, pagamentos, mensagens ou emissões.</Callout>
       {sp.erro && <Callout tone="negative" role="alert">{sp.erro}</Callout>}
       {sp.removido && <Callout tone="positive" role="status">Importação desfeita.</Callout>}
