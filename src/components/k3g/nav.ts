@@ -1,4 +1,4 @@
-import { CircleHelp, HandCoins, History, Landmark, FileText, LayoutDashboard, MessageSquare, Plug, Receipt, ReceiptText, Settings, Users, Wallet, type LucideIcon } from "lucide-react";
+import { CircleHelp, HandCoins, History, Landmark, FileText, LayoutDashboard, MessageSquare, Plug, Receipt, ReceiptText, Scale, Settings, Users, Wallet, type LucideIcon } from "lucide-react";
 
 export interface NavItem { label: string; href: string; icon: LucideIcon; soon?: boolean; mobile?: boolean; /** outros caminhos que também marcam este item como ativo (ex.: /empresa dentro de Configurações) */ also?: string[] }
 
@@ -12,9 +12,10 @@ export const NAV: NavItem[] = [
   { label: "A receber", href: "/contas-a-receber", icon: Wallet },
   { label: "A pagar", href: "/contas-a-pagar", icon: ReceiptText },
   { label: "Conciliação", href: "/conciliacao", icon: Landmark },
+  { label: "Sócios", href: "/socios", icon: Scale },
   { label: "Comissões", href: "/comissoes", icon: HandCoins },
   { label: "Histórico", href: "/historico", icon: History },
   { label: "Integrações", href: "/integracoes", icon: Plug, mobile: true },
   { label: "Ajuda", href: "/ajuda", icon: CircleHelp },
-  { label: "Configurações", href: "/configuracao", icon: Settings, mobile: true, also: ["/empresa", "/auditoria"] },
+  { label: "Configurações", href: "/configuracao", icon: Settings, mobile: true, also: ["/empresa", "/auditoria", "/despesas-cadastros"] },
 ];

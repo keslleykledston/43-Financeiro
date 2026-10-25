@@ -634,6 +634,46 @@ export const issuanceRequests = pgTable("issuance_requests", {
 
 // E11 — contas a pagar. A aplicação NUNCA executa pagamento: ela organiza, aprova (com alçada) e REGISTRA o que foi pago à mão no Cora.
 // Fluxo: rascunho → aguardando_aprovacao → aprovado | rejeitado | cancelado. "Paga" é derivado (soma das baixas ativas), como nas contas a receber.
+// D1 — categorias de despesa (empresa) e de gasto pessoal dos sócios; centros de custo; sócios; conta-corrente dos sócios.
+export const expenseCategories = pgTable("expense_categories", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  code: text("code").notNull(), // estável (usado por regras e importações)
+  name: text("name").notNull(),
+  grp: text("grp").notNull(),
+  kind: text("kind").notNull(), // empresa | pessoal
+  active: boolean("active").notNull().default(true),
+  sort: integer("sort").notNull().default(100),
+}, (t) => [
+  unique("expense_categories_company_id_uq").on(t.companyId, t.id),
+  uniqueIndex("expense_categories_code_uq").on(t.companyId, t.code),
+  check("expense_categories_kind_chk", sql`${t.kind} in ('empresa', 'pessoal')`),
+  check("expense_categories_text_chk", sql`char_length(${t.name}) between 2 and 60 and char_length(${t.grp}) between 2 and 40 and ${t.code} ~ '^[a-z0-9_]{2,40}$'`),
+]);
+
+export const costCenters = pgTable("cost_centers", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  code: text("code").notNull(),
+  name: text("name").notNull(),
+  active: boolean("active").notNull().default(true),
+}, (t) => [
+  unique("cost_centers_company_id_uq").on(t.companyId, t.id),
+  uniqueIndex("cost_centers_code_uq").on(t.companyId, t.code),
+  check("cost_centers_text_chk", sql`char_length(${t.name}) between 2 and 60 and ${t.code} ~ '^[a-z0-9_]{2,40}$'`),
+]);
+
+export const partners = pgTable("partners", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  name: text("name").notNull(),
+  active: boolean("active").notNull().default(true),
+}, (t) => [
+  unique("partners_company_id_uq").on(t.companyId, t.id),
+  uniqueIndex("partners_name_uq").on(t.companyId, sql`lower(${t.name})`),
+  check("partners_name_chk", sql`char_length(${t.name}) between 2 and 80`),
+]);
+
 export const payables = pgTable("payables", {
   ...base,
   companyId: uuid("company_id").notNull().references(() => companies.id),
@@ -643,6 +683,10 @@ export const payables = pgTable("payables", {
   amount: numeric("amount", { precision: 18, scale: 2 }).notNull(),
   dueDate: date("due_date", { mode: "string" }).notNull(),
   category: text("category"),
+  // D1 — classificação estruturada (todas opcionais: contas antigas continuam válidas)
+  categoryId: uuid("category_id"),
+  costCenterId: uuid("cost_center_id"),
+  competence: date("competence", { mode: "string" }), // mês de competência (sempre dia 1)
   status: text("status").notNull().default("rascunho"),
   createdBy: uuid("created_by").notNull().references(() => users.id),
   submittedAt: timestamp("submitted_at", { withTimezone: true }),
@@ -654,6 +698,9 @@ export const payables = pgTable("payables", {
   cancelReason: text("cancel_reason"),
 }, (t) => [
   foreignKey({ columns: [t.companyId, t.vendorId], foreignColumns: [vendors.companyId, vendors.id] }),
+  foreignKey({ columns: [t.companyId, t.categoryId], foreignColumns: [expenseCategories.companyId, expenseCategories.id] }),
+  foreignKey({ columns: [t.companyId, t.costCenterId], foreignColumns: [costCenters.companyId, costCenters.id] }),
+  check("payables_competence_chk", sql`${t.competence} is null or extract(day from ${t.competence}) = 1`),
   unique("payables_company_id_uq").on(t.companyId, t.id),
   uniqueIndex("payables_doc_uq").on(t.companyId, t.vendorId, sql`lower(${t.documentNumber})`).where(sql`${t.documentNumber} is not null and ${t.status} not in ('cancelado', 'rejeitado')`),
   index("payables_due_idx").on(t.companyId, t.status, t.dueDate),
@@ -693,6 +740,36 @@ export const payablePayments = pgTable("payable_payments", {
 ]);
 
 // Alçada e segregação por empresa. Padrão conservador: gerente aprova até R$ 5.000,00; ninguém aprova o que criou.
+// Conta-corrente do sócio com a empresa. Sinal do saldo (positivo = a empresa deve ao sócio): retirada −, despesa_paga_pelo_socio +, devolucao_do_socio +, reembolso_ao_socio −, compensacao_lucros +.
+export const partnerEntries = pgTable("partner_entries", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  partnerId: uuid("partner_id").notNull(),
+  kind: text("kind").notNull(),
+  amount: numeric("amount", { precision: 18, scale: 2 }).notNull(),
+  occurredOn: date("occurred_on", { mode: "string" }).notNull(),
+  categoryId: uuid("category_id"),
+  description: text("description").notNull(),
+  payableId: uuid("payable_id"),
+  requestKey: text("request_key"),
+  status: text("status").notNull().default("ativo"), // ativo | estornado
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+  reversedBy: uuid("reversed_by").references(() => users.id),
+  reversedAt: timestamp("reversed_at", { withTimezone: true }),
+  reverseReason: text("reverse_reason"),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.partnerId], foreignColumns: [partners.companyId, partners.id] }),
+  foreignKey({ columns: [t.companyId, t.categoryId], foreignColumns: [expenseCategories.companyId, expenseCategories.id] }),
+  foreignKey({ columns: [t.companyId, t.payableId], foreignColumns: [payables.companyId, payables.id] }),
+  uniqueIndex("partner_entries_request_key_uq").on(t.companyId, t.requestKey).where(sql`${t.requestKey} is not null`),
+  index("partner_entries_partner_idx").on(t.companyId, t.partnerId, t.occurredOn),
+  check("partner_entries_kind_chk", sql`${t.kind} in ('retirada', 'despesa_paga_pelo_socio', 'devolucao_do_socio', 'reembolso_ao_socio', 'compensacao_lucros')`),
+  check("partner_entries_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),
+  check("partner_entries_status_chk", sql`${t.status} in ('ativo', 'estornado')`),
+  check("partner_entries_reversal_chk", sql`(${t.status} = 'estornado' and ${t.reversedBy} is not null and ${t.reversedAt} is not null and char_length(btrim(${t.reverseReason})) >= 3) or (${t.status} = 'ativo' and ${t.reversedBy} is null and ${t.reversedAt} is null and ${t.reverseReason} is null)`),
+  check("partner_entries_text_chk", sql`char_length(${t.description}) between 2 and 200`),
+]);
+
 export const payablesSettings = pgTable("payables_settings", {
   ...base,
   companyId: uuid("company_id").notNull().references(() => companies.id),

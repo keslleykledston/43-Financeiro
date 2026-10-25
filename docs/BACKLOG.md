@@ -174,3 +174,11 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [x] E-mail do sistema (senha/convite) pelas mesmas travas do envio real; migração 0031. **E-mail real NÃO ligado** (depende da autorização escrita e da conta SMTP).
 - [ ] Ligar o canário de e-mail incluindo os endereços dos usuários na lista autorizada (docs/E10_GOLIVE.md) para o "esqueci minha senha" enviar de verdade.
 - [ ] Aviso por e-mail "sua senha foi alterada"; 2FA.
+
+## D1 — Despesas: categorias, centros, sócios, conta-corrente (2026-10-25, planilha Despesas__2026)
+- [x] Categorias (~30 padrão, editáveis), centros de custo, sócios; conta-corrente dos sócios (retirada, despesa paga pelo sócio, devolução, reembolso, compensação nos lucros); contas a pagar com categoria/centro/competência; migração 0032.
+- [ ] D2: recorrências (Vivo, energia, Simples, salário…), parcelas (empréstimos, consórcio, carro) com saldo e compromissos futuros, calendário de pagamentos.
+- [ ] D3: importar Despesas__2026.xlsx em staging com classificação sugerida (exige autorização escrita) + cruzar com extratos bancários.
+- [ ] D4: plano de retiradas e previsão de lucro (receita pelos contratos, despesas recorrentes e parcelas, limite de retirada sugerido, cenários).
+- [ ] D5: fatura de cartão aberta em compras; D6: conciliação com extrato Cora/OFX.
+- [ ] Mostrar sócios/categorias no painel; relatório de despesas por categoria/mês/centro.

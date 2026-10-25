@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
-import { auditLog, payablePayments, payables, payablesSettings, vendors } from "@/lib/db/schema";
+import { auditLog, costCenters, expenseCategories, payablePayments, payables, payablesSettings, vendors } from "@/lib/db/schema";
 import { toCsv } from "@/lib/csv";
 import { formatBRL } from "@/lib/format";
 import { isIsoDate } from "@/lib/iso-date";
@@ -41,7 +41,32 @@ export async function savePayablesSettings(db: DB, actorId: string, companyId: s
   });
 }
 
-export type PayableInput = { vendorId: string; description: string; documentNumber?: string; amount: string; dueDate: string; category?: string; force?: boolean };
+export type PayableInput = { vendorId: string; description: string; documentNumber?: string; amount: string; dueDate: string; category?: string; categoryId?: string; costCenterId?: string; competence?: string; force?: boolean };
+
+/** D1 — classificação estruturada (opcional): categoria da EMPRESA ativa, centro de custo ativo e mês de competência. */
+async function resolveClass(x: DB, companyId: string, i: PayableInput) {
+  let categoryId: string | null = null, costCenterId: string | null = null, competence: string | null = null;
+  if (i.categoryId) {
+    if (!uuidOk(i.categoryId)) throw new Invalid("Categoria não encontrada");
+    const [c] = await x.select({ active: expenseCategories.active, kind: expenseCategories.kind }).from(expenseCategories).where(and(eq(expenseCategories.id, i.categoryId), eq(expenseCategories.companyId, companyId)));
+    if (!c || !c.active) throw new Invalid("Categoria não encontrada ou inativa");
+    if (c.kind !== "empresa") throw new Invalid("Escolha uma categoria de despesa da empresa (gasto pessoal de sócio vai em Sócios)");
+    categoryId = i.categoryId;
+  }
+  if (i.costCenterId) {
+    if (!uuidOk(i.costCenterId)) throw new Invalid("Centro de custo não encontrado");
+    const [c] = await x.select({ active: costCenters.active }).from(costCenters).where(and(eq(costCenters.id, i.costCenterId), eq(costCenters.companyId, companyId)));
+    if (!c || !c.active) throw new Invalid("Centro de custo não encontrado ou inativo");
+    costCenterId = i.costCenterId;
+  }
+  const comp = (i.competence ?? "").trim();
+  if (comp) {
+    const m = /^(\d{4}-(0[1-9]|1[0-2]))(-01)?$/.exec(comp);
+    if (!m) throw new Invalid("Mês de competência inválido");
+    competence = `${m[1]}-01`;
+  }
+  return { categoryId, costCenterId, competence };
+}
 
 function validate(i: PayableInput) {
   if (!uuidOk(i.vendorId ?? "")) throw new Invalid("Escolha o fornecedor");
@@ -84,8 +109,9 @@ export async function createPayable(db: DB, actorId: string, companyId: string, 
       const x = tx as unknown as DB;
       await lockVendor(x, companyId, i.vendorId);
       await assertVendor(x, companyId, i.vendorId);
+      const cls = await resolveClass(x, companyId, i);
       if (!i.force && (await checkDuplicate(x, companyId, i.vendorId, v.cents, i.dueDate))) throw new Invalid("POSSIVEL_DUPLICIDADE: já há uma conta deste fornecedor com o mesmo valor e vencimento. Confirme que não é a mesma");
-      const [p] = await x.insert(payables).values({ companyId, vendorId: i.vendorId, description: v.description, documentNumber: v.documentNumber, amount: numericFromCents(v.cents), dueDate: i.dueDate, category: v.category, createdBy: actorId }).returning({ id: payables.id });
+      const [p] = await x.insert(payables).values({ companyId, vendorId: i.vendorId, description: v.description, documentNumber: v.documentNumber, amount: numericFromCents(v.cents), dueDate: i.dueDate, category: v.category, ...cls, createdBy: actorId }).returning({ id: payables.id });
       await audit(x, companyId, actorId, "payable.created", { payableId: p.id, vendorId: i.vendorId });
       return p.id;
     });
@@ -112,8 +138,9 @@ export async function updatePayable(db: DB, actorId: string, companyId: string, 
       if (p.createdBy !== actorId && role !== "diretoria" && role !== "gerente") throw new Forbidden("Só quem criou o rascunho (ou a gerência) pode editá-lo");
       await lockVendor(x, companyId, i.vendorId);
       await assertVendor(x, companyId, i.vendorId);
+      const cls = await resolveClass(x, companyId, i);
       if (!i.force && (await checkDuplicate(x, companyId, i.vendorId, v.cents, i.dueDate, id))) throw new Invalid("POSSIVEL_DUPLICIDADE: já há uma conta deste fornecedor com o mesmo valor e vencimento. Confirme que não é a mesma");
-      await x.update(payables).set({ vendorId: i.vendorId, description: v.description, documentNumber: v.documentNumber, amount: numericFromCents(v.cents), dueDate: i.dueDate, category: v.category, updatedAt: new Date() }).where(eq(payables.id, id));
+      await x.update(payables).set({ vendorId: i.vendorId, description: v.description, documentNumber: v.documentNumber, amount: numericFromCents(v.cents), dueDate: i.dueDate, category: v.category, ...cls, updatedAt: new Date() }).where(eq(payables.id, id));
       await audit(x, companyId, actorId, "payable.updated", { payableId: id });
     });
   } catch (e) { mapUnique(e); }
@@ -264,13 +291,13 @@ function where(companyId: string, f: ListFilters, today: string) {
   if (f.dueTo && isIsoDate(f.dueTo)) parts.push(sql`p.due_date <= ${f.dueTo}::date`);
   return sql.join(parts, sql` and `);
 }
-export type PayableRow = { id: string; vendorId: string; vendorName: string; description: string; documentNumber: string | null; category: string | null; dueDate: string; status: string; amountCents: number; paidCents: number; openCents: number; situation: ReturnType<typeof payableSituation>["situation"]; overdueDays: number; createdBy: string };
+export type PayableRow = { id: string; vendorId: string; vendorName: string; description: string; documentNumber: string | null; category: string | null; categoryId: string | null; categoryName: string | null; costCenterId: string | null; costCenterName: string | null; competence: string | null; dueDate: string; status: string; amountCents: number; paidCents: number; openCents: number; situation: ReturnType<typeof payableSituation>["situation"]; overdueDays: number; createdBy: string };
 const toRow = (r: Row, today: string): PayableRow => {
   const amountCents = centsFromNumeric(String(r.amount)), paidCents = centsFromNumeric(String(r.paid));
   const s = payableSituation({ status: String(r.status), amountCents, paidCents, dueDate: String(r.due_date), today });
-  return { id: String(r.id), vendorId: String(r.vendor_id), vendorName: String(r.legal_name), description: String(r.description), documentNumber: (r.document_number as string | null) ?? null, category: (r.category as string | null) ?? null, dueDate: String(r.due_date), status: String(r.status), amountCents, paidCents, openCents: s.openCents, situation: s.situation, overdueDays: s.overdueDays, createdBy: String(r.created_by) };
+  return { id: String(r.id), vendorId: String(r.vendor_id), vendorName: String(r.legal_name), description: String(r.description), documentNumber: (r.document_number as string | null) ?? null, category: (r.category as string | null) ?? null, categoryId: (r.category_id as string | null) ?? null, categoryName: (r.category_name as string | null) ?? null, costCenterId: (r.cost_center_id as string | null) ?? null, costCenterName: (r.cost_center_name as string | null) ?? null, competence: (r.competence as string | null) ?? null, dueDate: String(r.due_date), status: String(r.status), amountCents, paidCents, openCents: s.openCents, situation: s.situation, overdueDays: s.overdueDays, createdBy: String(r.created_by) };
 };
-const COLS = sql`p.id, p.vendor_id, v.legal_name, p.description, p.document_number, p.category, p.due_date::text, p.status, p.amount::text, coalesce(pp.paid, 0)::text paid, p.created_by`;
+const COLS = sql`p.id, p.vendor_id, v.legal_name, p.description, p.document_number, p.category, p.category_id, p.cost_center_id, p.competence::text, (select name from expense_categories where company_id = p.company_id and id = p.category_id) category_name, (select name from cost_centers where company_id = p.company_id and id = p.cost_center_id) cost_center_name, p.due_date::text, p.status, p.amount::text, coalesce(pp.paid, 0)::text paid, p.created_by`;
 
 export async function listPayables(db: DB, actorId: string, companyId: string, f: ListFilters = {}, today = todayManaus()) {
   await requirePerm(db, actorId, companyId, "payables.read");
@@ -339,8 +366,8 @@ export async function exportPayables(db: DB, actorId: string, companyId: string,
   const br = (d: string) => d.split("-").reverse().join("/");
   const money = (c: number) => (c / 100).toFixed(2).replace(".", ",");
   const csv = toCsv([
-    ["Fornecedor", "Descrição", "Documento", "Categoria", "Vencimento", "Valor", "Pago", "Saldo", "Situação", "Dias de atraso"],
-    ...items.map((r) => [r.vendorName, r.description, r.documentNumber ?? "", r.category ?? "", br(r.dueDate), money(r.amountCents), money(r.paidCents), money(r.status === "aprovado" ? r.amountCents - r.paidCents : r.amountCents), SITUATION_LABEL[r.situation], String(r.overdueDays)]),
+    ["Fornecedor", "Descrição", "Documento", "Categoria", "Vencimento", "Valor", "Pago", "Saldo", "Situação", "Dias de atraso", "Centro de custo", "Competência"],
+    ...items.map((r) => [r.vendorName, r.description, r.documentNumber ?? "", r.categoryName ?? r.category ?? "", br(r.dueDate), money(r.amountCents), money(r.paidCents), money(r.status === "aprovado" ? r.amountCents - r.paidCents : r.amountCents), SITUATION_LABEL[r.situation], String(r.overdueDays), r.costCenterName ?? "", r.competence ? r.competence.slice(5, 7) + "/" + r.competence.slice(0, 4) : ""]),
   ]);
   await audit(db, companyId, actorId, "payable.exported", { count: items.length, queue });
   return csv;

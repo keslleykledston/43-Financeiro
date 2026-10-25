@@ -6,7 +6,7 @@
 Menu **A pagar**. Fornecedores são cadastrados em *Clientes e fornecedores* (tipo "Fornecedor").
 
 ## Fluxo
-1. **Lançar** (diretoria, gerente, assistente): fornecedor, descrição, nº do documento (nota/boleto/fatura), valor e vencimento. Nasce como **rascunho** e pode ser editado por quem lançou.
+1. **Lançar** (diretoria, gerente, assistente): fornecedor, descrição, nº do documento (nota/boleto/fatura), categoria, centro de custo, mês de competência, valor e vencimento. Nasce como **rascunho** e pode ser editado por quem lançou.
 2. **Enviar para aprovação.** Depois de enviada, a conta **não pode ser alterada**: para corrigir, cancele e lance de novo.
 3. **Aprovar ou rejeitar** (gerente e diretoria):
    - **Alçada:** o gerente aprova até o limite da empresa (padrão **R$ 5.000,00**); acima disso, só a diretoria.

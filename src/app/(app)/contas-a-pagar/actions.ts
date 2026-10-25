@@ -16,7 +16,7 @@ export type FormState = { error?: string; duplicate?: boolean } | undefined;
 
 export async function savePayableAction(_prev: FormState, fd: FormData): Promise<FormState> {
   const id = s(fd, "id"); let newId = "";
-  const input = { vendorId: s(fd, "vendorId"), description: s(fd, "description"), documentNumber: s(fd, "documentNumber"), amount: s(fd, "amount"), dueDate: s(fd, "dueDate"), category: s(fd, "category"), force: fd.get("force") === "on" };
+  const input = { vendorId: s(fd, "vendorId"), description: s(fd, "description"), documentNumber: s(fd, "documentNumber"), amount: s(fd, "amount"), dueDate: s(fd, "dueDate"), category: s(fd, "category"), categoryId: s(fd, "categoryId"), costCenterId: s(fd, "costCenterId"), competence: s(fd, "competence"), force: fd.get("force") === "on" };
   try {
     const c = await ctx();
     if (id) await updatePayable(db, c.userId, c.companyId, id, input); else newId = await createPayable(db, c.userId, c.companyId, input);

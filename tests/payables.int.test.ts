@@ -276,7 +276,7 @@ describe.skipIf(!enabled)("E11 contas a pagar: fluxo, alçada, duplicidade, baix
     await approved({ description: "=HYPERLINK(\"http://x\")", documentNumber: "E1", amount: "1.234,56", dueDate: "2026-10-28" });
     await expect(exportPayables(db, asstA, A, {}, false, TODAY)).rejects.toThrow(Forbidden);
     const csv = await exportPayables(db, contA, A, { status: "todas" }, false, TODAY);
-    expect(csv.split("\r\n")[0]).toBe("\uFEFFFornecedor;Descrição;Documento;Categoria;Vencimento;Valor;Pago;Saldo;Situação;Dias de atraso");
+    expect(csv.split("\r\n")[0]).toBe("\uFEFFFornecedor;Descrição;Documento;Categoria;Vencimento;Valor;Pago;Saldo;Situação;Dias de atraso;Centro de custo;Competência");
     expect(csv).toContain("'=HYPERLINK"); expect(csv).not.toMatch(/(^|;)=HYPERLINK/m);
     expect(csv).toContain('"1234,56";"0,00";"1234,56";Aprovada · a vencer;0');
     expect((await exportPayables(db, dirA, A, {}, true, TODAY)).split("\r\n").filter(Boolean)).toHaveLength(2);
