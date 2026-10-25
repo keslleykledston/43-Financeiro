@@ -1,7 +1,9 @@
 import { LoginForm } from "./form";
 import { Logo } from "@/components/k3g/shell";
+import { Callout } from "@/components/k3g/primitives";
 
-export default function LoginPage() {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ senha?: string }> }) {
+  const sp = await searchParams;
   return (
     <main className="grid min-h-screen lg:grid-cols-2">
       <section className="hidden flex-col justify-between bg-brand-panel p-10 text-brand-panel-foreground lg:flex">
@@ -20,6 +22,7 @@ export default function LoginPage() {
           <div className="mb-8 lg:hidden"><Logo /></div>
           <h1 className="text-2xl font-semibold">Acessar o painel</h1>
           <p className="mt-1 mb-6 text-sm text-muted-foreground">Acesso somente por convite. Entre com seu e-mail corporativo.</p>
+          {sp.senha === "ok" && <Callout tone="positive" role="status" className="mb-4">Senha alterada. Entre com a nova senha.</Callout>}
           <LoginForm />
         </div>
       </section>

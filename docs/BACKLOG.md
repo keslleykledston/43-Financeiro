@@ -167,3 +167,10 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [ ] Texto da nota/boleto por CONTRATO (hoje é por cliente) se o dono precisar de texto diferente por contrato.
 - [ ] Remover a coluna `companies.address` (sem uso) em limpeza futura.
 
+
+## E27 — Acesso: primeiro acesso, convites e redefinição de senha (2026-10-25, ADR-023)
+- [x] Convite com entrada direta (nome + senha com confirmação + força, já loga), convites pendentes (novo link / cancelar), política única de senha.
+- [x] "Esqueci minha senha" (resposta sempre igual) + `/redefinir/[token]` (uso único, 60 min) + link de nova senha gerado pela diretoria (24 h) + `scripts/ops-reset-link.ts`.
+- [x] E-mail do sistema (senha/convite) pelas mesmas travas do envio real; migração 0031. **E-mail real NÃO ligado** (depende da autorização escrita e da conta SMTP).
+- [ ] Ligar o canário de e-mail incluindo os endereços dos usuários na lista autorizada (docs/E10_GOLIVE.md) para o "esqueci minha senha" enviar de verdade.
+- [ ] Aviso por e-mail "sua senha foi alterada"; 2FA.

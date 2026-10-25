@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { aceitarConvite } from "./helpers";
 
 const CNPJ_ALFA = "12.ABC.345/01DE-35";
 const alerta = (p: Page) => p.locator("p[role=alert]");
@@ -142,18 +143,7 @@ test("E03 — contabilidade vê e exporta, mas não cadastra", async ({ page, br
   await expect(code).toBeVisible();
   const path = new URL((await code.innerText()).trim()).pathname;
 
-  const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } });
-  const g = await ctx.newPage();
-  await g.goto(path);
-  await g.getByLabel("E-mail convidado").fill(email);
-  await g.getByLabel("Nome").fill("Contabilidade");
-  await g.getByLabel(/^Senha/).fill(senha);
-  await g.getByRole("button", { name: "Criar acesso" }).click();
-  await expect(g).toHaveURL(/\/login/);
-  await g.getByLabel("E-mail").fill(email);
-  await g.getByLabel("Senha").fill(senha);
-  await g.getByRole("button", { name: "Entrar" }).click();
-  await expect(g.getByRole("heading", { name: "Visão executiva" })).toBeVisible();
+  const { ctx, page: g } = await aceitarConvite(browser, path, "Contabilidade", senha); // E27: já entra ao criar a senha
 
   await g.goto("/clientes");
   await expect(g.getByRole("heading", { name: "Clientes e fornecedores" })).toBeVisible();

@@ -34,6 +34,9 @@ O adaptador existe, mas **está desligado**. Para o canário (e-mails reais só 
 5. Só então processar a fila (botão em Mensagens): vão só os e-mails cujo destinatário está na lista; o resto fica bloqueado com o motivo.
 **Desligar (kill switch):** *Revogar autorização* (imediato), ou `paused` em Mensagens, ou voltar a chave para `"false"`.
 
+### E-mails do sistema (E27): "esqueci minha senha" e convite por e-mail
+Usam as MESMAS três travas e a MESMA lista de destinatários autorizados. Para o "esqueci minha senha" enviar de verdade, o endereço de cada usuário precisa estar na lista (endereço por endereço, ou `@dominio` do remetente). Fora da lista, ou com qualquer trava faltando, nada é criado nem enviado e a diretoria usa o **Link de nova senha** (Configurações → Usuários e acessos). Têm limite diário próprio (40) e não gastam o limite de cobrança.
+
 ## Ordem de habilitação (um provedor por vez, cada passo com sandbox + revisão do Codex)
 1. **Canário interno de e-mail:** só para endereços internos, limite pequeno, kill switch testado.
 2. **Cora homologação** (boleto/extrato) com a conta de teste; reconsulta, cancelamento e conciliação conferidos.

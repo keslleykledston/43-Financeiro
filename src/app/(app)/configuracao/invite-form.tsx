@@ -2,6 +2,7 @@
 import { useActionState } from "react";
 import { inviteAction } from "./actions";
 import { ROLE_LABEL, type Role } from "@/modules/identity/permissions";
+import { LinkOnce } from "@/components/k3g/link-once";
 
 export function InviteForm({ roles }: { roles: Role[] }) {
   const [state, action, pending] = useActionState(inviteAction, undefined);
@@ -17,12 +18,7 @@ export function InviteForm({ roles }: { roles: Role[] }) {
         <button disabled={pending} className="rounded-md bg-primary px-4 py-2.5 font-medium text-primary-foreground disabled:opacity-60">Convidar</button>
       </div>
       {state?.error && <p role="alert" className="text-sm text-negative-foreground">{state.error}</p>}
-      {state?.link && (
-        <div role="status" className="rounded-md bg-positive-soft p-3 text-sm text-positive-foreground">
-          Convite criado (válido por 72 h). Envie este link ao convidado — ele não será exibido de novo:
-          <code className="mt-1 block break-all">{state.link}</code>
-        </div>
-      )}
+      {state?.link && <LinkOnce link={state.link} note={`Convite criado (válido por 72 h). ${state.mail ?? ""} Este link não será exibido de novo:`} />}
     </form>
   );
 }

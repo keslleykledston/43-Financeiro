@@ -1,4 +1,5 @@
 import { test, expect, type Browser } from "@playwright/test";
+import { aceitarConvite } from "./helpers";
 
 const ANTIGA = "Convidado-Senha-456", NOVA = "Senha-Trocada-789-xyz";
 
@@ -22,15 +23,8 @@ test("Minha conta — trocar a própria senha ponta a ponta", async ({ page, bro
   const code = page.getByRole("status").filter({ hasText: "Convite criado" }).locator("code");
   const path = new URL((await code.innerText()).trim()).pathname;
 
-  const guest = await browser.newContext({ storageState: { cookies: [], origins: [] } });
-  const g = await guest.newPage();
-  await g.goto(path);
-  await g.getByLabel("E-mail convidado").fill(email);
-  await g.getByLabel("Nome").fill("Usuária Conta");
-  await g.getByLabel(/^Senha/).fill(ANTIGA);
-  await g.getByRole("button", { name: "Criar acesso" }).click();
-  await expect(g).toHaveURL(/\/login/);
-  await guest.close();
+  const guest = await aceitarConvite(browser, path, "Usuária Conta", ANTIGA); // E27: já entra ao criar a senha
+  await guest.ctx.close();
 
   const { ctx, page: u } = await entrar(browser, email, ANTIGA);
   await expect(u.getByRole("heading", { name: "Visão executiva" })).toBeVisible();
@@ -73,15 +67,8 @@ test("Minha conta — 'Sair em todos os dispositivos' derruba a sessão (usuári
   await page.getByRole("button", { name: "Convidar" }).click();
   const code = page.getByRole("status").filter({ hasText: "Convite criado" }).locator("code");
   const path = new URL((await code.innerText()).trim()).pathname;
-  const guest = await browser.newContext({ storageState: { cookies: [], origins: [] } });
-  const g = await guest.newPage();
-  await g.goto(path);
-  await g.getByLabel("E-mail convidado").fill(email);
-  await g.getByLabel("Nome").fill("Usuária Sessões");
-  await g.getByLabel(/^Senha/).fill(ANTIGA);
-  await g.getByRole("button", { name: "Criar acesso" }).click();
-  await expect(g).toHaveURL(/\/login/);
-  await guest.close();
+  const guest = await aceitarConvite(browser, path, "Usuária Sessões", ANTIGA);
+  await guest.ctx.close();
 
   // dois "aparelhos" com a mesma conta
   const a = await entrar(browser, email, ANTIGA), b = await entrar(browser, email, ANTIGA);

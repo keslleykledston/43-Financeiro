@@ -28,9 +28,10 @@ export async function activeAuthorization(x: DB, companyId: string) {
   return a ?? null;
 }
 
-/** Mensagens reais de hoje (dia de Manaus) que contam para o limite diário: em andamento, enviadas e de resultado desconhecido. */
+/** Mensagens reais de hoje (dia de Manaus) que contam para o limite diário de COBRANÇA (fila e teste): em andamento, enviadas e de resultado desconhecido.
+ *  E-mails do sistema (senha, convite) têm limite próprio em email-system.ts e não gastam o da cobrança. */
 export async function sentToday(x: DB, companyId: string, today = manausDay()): Promise<number> {
-  const r = await x.execute(sql`select count(*)::int n from email_send_log where company_id = ${companyId} and status in ('enviando', 'enviado', 'desconhecido') and (created_at at time zone 'America/Manaus')::date = ${today}::date`);
+  const r = await x.execute(sql`select count(*)::int n from email_send_log where company_id = ${companyId} and kind in ('fila', 'teste') and status in ('enviando', 'enviado', 'desconhecido') and (created_at at time zone 'America/Manaus')::date = ${today}::date`);
   return Number((r as unknown as { n: number }[])[0].n);
 }
 

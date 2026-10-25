@@ -61,7 +61,23 @@ export const invitations = pgTable("invitations", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   acceptedAt: timestamp("accepted_at", { withTimezone: true }),
   invitedBy: uuid("invited_by").notNull().references(() => users.id),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }), // E27 — convite cancelado ou substituído por um novo link
 }, (t) => [uniqueIndex("invitations_token_uq").on(t.tokenHash), index("invitations_company_idx").on(t.companyId)]);
+
+// E27 — redefinição de senha: só o hash do token; uso único; vence em pouco tempo. `channel` = como o link chegou (e-mail pedido pelo próprio usuário ou gerado por quem administra).
+export const passwordResets = pgTable("password_resets", {
+  ...base,
+  userId: uuid("user_id").notNull().references(() => users.id),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  channel: text("channel").notNull(), // email | admin
+  createdBy: uuid("created_by").references(() => users.id), // nulo = o próprio usuário pediu
+}, (t) => [
+  uniqueIndex("password_resets_token_uq").on(t.tokenHash),
+  index("password_resets_user_idx").on(t.userId),
+  check("password_resets_channel_chk", sql`${t.channel} in ('email', 'admin')`),
+]);
 
 export const rateLimits = pgTable("rate_limits", {
   key: text("key").primaryKey(),
@@ -898,7 +914,7 @@ export const emailLiveAuthorizations = pgTable("email_live_authorizations", {
 export const emailSendLog = pgTable("email_send_log", {
   ...base,
   companyId: uuid("company_id").notNull().references(() => companies.id),
-  kind: text("kind").notNull(), // fila | teste
+  kind: text("kind").notNull(), // fila | teste | senha | convite (E27: e-mails do sistema, fora do limite de cobrança)
   queueId: uuid("queue_id"), // sem FK de propósito: o registro não pode sumir junto com a fila
   recipientDomains: text("recipient_domains").notNull(),
   recipients: integer("recipients").notNull(),
@@ -909,7 +925,7 @@ export const emailSendLog = pgTable("email_send_log", {
   finishedAt: timestamp("finished_at", { withTimezone: true }),
 }, (t) => [
   index("email_send_log_company_idx").on(t.companyId, t.createdAt),
-  check("email_send_log_kind_chk", sql`${t.kind} in ('fila', 'teste')`),
+  check("email_send_log_kind_chk", sql`${t.kind} in ('fila', 'teste', 'senha', 'convite')`),
   check("email_send_log_status_chk", sql`${t.status} in ('enviando', 'enviado', 'falhou', 'desconhecido')`),
   check("email_send_log_finished_chk", sql`(${t.status} = 'enviando') = (${t.finishedAt} is null)`),
 ]);
