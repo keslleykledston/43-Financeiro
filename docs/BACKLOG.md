@@ -177,7 +177,7 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 
 ## D1 — Despesas: categorias, centros, sócios, conta-corrente (2026-10-25, planilha Despesas__2026)
 - [x] Categorias (~30 padrão, editáveis), centros de custo, sócios; conta-corrente dos sócios (retirada, despesa paga pelo sócio, devolução, reembolso, compensação nos lucros); contas a pagar com categoria/centro/competência; migração 0032.
-- [ ] D2: recorrências (Vivo, energia, Simples, salário…), parcelas (empréstimos, consórcio, carro) com saldo e compromissos futuros, calendário de pagamentos.
+- [x] D2: recorrências, parcelamentos com saldo e compromissos futuros, calendário de pagamentos (migração 0033).
 - [ ] D3: importar Despesas__2026.xlsx em staging com classificação sugerida (exige autorização escrita) + cruzar com extratos bancários.
 - [ ] D4: plano de retiradas e previsão de lucro (receita pelos contratos, despesas recorrentes e parcelas, limite de retirada sugerido, cenários).
 - [ ] D5: fatura de cartão aberta em compras; D6: conciliação com extrato Cora/OFX.

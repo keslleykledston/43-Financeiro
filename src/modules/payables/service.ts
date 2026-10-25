@@ -44,7 +44,7 @@ export async function savePayablesSettings(db: DB, actorId: string, companyId: s
 export type PayableInput = { vendorId: string; description: string; documentNumber?: string; amount: string; dueDate: string; category?: string; categoryId?: string; costCenterId?: string; competence?: string; force?: boolean };
 
 /** D1 — classificação estruturada (opcional): categoria da EMPRESA ativa, centro de custo ativo e mês de competência. */
-async function resolveClass(x: DB, companyId: string, i: PayableInput) {
+export async function resolveClass(x: DB, companyId: string, i: PayableInput) {
   let categoryId: string | null = null, costCenterId: string | null = null, competence: string | null = null;
   if (i.categoryId) {
     if (!uuidOk(i.categoryId)) throw new Invalid("Categoria não encontrada");
@@ -83,7 +83,7 @@ function validate(i: PayableInput) {
 /** Serializa lançamentos do MESMO fornecedor: a checagem de duplicidade provável (valor + vencimento) não tem índice, então precisa de lock. */
 const lockVendor = (x: DB, companyId: string, vendorId: string) => x.execute(sql`select pg_advisory_xact_lock(hashtext(${`payable-vendor:${companyId}:${vendorId}`}))`);
 
-async function assertVendor(x: DB, companyId: string, vendorId: string) {
+export async function assertVendor(x: DB, companyId: string, vendorId: string) {
   const [v] = await x.select({ s: vendors.status, archived: vendors.archivedAt }).from(vendors).where(and(eq(vendors.id, vendorId), eq(vendors.companyId, companyId)));
   if (!v || v.archived) throw new Invalid("Fornecedor não encontrado");
   if (v.s !== "ativo") throw new Invalid("Fornecedor inativo: reative o cadastro antes de lançar contas");
@@ -139,6 +139,7 @@ export async function updatePayable(db: DB, actorId: string, companyId: string, 
       await lockVendor(x, companyId, i.vendorId);
       await assertVendor(x, companyId, i.vendorId);
       const cls = await resolveClass(x, companyId, i);
+      if (p.templateId) cls.competence = p.competence; // conta gerada por modelo: a competência é a chave da não-duplicação e não muda
       if (!i.force && (await checkDuplicate(x, companyId, i.vendorId, v.cents, i.dueDate, id))) throw new Invalid("POSSIVEL_DUPLICIDADE: já há uma conta deste fornecedor com o mesmo valor e vencimento. Confirme que não é a mesma");
       await x.update(payables).set({ vendorId: i.vendorId, description: v.description, documentNumber: v.documentNumber, amount: numericFromCents(v.cents), dueDate: i.dueDate, category: v.category, ...cls, updatedAt: new Date() }).where(eq(payables.id, id));
       await audit(x, companyId, actorId, "payable.updated", { payableId: id });

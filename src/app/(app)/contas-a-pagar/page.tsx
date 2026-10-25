@@ -30,6 +30,8 @@ export default async function ContasAPagar({ searchParams }: { searchParams: Pro
         actions={<div className="flex flex-wrap gap-2">
           {write && <AppLink href="/contas-a-pagar/novo" className={buttonClass("primary")}>Nova conta</AppLink>}
           <AppLink href="/contas-a-pagar/execucao" className={buttonClass("outline")}>Fila de execução</AppLink>
+          <AppLink href="/contas-a-pagar/calendario" className={buttonClass("outline")}>Calendário</AppLink>
+          <AppLink href="/contas-a-pagar/recorrentes" className={buttonClass("outline")}>Recorrentes e parcelas</AppLink>
           {can(role, "payables.export") && <a href={`/contas-a-pagar/exportar?${qs}`} className={buttonClass("outline")}>Exportar CSV</a>}
         </div>} />
       <Callout tone="info">Este sistema <strong>não executa pagamentos</strong>. Ele organiza e aprova as contas; quem tem alçada paga no banco (Cora) e depois registra a baixa aqui.</Callout>

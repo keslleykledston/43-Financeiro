@@ -674,6 +674,53 @@ export const partners = pgTable("partners", {
   check("partners_name_chk", sql`char_length(${t.name}) between 2 and 80`),
 ]);
 
+// D2 — contas recorrentes (modelo mensal) e séries de parcelas. Geram RASCUNHOS de contas a pagar, mês a mês, sem duplicar.
+export const payableTemplates = pgTable("payable_templates", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  vendorId: uuid("vendor_id").notNull(),
+  description: text("description").notNull(),
+  amount: numeric("amount", { precision: 18, scale: 2 }).notNull(), // valor ESPERADO; o rascunho pode ser ajustado antes de enviar
+  dueDay: integer("due_day").notNull(), // 1–31 (meses curtos usam o último dia)
+  categoryId: uuid("category_id"),
+  costCenterId: uuid("cost_center_id"),
+  startMonth: date("start_month", { mode: "string" }).notNull(),
+  endMonth: date("end_month", { mode: "string" }),
+  active: boolean("active").notNull().default(true),
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.vendorId], foreignColumns: [vendors.companyId, vendors.id] }),
+  foreignKey({ columns: [t.companyId, t.categoryId], foreignColumns: [expenseCategories.companyId, expenseCategories.id] }),
+  foreignKey({ columns: [t.companyId, t.costCenterId], foreignColumns: [costCenters.companyId, costCenters.id] }),
+  unique("payable_templates_company_id_uq").on(t.companyId, t.id),
+  check("payable_templates_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),
+  check("payable_templates_day_chk", sql`${t.dueDay} between 1 and 31`),
+  check("payable_templates_text_chk", sql`char_length(${t.description}) between 2 and 200`),
+  check("payable_templates_months_chk", sql`extract(day from ${t.startMonth}) = 1 and (${t.endMonth} is null or (extract(day from ${t.endMonth}) = 1 and ${t.endMonth} >= ${t.startMonth}))`),
+]);
+
+export const payableSeries = pgTable("payable_series", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  vendorId: uuid("vendor_id").notNull(),
+  description: text("description").notNull(),
+  installments: integer("installments").notNull(),
+  firstDue: date("first_due", { mode: "string" }).notNull(),
+  amount: numeric("amount", { precision: 18, scale: 2 }).notNull(), // valor de cada parcela
+  categoryId: uuid("category_id"),
+  costCenterId: uuid("cost_center_id"),
+  active: boolean("active").notNull().default(true), // desativar encerra a série: parcelas ainda não geradas deixam de existir
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.vendorId], foreignColumns: [vendors.companyId, vendors.id] }),
+  foreignKey({ columns: [t.companyId, t.categoryId], foreignColumns: [expenseCategories.companyId, expenseCategories.id] }),
+  foreignKey({ columns: [t.companyId, t.costCenterId], foreignColumns: [costCenters.companyId, costCenters.id] }),
+  unique("payable_series_company_id_uq").on(t.companyId, t.id),
+  check("payable_series_amount_chk", sql`${t.amount} > 0 and ${t.amount} <= 99999999999.99`),
+  check("payable_series_count_chk", sql`${t.installments} between 2 and 120`),
+  check("payable_series_text_chk", sql`char_length(${t.description}) between 2 and 160`),
+]);
+
 export const payables = pgTable("payables", {
   ...base,
   companyId: uuid("company_id").notNull().references(() => companies.id),
@@ -687,6 +734,10 @@ export const payables = pgTable("payables", {
   categoryId: uuid("category_id"),
   costCenterId: uuid("cost_center_id"),
   competence: date("competence", { mode: "string" }), // mês de competência (sempre dia 1)
+  // D2 — origem quando gerada por modelo recorrente ou série de parcelas
+  templateId: uuid("template_id"),
+  seriesId: uuid("series_id"),
+  installmentNo: integer("installment_no"),
   status: text("status").notNull().default("rascunho"),
   createdBy: uuid("created_by").notNull().references(() => users.id),
   submittedAt: timestamp("submitted_at", { withTimezone: true }),
@@ -701,6 +752,11 @@ export const payables = pgTable("payables", {
   foreignKey({ columns: [t.companyId, t.categoryId], foreignColumns: [expenseCategories.companyId, expenseCategories.id] }),
   foreignKey({ columns: [t.companyId, t.costCenterId], foreignColumns: [costCenters.companyId, costCenters.id] }),
   check("payables_competence_chk", sql`${t.competence} is null or extract(day from ${t.competence}) = 1`),
+  foreignKey({ columns: [t.companyId, t.templateId], foreignColumns: [payableTemplates.companyId, payableTemplates.id] }),
+  foreignKey({ columns: [t.companyId, t.seriesId], foreignColumns: [payableSeries.companyId, payableSeries.id] }),
+  uniqueIndex("payables_template_month_uq").on(t.templateId, t.competence).where(sql`${t.templateId} is not null`),
+  uniqueIndex("payables_series_no_uq").on(t.seriesId, t.installmentNo).where(sql`${t.seriesId} is not null`),
+  check("payables_origin_chk", sql`(${t.templateId} is null or (${t.seriesId} is null and ${t.competence} is not null)) and ((${t.seriesId} is null) = (${t.installmentNo} is null))`),
   unique("payables_company_id_uq").on(t.companyId, t.id),
   uniqueIndex("payables_doc_uq").on(t.companyId, t.vendorId, sql`lower(${t.documentNumber})`).where(sql`${t.documentNumber} is not null and ${t.status} not in ('cancelado', 'rejeitado')`),
   index("payables_due_idx").on(t.companyId, t.status, t.dueDate),

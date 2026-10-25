@@ -232,6 +232,13 @@
       "when": 1792953415443,
       "tag": "0032_medical_nico_minoru",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792953963966,
+      "tag": "0033_normal_retro_girl",
+      "breakpoints": true
     }
   ]
 }

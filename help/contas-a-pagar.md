@@ -35,3 +35,16 @@ Menu **A pagar**. Fornecedores são cadastrados em *Clientes e fornecedores* (ti
 - Alterar alçada: diretoria.
 
 > Anexos (nota fiscal/boleto em PDF) ficam para a próxima entrega, junto com os comprovantes de contas a receber, por exigirem armazenamento de arquivos com revisão de segurança própria.
+
+
+## Recorrentes, parcelas e calendário
+**Onde:** em **Contas a pagar**, botões **Calendário** e **Recorrentes e parcelas**.
+
+- **Conta recorrente** (Vivo, energia, Simples, salários…): cadastre uma vez o fornecedor, a descrição, o **valor esperado**, o **dia do vencimento** (dia 31 em meses curtos vale o último dia), a categoria, o centro de custo e de qual mês até qual mês vale. Para mudar o valor esperado, o dia ou o mês final, edite na própria linha; vale para os meses **ainda não gerados**.
+- **Parcelamento** (empréstimo, consórcio, carro): informe fornecedor, descrição, **número de parcelas**, **primeiro vencimento** e o valor de cada parcela. Se já pagou algumas, cadastre o primeiro vencimento **ainda em aberto** e as parcelas que restam. A tela mostra quantas foram pagas, quantas restam, o valor restante e o último vencimento. **Encerrar** o parcelamento para de prever as parcelas que ainda não foram geradas.
+- **Calendário:** mostra, mês a mês e dia a dia, o que vence (rascunho, aguardando aprovação, aprovada, paga…) e o que está **previsto** mas ainda não virou conta. O total do mês soma o lançado e o previsto.
+- **Gerar o mês:** cria **rascunhos** das previstas do mês (quem lança, aprova e baixa segue o fluxo normal). Pode clicar de novo sem medo: o que já foi gerado não duplica, e **um rascunho cancelado de propósito não volta**. Fornecedor suspenso/cancelado: a conta não é gerada até reativar o cadastro.
+- A competência de uma conta gerada por modelo não muda (é ela que impede a duplicação). Valor e vencimento do rascunho podem ser ajustados antes de enviar para aprovação.
+- O sistema **não aprova nem paga nada sozinho**.
+
+**Quem pode:** ver, todos os que veem contas a pagar; **gerar o mês**, quem lança contas (diretoria, gerente, assistente); **cadastrar/alterar/encerrar** modelos e parcelamentos, a diretoria.
