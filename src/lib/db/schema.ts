@@ -668,10 +668,29 @@ export const partners = pgTable("partners", {
   companyId: uuid("company_id").notNull().references(() => companies.id),
   name: text("name").notNull(),
   active: boolean("active").notNull().default(true),
+  plannedMonthly: numeric("planned_monthly", { precision: 18, scale: 2 }).notNull().default("0"), // D4 — retirada mensal PLANEJADA (não é lançamento: só alimenta o plano)
 }, (t) => [
   unique("partners_company_id_uq").on(t.companyId, t.id),
+  check("partners_planned_chk", sql`${t.plannedMonthly} >= 0 and ${t.plannedMonthly} <= 99999999999.99`),
   uniqueIndex("partners_name_uq").on(t.companyId, sql`lower(${t.name})`),
   check("partners_name_chk", sql`char_length(${t.name}) between 2 and 80`),
+]);
+
+// D4 — premissas do plano de retiradas e previsão de lucro (uma linha por empresa; sem linha = padrões).
+export const profitSettings = pgTable("profit_settings", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  delinquencyBps: integer("delinquency_bps").notNull().default(300), // inadimplência esperada sobre a receita
+  unplannedBps: integer("unplanned_bps").notNull().default(500), // reserva para despesas imprevistas, sobre as despesas conhecidas
+  reserveMonths: integer("reserve_months").notNull().default(2), // meses de despesa que devem ficar em caixa
+  retentionBps: integer("retention_bps").notNull().default(2000), // parte do resultado que NÃO se sugere retirar
+  cashNow: numeric("cash_now", { precision: 18, scale: 2 }), // caixa atual informado pela diretoria (opcional)
+  cashAsOf: date("cash_as_of", { mode: "string" }),
+  updatedBy: uuid("updated_by").references(() => users.id),
+}, (t) => [
+  uniqueIndex("profit_settings_company_uq").on(t.companyId),
+  check("profit_settings_ranges_chk", sql`${t.delinquencyBps} between 0 and 10000 and ${t.unplannedBps} between 0 and 10000 and ${t.retentionBps} between 0 and 10000 and ${t.reserveMonths} between 0 and 24`),
+  check("profit_settings_cash_chk", sql`(${t.cashNow} is null) = (${t.cashAsOf} is null) and (${t.cashNow} is null or abs(${t.cashNow}) <= 99999999999.99)`),
 ]);
 
 // D2 — contas recorrentes (modelo mensal) e séries de parcelas. Geram RASCUNHOS de contas a pagar, mês a mês, sem duplicar.

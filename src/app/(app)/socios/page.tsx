@@ -27,7 +27,7 @@ export default async function Socios({ searchParams }: { searchParams: Promise<{
   return (
     <div className="space-y-5">
       <PageHeader title="Sócios e retiradas" description={ctx.current.name}
-        actions={<AppLink href={`/socios/exportar${qs ? `?${qs}` : ""}`} className={buttonClass("outline")}><Download className="size-4" aria-hidden /> Baixar CSV</AppLink>} />
+        actions={<div className="flex flex-wrap gap-2"><AppLink href="/socios/plano" className={buttonClass("primary")}>Plano de retiradas e lucro</AppLink><AppLink href={`/socios/exportar${qs ? `?${qs}` : ""}`} className={buttonClass("outline")}><Download className="size-4" aria-hidden /> Baixar CSV</AppLink></div>} />
       <Callout tone="info">Aqui se <strong>registra</strong> o que a empresa pagou de gasto pessoal dos sócios (retirada) e o que os sócios pagaram pela empresa. Nada é pago por este sistema. O saldo mostra o quanto cada sócio deve à empresa (a compensar na distribuição de lucros) ou o quanto a empresa deve a ele.</Callout>
       {sp.erro && <Callout tone="negative" role="alert">{sp.erro}</Callout>}
       {sp.ok && <Callout tone="positive" role="status">Lançamento estornado.</Callout>}

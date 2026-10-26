@@ -180,6 +180,7 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [x] D2: recorrências, parcelamentos com saldo e compromissos futuros, calendário de pagamentos (migração 0033).
 - [x] D3 (mecanismo): staging imutável + relatório + classificação sugerida + CSV (migração 0034). **Falta rodar a importação real (autorização escrita do dono).**
 - [ ] D3b: aplicar o histórico (contas a pagar pagas, lançamentos dos sócios, recorrentes e parcelamentos) após conferência; cruzar com extratos bancários; nova autorização escrita.
-- [ ] D4: plano de retiradas e previsão de lucro (receita pelos contratos, despesas recorrentes e parcelas, limite de retirada sugerido, cenários).
+- [x] D4: plano de retiradas e previsão de lucro (migração 0035).
+- [ ] D4b: reajustes/aditivos futuros e fim de contrato na projeção; sazonalidade; imposto sobre o lucro; comparar previsto × realizado mês a mês.
 - [ ] D5: fatura de cartão aberta em compras; D6: conciliação com extrato Cora/OFX.
 - [ ] Mostrar sócios/categorias no painel; relatório de despesas por categoria/mês/centro.

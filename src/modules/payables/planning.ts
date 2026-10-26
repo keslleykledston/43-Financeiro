@@ -142,7 +142,7 @@ export async function listSeries(db: DB, actorId: string, companyId: string, _to
 export type Forecast = { kind: "recorrente" | "parcela"; key: string; refId: string; installmentNo: number | null; vendorName: string; description: string; dueDate: string; amountCents: number };
 export type MonthPlan = { month: string; items: PayableRow[]; forecasts: Forecast[]; totals: { itemsCents: number; forecastCents: number; paidCents: number } };
 
-async function pendingForecasts(db: DB, companyId: string, month: string): Promise<Forecast[]> {
+export async function pendingForecasts(db: DB, companyId: string, month: string): Promise<Forecast[]> {
   const m01 = firstOf(month);
   const t = rows(await db.execute(sql`select t.id, v.legal_name, t.description, t.amount::text, t.due_day from payable_templates t join vendors v on v.company_id = t.company_id and v.id = t.vendor_id
     where t.company_id = ${companyId} and t.active and t.start_month <= ${m01}::date and (t.end_month is null or t.end_month >= ${m01}::date)
