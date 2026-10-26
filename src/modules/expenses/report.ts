@@ -21,7 +21,8 @@ export type ExpenseReport = {
   totals: { empresaPaidCents: number; casaPaidCents: number; cardReferenceCents: number; tithesRecordedCents: number; callCents: number; k3g2Cents: number; installmentRemainingCents: number };
 };
 
-const eff = (r: ExpenseRow) => r.paidCents ?? 0;
+/** Valor PAGO = só quando há data de pagamento (ou ao menos uma data escrita em texto). Sem data, a linha está em aberto e não entra nos totais pagos (regra do dono). */
+const eff = (r: ExpenseRow) => (r.paidOn || r.paidRaw ? (r.paidCents ?? 0) : 0);
 const monthOfDue = (d: string | null) => (d ? d.slice(0, 7) : null);
 
 export function analyzeExpenses(rows: ExpenseRow[]): ExpenseReport {

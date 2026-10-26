@@ -253,6 +253,13 @@
       "when": 1792958206621,
       "tag": "0035_gifted_vulcan",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793041036868,
+      "tag": "0036_worthless_jocasta",
+      "breakpoints": true
     }
   ]
 }

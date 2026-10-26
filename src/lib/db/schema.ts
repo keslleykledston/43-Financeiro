@@ -836,6 +836,7 @@ export const partnerEntries = pgTable("partner_entries", {
   foreignKey({ columns: [t.companyId, t.partnerId], foreignColumns: [partners.companyId, partners.id] }),
   foreignKey({ columns: [t.companyId, t.categoryId], foreignColumns: [expenseCategories.companyId, expenseCategories.id] }),
   foreignKey({ columns: [t.companyId, t.payableId], foreignColumns: [payables.companyId, payables.id] }),
+  unique("partner_entries_company_id_uq").on(t.companyId, t.id),
   uniqueIndex("partner_entries_request_key_uq").on(t.companyId, t.requestKey).where(sql`${t.requestKey} is not null`),
   index("partner_entries_partner_idx").on(t.companyId, t.partnerId, t.occurredOn),
   check("partner_entries_kind_chk", sql`${t.kind} in ('retirada', 'despesa_paga_pelo_socio', 'devolucao_do_socio', 'reembolso_ao_socio', 'compensacao_lucros')`),
@@ -1119,6 +1120,7 @@ export const expenseImportRows = pgTable("expense_import_rows", {
   installmentsTotal: integer("installments_total"),
 }, (t) => [
   foreignKey({ columns: [t.companyId, t.importId], foreignColumns: [expenseImports.companyId, expenseImports.id] }).onDelete("cascade"),
+  unique("expense_rows_company_id_uq").on(t.companyId, t.id),
   uniqueIndex("expense_rows_pos_uq").on(t.importId, t.sheet, t.rowNumber, t.block),
   index("expense_rows_company_month_idx").on(t.companyId, t.month),
   check("expense_rows_month_chk", sql`${t.month} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
@@ -1126,6 +1128,27 @@ export const expenseImportRows = pgTable("expense_import_rows", {
   check("expense_rows_amounts_chk", sql`coalesce(${t.amount}, 0) >= 0 and coalesce(${t.paidAmount}, 0) >= 0`),
   check("expense_rows_text_chk", sql`char_length(${t.description}) between 1 and 200 and (${t.paidRaw} is null or char_length(${t.paidRaw}) <= 40)`),
   check("expense_rows_inst_chk", sql`(${t.installmentNo} is null) = (${t.installmentsTotal} is null) and (${t.installmentNo} is null or (${t.installmentNo} between 1 and ${t.installmentsTotal} and ${t.installmentsTotal} between 2 and 999))`),
+]);
+
+// D3b — o que cada linha do staging virou no sistema (conta paga, conta em aberto ou retirada do sócio). Uma linha só é aplicada uma vez (índice único);
+// imutável: corrigir é estornar/cancelar pelos fluxos normais. Enquanto existir aplicação, a importação não pode ser desfeita.
+export const expenseApplications = pgTable("expense_applications", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  rowId: uuid("row_id").notNull(),
+  kind: text("kind").notNull(), // conta_paga | conta_aberta | retirada
+  payableId: uuid("payable_id"),
+  paymentId: uuid("payment_id"),
+  entryId: uuid("entry_id"),
+  appliedBy: uuid("applied_by").notNull().references(() => users.id),
+}, (t) => [
+  uniqueIndex("expense_applications_row_uq").on(t.rowId),
+  foreignKey({ columns: [t.companyId, t.rowId], foreignColumns: [expenseImportRows.companyId, expenseImportRows.id] }),
+  foreignKey({ columns: [t.companyId, t.payableId], foreignColumns: [payables.companyId, payables.id] }),
+  foreignKey({ columns: [t.companyId, t.paymentId], foreignColumns: [payablePayments.companyId, payablePayments.id] }),
+  foreignKey({ columns: [t.companyId, t.entryId], foreignColumns: [partnerEntries.companyId, partnerEntries.id] }),
+  check("expense_applications_kind_chk", sql`${t.kind} in ('conta_paga', 'conta_aberta', 'retirada')`),
+  check("expense_applications_shape_chk", sql`case ${t.kind} when 'conta_paga' then ${t.payableId} is not null and ${t.paymentId} is not null and ${t.entryId} is null when 'conta_aberta' then ${t.payableId} is not null and ${t.paymentId} is null and ${t.entryId} is null else ${t.entryId} is not null and ${t.payableId} is null and ${t.paymentId} is null end`),
 ]);
 
 export const legacyImports = pgTable("legacy_imports", {

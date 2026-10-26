@@ -57,6 +57,8 @@ export async function importExpenses(db: DB, actorId: string, companyId: string,
 export async function removeExpenseImport(db: DB, actorId: string, companyId: string, importId: string) {
   await requirePerm(db, actorId, companyId, "history.import");
   if (!/^[0-9a-f-]{36}$/i.test(importId)) throw new Invalid("Importação inválida");
+  const [applied] = (await db.execute(sql`select count(*)::int n from expense_applications a join expense_import_rows r on r.id = a.row_id where r.import_id = ${importId} and a.company_id = ${companyId}`)) as unknown as { n: number }[];
+  if (applied.n > 0) throw new Invalid("Esta importação já foi aplicada ao sistema (contas e retiradas). Para corrigir, cancele ou estorne os lançamentos pelos fluxos normais.");
   await db.transaction(async (tx) => {
     const x = tx as unknown as DB;
     await x.execute(sql`select set_config('k3g.allow_expense_import_delete', 'on', true)`); // só nesta transação: o gatilho libera o DELETE do fluxo auditado

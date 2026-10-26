@@ -29,7 +29,7 @@ const ROWS: ExpenseRow[] = [
 describe("D3 — análise pura do histórico de despesas", () => {
   const rep = analyzeExpenses(ROWS);
   it("totais só de empresa/casa (pago), cartão e dízimo à parte", () => {
-    expect(rep.totals).toMatchObject({ empresaPaidCents: 77356 + 300000 + 29988 + 500, casaPaidCents: 200000 + 22419, cardReferenceCents: 174769, tithesRecordedCents: 100000, callCents: 29988 });
+    expect(rep.totals).toMatchObject({ empresaPaidCents: 77356 + 300000 + 29988 + 500, casaPaidCents: 22419, cardReferenceCents: 174769, tithesRecordedCents: 100000, callCents: 29988 });
     expect(rep.byBlock).toEqual({ empresa: 5, casa: 2, cartao: 1, dizimo: 1 });
     expect(rep.months).toHaveLength(1);
   });
@@ -84,7 +84,7 @@ describe.skipIf(!enabled)("D3 — staging do histórico de despesas (DB de teste
     expect((await getExpenseReport(db, dirB, B)).report).toBeNull();
     const r = await getExpenseReport(db, dirA, A);
     expect(r.current).toMatchObject({ rows: 9, year: 2026 });
-    expect(r.report!.totals.casaPaidCents).toBe(222419);
+    expect(r.report!.totals.casaPaidCents).toBe(22419);
   });
 
   it("troca atômica (replace): a nova entra no lugar da antiga; se a nova falhar a antiga fica; o mesmo arquivo não apaga nada", async () => {

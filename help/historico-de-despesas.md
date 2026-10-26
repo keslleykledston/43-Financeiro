@@ -9,7 +9,7 @@ A planilha de despesas do ano (uma aba por mês) é guardada **como veio**, linh
 **Histórico de boletos → Histórico de despesas** (ou direto em `/historico/despesas`).
 
 ## O que a tela mostra
-- **Totais**: despesas da empresa e da casa (pelo valor **pago**), parcelas ainda a vencer e as faturas de cartão (só referência: elas repetem linhas que já estão em Empresa e Casa, por isso não entram nos totais).
+- **Totais**: despesas da empresa e da casa (pelo valor **pago**, só de linhas com data de pagamento; as sem data estão em aberto e não entram), parcelas ainda a vencer e as faturas de cartão (só referência: elas repetem linhas que já estão em Empresa e Casa, por isso não entram nos totais).
 - **Por mês**: empresa × casa em cada aba. A soma é refeita pelo sistema: a planilha original deixa de somar a primeira linha em alguns meses.
 - **Classificação sugerida**: cada linha ganha uma categoria e uma natureza (despesa da empresa ou retirada de sócio) por regras de palavras. É **sugestão**.
 - **A classificar**: o que as regras não reconheceram, com o total pago de cada descrição.
@@ -22,6 +22,17 @@ Regra do dono: a despesa **só conta como paga quando tem data de pagamento**. L
 ## Downloads
 - **Classificação sugerida (CSV)**: todas as linhas com a categoria, a natureza, a empresa e o centro sugeridos.
 - **Divergências (CSV)**: o que revisar, com aba e linha.
+
+## Aplicação ao sistema (D3b)
+Depois que você conferiu e autorizou por escrito, a operação **aplica** o histórico ao sistema (o cartão "Aplicação ao sistema" nesta tela mostra o que já foi aplicado):
+- **Aba Empresa com data de pagamento** → vira uma **conta a pagar aprovada e paga** (forma de pagamento "Outro", referência "planilha"). Se o valor pago difere do valor da conta, vale o **valor pago** e a diferença fica na observação da baixa (não nasce dívida fantasma).
+- **Aba Empresa sem data de pagamento** → vira **conta aprovada em aberto** (pendente de pagamento), com o valor da conta e o vencimento da planilha.
+- **Aba Casa com data de pagamento** → vira **retirada** na conta-corrente do **Keslley** (decisão do dono). Sem data, não vira nada, porque não existe retirada pendente.
+- **Ficam de fora**: faturas de cartão (só referência), dízimos (a planilha não diz se foram pagos), linhas sem valor e datas escritas como texto ("19/02").
+- O fornecedor dessas contas é **"Histórico da planilha"**; o texto original da planilha está na descrição de cada conta. Categoria e centro de custo (K3G 2) vêm da classificação sugerida; confira e ajuste pelos fluxos normais.
+- Linhas que parecem ser da **K3G Call** ficam na empresa importada (o relatório informa quantas); se forem mesmo da Call, é preciso transferir.
+- Opcionalmente a operação cria **contas recorrentes** e **parcelamentos** ativos para o que a planilha ainda mostra nos últimos meses (assim o plano de retiradas enxerga o que vem pela frente). Eles só geram contas quando alguém usa "Gerar o mês".
+- Depois de aplicado, **a importação não pode mais ser desfeita**: corrigir uma conta é cancelá-la ou estornar a baixa/retirada, como sempre.
 
 ## O que vem depois
 Depois que você conferir a classificação, a **aplicação** (criar contas a pagar já pagas, lançamentos dos sócios, recorrentes e parcelamentos) é uma etapa **separada**, que exige uma nova autorização sua. Cruzar com os **extratos bancários** deixa a aplicação mais segura.

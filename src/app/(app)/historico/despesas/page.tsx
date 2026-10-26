@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
 import { getExpenseReport } from "@/modules/expenses/history";
+import { applicationStatus } from "@/modules/expenses/apply";
 import { DIV_LABEL, DIV_ORDER, DIV_SEVERITY } from "@/modules/expenses/report";
 import { DEFAULT_CATEGORIES } from "@/modules/expenses/catalog";
 import { formatBRL, formatDateTime } from "@/lib/format";
@@ -22,6 +23,7 @@ export default async function HistoricoDespesas({ searchParams }: { searchParams
   if (!ctx.current || !role || !can(role, "partners.read")) return <Callout tone="warning">Seu papel não tem acesso ao histórico de despesas (inclui gasto pessoal dos sócios).</Callout>;
   const { current, report } = await getExpenseReport(db, ctx.user.id, ctx.current.id);
   const canImport = can(role, "history.import");
+  const applied = await applicationStatus(db, ctx.user.id, ctx.current.id);
   return (
     <div className="max-w-5xl space-y-5">
       <PageHeader title="Histórico de despesas" description={`${ctx.current.name} · a planilha de despesas como veio, com a classificação sugerida e o que precisa de revisão.`}
@@ -44,6 +46,14 @@ export default async function HistoricoDespesas({ searchParams }: { searchParams
               <label className="flex items-center gap-2"><input type="checkbox" name="confirm" /> Confirmo desfazer esta importação (as linhas guardadas somem; nenhum cadastro é afetado)</label>
               <button className="rounded-md px-3 py-1.5 text-sm text-negative-foreground ring-1 ring-border">Desfazer importação</button>
             </form>
+          )}
+        </SectionCard>
+
+        <SectionCard title="Aplicação ao sistema">
+          {applied.total === 0 ? (
+            <p className="text-sm text-muted-foreground">Ainda <strong>não aplicada</strong>: nenhuma conta a pagar nem retirada foi criada a partir desta planilha. A aplicação é feita pela operação, com a sua autorização escrita.</p>
+          ) : (
+            <p className="text-sm">Aplicada: <strong>{applied.paid}</strong> contas pagas · <strong>{applied.open}</strong> contas em aberto (sem data de pagamento) · <strong>{applied.withdrawals}</strong> retiradas da Casa lançadas no Keslley. Confira em <AppLink href="/contas-a-pagar" className="underline">Contas a pagar</AppLink> e <AppLink href="/socios" className="underline">Sócios</AppLink>. O fornecedor dessas contas é &quot;Histórico da planilha&quot;; a descrição original está em cada conta.</p>
           )}
         </SectionCard>
 
