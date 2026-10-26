@@ -178,7 +178,7 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 ## D1 — Despesas: categorias, centros, sócios, conta-corrente (2026-10-25, planilha Despesas__2026)
 - [x] Categorias (~30 padrão, editáveis), centros de custo, sócios; conta-corrente dos sócios (retirada, despesa paga pelo sócio, devolução, reembolso, compensação nos lucros); contas a pagar com categoria/centro/competência; migração 0032.
 - [x] D2: recorrências, parcelamentos com saldo e compromissos futuros, calendário de pagamentos (migração 0033).
-- [x] D3 (mecanismo): staging imutável + relatório + classificação sugerida + CSV (migração 0034). **Falta rodar a importação real (autorização escrita do dono).**
+- [x] D3 (mecanismo): staging imutável + relatório + classificação sugerida + CSV (migração 0034). **Importação real em staging feita em 2026-10-26 (autorização escrita do dono: "Autorizado importação de despesas"): 711 linhas na K3G Solutions (empresa 344, casa 269, cartão 88, dízimo 10); backup k3gfinance-20261026T171552Z.**
 - [ ] D3b: aplicar o histórico (contas a pagar pagas, lançamentos dos sócios, recorrentes e parcelamentos) após conferência; cruzar com extratos bancários; nova autorização escrita.
 - [x] D4: plano de retiradas e previsão de lucro (migração 0035).
 - [ ] D4b: reajustes/aditivos futuros e fim de contrato na projeção; sazonalidade; imposto sobre o lucro; comparar previsto × realizado mês a mês.
