@@ -4,11 +4,11 @@ import { recurringCandidates, seriesCandidates, suggest, type Nature, type Recur
 /** D3 — relatório PURO do staging de despesas: totais, classificação sugerida, o que falta classificar, recorrências, parcelas e divergências. */
 export type DivKind = "sem_valor" | "pago_sem_data" | "pago_em_texto" | "vencimento_fora_do_mes" | "pago_diferente" | "pago_parcial" | "tem_aviso" | "e_da_call" | "e_do_k3g2";
 export const DIV_LABEL: Record<DivKind, string> = {
-  sem_valor: "Linha sem valor", pago_sem_data: "Valor pago sem data de pagamento", pago_em_texto: "Data de pagamento escrita como texto",
+  sem_valor: "Linha sem valor", pago_sem_data: "Sem data de pagamento (fica em aberto)", pago_em_texto: "Data de pagamento escrita como texto",
   vencimento_fora_do_mes: "Vencimento fora do mês da aba", pago_diferente: "Valor pago diferente do valor da conta", pago_parcial: "Pago a menos que o valor da conta",
   tem_aviso: "Classificação precisa de confirmação", e_da_call: "Parece ser da K3G Call (não da empresa importada)", e_do_k3g2: "Parece ser do K3G 2 (imóvel de expansão)",
 };
-export const DIV_SEVERITY: Record<DivKind, "revisar" | "info"> = { sem_valor: "revisar", pago_sem_data: "revisar", pago_em_texto: "revisar", vencimento_fora_do_mes: "info", pago_diferente: "info", pago_parcial: "revisar", tem_aviso: "revisar", e_da_call: "revisar", e_do_k3g2: "info" };
+export const DIV_SEVERITY: Record<DivKind, "revisar" | "info"> = { sem_valor: "revisar", pago_sem_data: "info", pago_em_texto: "revisar", vencimento_fora_do_mes: "info", pago_diferente: "info", pago_parcial: "revisar", tem_aviso: "revisar", e_da_call: "revisar", e_do_k3g2: "info" };
 export const DIV_ORDER = Object.keys(DIV_LABEL) as DivKind[];
 
 export type Divergence = { kind: DivKind; sheet: string; row: number; month: string; block: string; description: string; detail: string };
@@ -53,7 +53,7 @@ export function analyzeExpenses(rows: ExpenseRow[]): ExpenseReport {
     if (s.centerHint === "k3g2") { k3g2Cents += eff(r); add(r, "e_do_k3g2", "descrição cita K3G 2"); }
     if (s.ambiguous) add(r, "tem_aviso", s.ambiguous);
     if (r.amountCents === null && r.paidCents === null) { add(r, "sem_valor", "nem valor nem valor pago"); continue; }
-    if (r.paidCents !== null && r.paidCents > 0 && r.paidOn === null && r.paidRaw === null) add(r, "pago_sem_data", "valor pago preenchido, data de pagamento vazia: foi pago?");
+    if (r.paidCents !== null && r.paidCents > 0 && r.paidOn === null && r.paidRaw === null) add(r, "pago_sem_data", "sem data de pagamento: fica como pendente de pagamento (em aberto) quando o histórico for aplicado");
     if (r.paidRaw) add(r, "pago_em_texto", `data escrita: "${r.paidRaw}"`);
     const dm = monthOfDue(r.dueOn);
     if (dm && dm !== r.month) add(r, "vencimento_fora_do_mes", `vencimento ${r.dueOn!.split("-").reverse().join("/")} na aba de ${r.month.slice(5)}/${r.month.slice(0, 4)}`);

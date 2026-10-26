@@ -15,7 +15,9 @@ A planilha de despesas do ano (uma aba por mês) é guardada **como veio**, linh
 - **A classificar**: o que as regras não reconheceram, com o total pago de cada descrição.
 - **Candidatas a conta recorrente**: descrições que se repetem em 3 meses ou mais com valor parecido (Vivo, energia, Simples…), com valor e dia típicos.
 - **Parcelamentos encontrados**: "14/36" e "13º" (quando o total não está escrito, aparece "total desconhecido"), com a última parcela vista, quantas restam e quanto.
-- **Para revisar** (com aba e linha no CSV de divergências): linhas sem valor, valor pago sem data, data escrita como texto ("19/02"), vencimento fora do mês da aba, pago a menos ou diferente, classificação que pede confirmação, linhas que parecem ser da **K3G Call** e as do **K3G 2** (imóvel de expansão).
+- **Para revisar** (com aba e linha no CSV de divergências): linhas sem valor, data escrita como texto ("19/02"), vencimento fora do mês da aba, pago a menos ou diferente, classificação que pede confirmação, linhas que parecem ser da **K3G Call** e as do **K3G 2** (imóvel de expansão).
+
+Regra do dono: a despesa **só conta como paga quando tem data de pagamento**. Linha com valor e **sem data de pagamento** fica como **pendente de pagamento (em aberto)** quando o histórico for aplicado (aparece aqui como informativo). Linhas **sem valor** ficam de fora, e o pago a menos que a conta continua em revisão (pode ser pagamento parcial).
 
 ## Downloads
 - **Classificação sugerida (CSV)**: todas as linhas com a categoria, a natureza, a empresa e o centro sugeridos.
