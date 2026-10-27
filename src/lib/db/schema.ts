@@ -1259,3 +1259,37 @@ export const boletoCancelRequests = pgTable("boleto_cancel_requests", {
   check("boleto_cancel_requests_reason_chk", sql`char_length(${t.reason}) between 3 and 200`),
   check("boleto_cancel_requests_decided_chk", sql`(${t.status} = 'pendente') = (${t.decidedAt} is null)`),
 ]);
+
+/** E31 — como o reajuste anual deste contrato é feito (índice contratado ou percentual fixo). Informativo: ajuda a propor o aditivo; nunca altera valor sozinho. */
+export const contractAdjustmentRules = pgTable("contract_adjustment_rules", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  contractId: uuid("contract_id").notNull(),
+  indexCode: text("index_code").notNull(), // ipca | igpm | inpc | fixo | outro
+  fixedBps: integer("fixed_bps"), // só para 'fixo' (pontos-base: 450 = 4,50%)
+  note: text("note"),
+  updatedBy: uuid("updated_by").notNull().references(() => users.id),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.contractId], foreignColumns: [contracts.companyId, contracts.id] }),
+  uniqueIndex("contract_adjustment_rules_contract_uq").on(t.contractId),
+  check("contract_adjustment_rules_index_chk", sql`${t.indexCode} in ('ipca', 'igpm', 'inpc', 'fixo', 'outro')`),
+  check("contract_adjustment_rules_fixed_chk", sql`(${t.indexCode} = 'fixo') = (${t.fixedBps} is not null) and (${t.fixedBps} is null or ${t.fixedBps} between 0 and 10000)`),
+  check("contract_adjustment_rules_note_chk", sql`char_length(${t.note}) <= 200`),
+]);
+
+/** E31 — alerta de contrato adiado ou ignorado POR CICLO (a mesma data do alerta). Quando o próximo ciclo chega, o alerta volta sozinho. */
+export const contractAlertSnoozes = pgTable("contract_alert_snoozes", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  contractId: uuid("contract_id").notNull(),
+  kind: text("kind").notNull(),
+  dueDate: date("due_date", { mode: "string" }).notNull(), // data do alerta que está sendo silenciado
+  until: date("until", { mode: "string" }), // nulo = ignorado neste ciclo; data = reaparece depois dela
+  note: text("note"),
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.contractId], foreignColumns: [contracts.companyId, contracts.id] }),
+  uniqueIndex("contract_alert_snoozes_uq").on(t.contractId, t.kind, t.dueDate),
+  check("contract_alert_snoozes_kind_chk", sql`${t.kind} in ('vigencia_encerrada', 'vigencia_proxima', 'renovacao_proxima', 'reajuste_atrasado', 'reajuste_proximo')`),
+  check("contract_alert_snoozes_note_chk", sql`char_length(${t.note}) <= 200`),
+]);

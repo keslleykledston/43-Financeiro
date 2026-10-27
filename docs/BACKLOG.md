@@ -192,3 +192,5 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [x] E29: aditivo agendado (data futura aplicada sozinha na data).
 - [x] Painel: bloco "Despesas e retiradas do mês" (top categorias + retiradas dos sócios).
 - [x] E30: pedido de cancelamento de boleto por gerente/assistente com decisão da diretoria.
+- [x] E31: regra de reajuste por contrato (índice/percentual), "Propor reajuste" pré-preenche o aditivo, adiar/ignorar alertas por ciclo.
+- [x] H2 (leitura): linha do tempo dos clientes inferida das abas mensais + ponte de receita. Fora (exige autorização): gerar aditivos "inferidos" e corrigir início de vigência.

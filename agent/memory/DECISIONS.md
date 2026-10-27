@@ -165,3 +165,8 @@ Calendário (`src/modules/billing/calendar.ts`, funções puras testadas contra 
 - Decisão: permissão nova `boletos.request` (gerente, assistente). Pedido = registro `boleto_cancel_requests` (um pendente por cobrança). Quem cancela segue sendo `boletos.cancel` (diretoria): aprovar reserva o pedido, chama o `cancelBoleto` existente (mesmo motor, mesmas travas e trilha, em nome de quem aprovou) e liga o pedido ao cancelamento; falha antes de enviar (pagamento chegou etc.) devolve o pedido a "pendente". Recusar exige resposta; retirar é só de quem pediu. Auditoria só com ids.
 - Consequências: migração 0039. Janela rara em que o processo cai entre reservar e cancelar deixa "aprovado" sem cancelamento (a diretoria cancela direto). Nenhum envio real; provedor continua simulado.
 
+## ADR-030 — Regra de reajuste e silêncio de alertas de contrato — E31
+- Contexto: backlog E17 pedia índice/percentual de reajuste por contrato e "adiar/ignorar alerta". Não há fonte de dados de índices (IPCA/IGP-M) no sistema e reajuste automático não é permitido (valor de contrato exige aprovação).
+- Decisão: `contract_adjustment_rules` (índice ou percentual fixo, informativo) e `contract_alert_snoozes` por (contrato, tipo, DATA do alerta): "ignorar" vale só naquele ciclo, "adiar" até uma data (1–120 dias); o próximo ciclo reabre sozinho. "Propor reajuste" só pré-preenche o aditivo (valor × (1+%) e tipo reajuste) — não grava nada; segue o fluxo normal de aprovação. Permissão: `contracts.write` para gravar; leitura geral.
+- Consequências: migração 0040. O percentual do índice vem da pessoa (sem consulta externa).
+

@@ -26,6 +26,11 @@ Contratos em rascunho ou encerrados não geram alerta. Contrato com data final a
 3. **Cliente não vai renovar:** proponha a data final (ela vai para aprovação).
 4. **Fim informado que passou, mas o cliente continua:** proponha apagar a data final.
 
+## Reajuste anual, adiar e ignorar
+- **Regra de reajuste do contrato:** na página do contrato, bloco *Reajuste anual deste contrato*, registre o **índice combinado** (IPCA, IGP-M, INPC), um **percentual fixo** ou outra observação. É só uma anotação: o sistema **nunca reajusta sozinho**.
+- **Propor reajuste:** nos alertas de reajuste (e de renovação), digite o percentual (vem preenchido se a regra for percentual fixo) e clique em *Propor reajuste*. Abre o contrato com o aditivo **já preenchido** (tipo reajuste, valor atual + o percentual); você confere, ajusta e envia — o aditivo continua passando pela aprovação de sempre.
+- **Adiar 30 dias / Ignorar este ciclo:** tira o alerta da lista **só para aquele ciclo**. "Adiar" volta depois da data; "Ignorar" vale até o ciclo seguinte (a data do alerta muda) e então o aviso volta sozinho. Os silenciados ficam em *Silenciados*, de onde você **Reativa**. Quem escreve contratos pode adiar/ignorar.
+
 ## Limites a conhecer
 - A data de início dos contratos importados da planilha é o **primeiro mês em que o cliente aparece nela**, não a data da assinatura. Se o contrato real é mais antigo ou mais novo, a renovação e o reajuste previstos saem errados: corrija o início numa alteração de contrato.
 - Contratos importados cujo cliente **sumiu das últimas abas** vieram com data final; confira se o cliente realmente saiu.

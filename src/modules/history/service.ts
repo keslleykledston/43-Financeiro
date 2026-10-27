@@ -7,6 +7,7 @@ import { toCsv } from "@/lib/csv";
 import { checkDocument, formatDocument, parseDocument } from "@/lib/validators/document";
 import { Invalid, requirePerm } from "@/modules/identity/service";
 import type { Entry } from "@/modules/contracts/planilha";
+import { buildTimeline, EVENT_LABEL, type Timeline } from "./timeline";
 import { analyze, DIV_LABEL, DIV_SEVERITY, nameKeyOf, type Report, type StageRow } from "./analysis";
 import { sql } from "drizzle-orm";
 
@@ -149,3 +150,19 @@ export async function removeDocumentFix(db: DB, actorId: string, companyId: stri
   });
 }
 
+
+/** H2 — linha do tempo inferida (somente leitura; staging não muda). */
+export async function getTimeline(db: DB, actorId: string, companyId: string): Promise<{ current: Awaited<ReturnType<typeof load>>["current"]; timeline: Timeline | null }> {
+  await requirePerm(db, actorId, companyId, "history.read");
+  const { current, rows } = await load(db, companyId);
+  return { current, timeline: current ? buildTimeline(rows) : null };
+}
+
+export async function exportTimelineCsv(db: DB, actorId: string, companyId: string): Promise<string> {
+  await requirePerm(db, actorId, companyId, "history.read");
+  const { timeline } = await getTimeline(db, actorId, companyId);
+  const money = (c: number) => (c / 100).toFixed(2).replace(".", ",");
+  const rows = (timeline?.customers ?? []).flatMap((c) => c.events.filter((e) => e.kind !== "base").map((e) => [c.name, c.document ? formatDocument(c.document.length === 11 ? "cpf" : "cnpj", c.document) : "", e.month, EVENT_LABEL[e.kind], e.detail, money(c.lastCents)]));
+  await audit(db, companyId, actorId, "history.timeline_exported", { events: rows.length });
+  return toCsv([["cliente", "documento", "mes", "evento", "detalhe", "ultimo_valor"], ...rows]);
+}

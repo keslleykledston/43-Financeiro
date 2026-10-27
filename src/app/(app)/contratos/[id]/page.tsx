@@ -13,14 +13,15 @@ import { Callout, Money, PageHeader, SectionCard, StatusPill, type StatusTone } 
 import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass, inputClass } from "@/components/k3g/button";
 import { ContractForm } from "../contract-form";
-import { cancelScheduleAction, commissionAction, decideAction, noteAction, proposeAction, statusAction } from "../actions";
+import { INDEX_CODES, INDEX_LABEL, getAdjustmentRule, parsePctBps, suggestedCents } from "@/modules/contracts/adjustment";
+import { cancelScheduleAction, saveRuleAction, commissionAction, decideAction, noteAction, proposeAction, statusAction } from "../actions";
 import { percentLabel } from "@/modules/commissions/calc";
 
 const TONE: Record<ContractStatus, StatusTone> = { rascunho: "info", ativo: "positive", suspenso: "warning", encerrado: "neutral" };
 const VTONE = { pendente: "info", aprovada: "positive", rejeitada: "negative", substituida: "neutral", agendada: "warning", cancelada: "neutral" } as const;
 const brMoney = (c: number) => (c / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); // 250000 → "2.500,00" (aceito pelo parser estrito)
 
-export default async function Detalhe({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ erro?: string; agendado?: string; proposta?: string; comissao?: string; aprovado?: string; comentario?: string }> }) {
+export default async function Detalhe({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ erro?: string; regra?: string; pct?: string; agendado?: string; proposta?: string; comissao?: string; aprovado?: string; comentario?: string }> }) {
   const [{ id }, sp, ctx] = await Promise.all([params, searchParams, requireContext()]);
   const role = ctx.current ? await activeRole(db, ctx.user.id, ctx.current.id) : null;
   if (!ctx.current || !role || !can(role, "contracts.read")) return <Callout tone="warning">Seu papel não tem acesso a contratos.</Callout>;
@@ -30,6 +31,10 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
   const notes = await listNotes(db, ctx.user.id, ctx.current.id, { contractId: id });
   const pending = c.versions.find((v) => v.state === "pendente");
   const scheduled = c.versions.find((v) => v.state === "agendada");
+  const rule = await getAdjustmentRule(db, ctx.user.id, ctx.current.id, c.id);
+  let pctBps: number | null = null; try { pctBps = sp.pct ? parsePctBps(sp.pct) : null; } catch { pctBps = null; }
+  const proposed = pctBps !== null && pctBps > 0 ? suggestedCents(c.amountCents, pctBps) : null; // valor pré-preenchido do aditivo de reajuste (continua passando pela aprovação)
+  const tooBig = pctBps !== null && pctBps > 0 && proposed === null; // passaria do teto do valor mensal: não pré-preenche
   const nextComp = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Manaus" }).slice(0, 7);
   const sched = billingSchedule({ competenceMonth: nextComp, dueDay: c.dueDay, jointInvoice: c.invoiceJointRequired, issueDayOverride: c.issueDayOverride });
   const status = c.status as ContractStatus;
@@ -95,9 +100,11 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
 
       {write && status !== "encerrado" && (!pending || status === "rascunho") && (
         <SectionCard title={status === "rascunho" ? "Corrigir o contrato" : "Aditivo ou ajuste de valor"}>
+          {tooBig && <Callout tone="warning" role="status">Esse percentual levaria o valor acima do máximo permitido para o contrato; informe o novo valor à mão.</Callout>}
+          {proposed !== null && status !== "rascunho" && <Callout tone="info" role="status">Reajuste de <strong>{String(pctBps! / 100).replace(".", ",")}%</strong> sobre {formatBRL(c.amountCents)} = <strong>{formatBRL(proposed)}</strong>. Conferir e ajustar antes de enviar; nada muda até a aprovação.</Callout>}
           <p className="mb-3 text-sm text-muted-foreground">{status === "rascunho" ? "Ajuste os dados antes da aprovação." : "A alteração só passa a valer depois de aprovada; os termos atuais continuam até lá."}</p>
           <ContractForm action={proposeAction.bind(null, c.id)} withReason amendment={status !== "rascunho"} approveNow={status !== "rascunho" && role === "diretoria"} submit={status === "rascunho" ? "Salvar correção" : "Enviar para aprovação"}
-            defaults={{ description: c.description, monthlyAmount: brMoney(c.amountCents), startAt: c.startAt, endAt: c.endAt, dueDay: c.dueDay, invoiceJointRequired: c.invoiceJointRequired, issueDayOverride: c.issueDayOverride }} />
+            defaults={{ ...(proposed !== null && status !== "rascunho" ? { kind: "reajuste", reason: `Reajuste de ${String(pctBps! / 100).replace(".", ",")}%` } : {}), description: c.description, monthlyAmount: brMoney(proposed ?? c.amountCents), startAt: c.startAt, endAt: c.endAt, dueDay: c.dueDay, invoiceJointRequired: c.invoiceJointRequired, issueDayOverride: c.issueDayOverride }} />
         </SectionCard>
       )}
 
@@ -109,6 +116,20 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
             {status === "suspenso" && approve && <button name="to" value="ativo" className={buttonClass("success")}>Reativar</button>}
             {status === "suspenso" && !approve && <p className="text-sm text-muted-foreground">Reativar exige gerente ou diretoria.</p>}
             <button name="to" value="encerrado" className={buttonClass("danger")}>Encerrar (definitivo)</button>
+          </form>
+        </SectionCard>
+      )}
+
+      {write && status !== "rascunho" && status !== "encerrado" && (
+        <SectionCard title="Reajuste anual deste contrato">
+          {sp.regra && <Callout tone="positive" role="status">Regra de reajuste salva.</Callout>}
+          <p className="mb-3 text-sm text-muted-foreground">Registre o índice combinado no contrato. É só uma anotação: o sistema nunca reajusta sozinho, ele ajuda a pré-preencher o aditivo quando o alerta de reajuste chegar.</p>
+          <form action={saveRuleAction} className="grid max-w-xl gap-3 sm:grid-cols-3">
+            <input type="hidden" name="contractId" value={c.id} />
+            <div><label htmlFor="rule-index" className="mb-1 block text-sm font-medium">Índice</label><select id="rule-index" name="index" defaultValue={rule?.indexCode ?? "ipca"} className={inputClass}>{INDEX_CODES.map((i) => <option key={i} value={i}>{INDEX_LABEL[i]}</option>)}</select></div>
+            <div><label htmlFor="rule-pct" className="mb-1 block text-sm font-medium">Percentual fixo (%)</label><input id="rule-pct" name="fixedPct" inputMode="decimal" defaultValue={rule?.fixedBps != null ? String(rule.fixedBps / 100).replace(".", ",") : ""} placeholder="só para 'fixo'" className={inputClass} /></div>
+            <div><label htmlFor="rule-note" className="mb-1 block text-sm font-medium">Observação</label><input id="rule-note" name="note" maxLength={200} defaultValue={rule?.note ?? ""} className={inputClass} /></div>
+            <div className="sm:col-span-3"><button className={buttonClass("outline")}>Salvar regra</button></div>
           </form>
         </SectionCard>
       )}

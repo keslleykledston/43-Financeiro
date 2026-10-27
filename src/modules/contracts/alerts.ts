@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { DB } from "@/lib/db";
-import { contracts, contractVersions, customers } from "@/lib/db/schema";
+import { contractAdjustmentRules, contractAlertSnoozes, contracts, contractVersions, customers } from "@/lib/db/schema";
 import { centsFromNumeric } from "@/lib/money";
 import { requirePerm } from "@/modules/identity/service";
 
@@ -95,6 +95,13 @@ export async function listContractAlerts(db: DB, actorId: string, companyId: str
     if (typeof cents !== "number") continue;
     (byContract.get(v.contractId) ?? byContract.set(v.contractId, []).get(v.contractId)!).push({ cents, on: v.effectiveOn ?? manausDay(v.decidedAt) }); // data de efeito do aditivo, se informada
   }
-  const alerts = contractAlerts(rows.map((r) => ({ id: r.c.id, customerName: r.name, status: r.c.status, startAt: r.c.startAt, endAt: r.c.endAt, amountCents: centsFromNumeric(r.c.monthlyAmount), approved: byContract.get(r.c.id) ?? [] })), today, windowDays);
-  return { alerts, checked: rows.length };
+  const all = contractAlerts(rows.map((r) => ({ id: r.c.id, customerName: r.name, status: r.c.status, startAt: r.c.startAt, endAt: r.c.endAt, amountCents: centsFromNumeric(r.c.monthlyAmount), approved: byContract.get(r.c.id) ?? [] })), today, windowDays);
+  // E31: alertas adiados/ignorados neste ciclo saem da lista (e ficam em `snoozed`, para reativar); regras de reajuste por contrato
+  const sn = await db.select().from(contractAlertSnoozes).where(eq(contractAlertSnoozes.companyId, companyId));
+  const rules = await db.select().from(contractAdjustmentRules).where(eq(contractAdjustmentRules.companyId, companyId));
+  const hidden = (a: ContractAlert) => sn.find((s) => s.contractId === a.contractId && s.kind === a.kind && s.dueDate === a.date && (s.until === null || s.until >= today));
+  const alerts = all.filter((a) => !hidden(a));
+  const snoozed = all.flatMap((a) => { const h = hidden(a); return h ? [{ ...a, snoozeId: h.id, until: h.until }] : []; });
+  const ruleBy = new Map(rules.map((r) => [r.contractId, { indexCode: r.indexCode, fixedBps: r.fixedBps, note: r.note }]));
+  return { alerts, snoozed, rules: ruleBy, checked: rows.length };
 }

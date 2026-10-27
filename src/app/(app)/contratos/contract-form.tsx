@@ -3,7 +3,7 @@ import { useActionState } from "react";
 import type { FormState } from "./actions";
 import { buttonClass, inputClass } from "@/components/k3g/button";
 
-type Defaults = { customerId?: string; description?: string; monthlyAmount?: string; startAt?: string; endAt?: string | null; dueDay?: number | string; invoiceJointRequired?: boolean; issueDayOverride?: number | null };
+type Defaults = { customerId?: string; description?: string; monthlyAmount?: string; startAt?: string; endAt?: string | null; dueDay?: number | string; invoiceJointRequired?: boolean; issueDayOverride?: number | null; kind?: string; effectiveOn?: string; reason?: string };
 type Opt = { id: string; name: string; status: string };
 
 const L = ({ id, children }: { id: string; children: React.ReactNode }) => <label htmlFor={id} className="mb-1 block text-sm font-medium">{children}</label>;
@@ -35,12 +35,12 @@ export function ContractForm({ action, defaults, customers, submit, withReason, 
         <div><L id="issueDayOverride">Dia de emissão personalizado (opcional)</L><input id="issueDayOverride" name="issueDayOverride" type="number" min={1} max={28} defaultValue={d("issueDayOverride")} className={inputClass} /><p className="mt-1 text-xs text-muted-foreground">Deixe em branco para seguir o calendário padrão (lotes 25 / 1 / 8 / 15).</p></div>
         <label className="flex items-center gap-2 self-end pb-2 text-sm"><input type="checkbox" name="invoiceJointRequired" defaultChecked={v.invoiceJointRequired ? v.invoiceJointRequired === "on" : !!defaults?.invoiceJointRequired} /> Cliente exige NF emitida junto do boleto</label>
       </div>
-      {withReason && <div><L id="reason">Motivo da alteração</L><input id="reason" name="reason" maxLength={200} defaultValue={d("reason" as keyof Defaults)} placeholder="Ex.: reajuste anual" className={inputClass} /></div>}
+      {withReason && <div><L id="reason">Motivo da alteração</L><input id="reason" name="reason" maxLength={200} defaultValue={d("reason")} placeholder="Ex.: reajuste anual" className={inputClass} /></div>}
       {amendment && (
         <fieldset className="grid gap-4 rounded-md border bg-muted/30 p-3 sm:grid-cols-2">
           <legend className="px-1 text-sm font-medium">Aditivo</legend>
-          <div><L id="kind">Tipo</L><select id="kind" name="kind" defaultValue={v.kind ?? "alteracao"} className={inputClass}>{KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
-          <div><L id="effectiveOn">Vale a partir de (opcional)</L><input id="effectiveOn" name="effectiveOn" type="date" defaultValue={v.effectiveOn ?? ""} className={inputClass} /><p className="mt-1 text-xs text-muted-foreground">Data futura = aditivo <strong>agendado</strong>: aprovado agora, passa a valer sozinho nessa data. Cobranças já geradas não mudam.</p></div>
+          <div><L id="kind">Tipo</L><select id="kind" name="kind" defaultValue={d("kind", "alteracao")} className={inputClass}>{KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
+          <div><L id="effectiveOn">Vale a partir de (opcional)</L><input id="effectiveOn" name="effectiveOn" type="date" defaultValue={d("effectiveOn")} className={inputClass} /><p className="mt-1 text-xs text-muted-foreground">Data futura = aditivo <strong>agendado</strong>: aprovado agora, passa a valer sozinho nessa data. Cobranças já geradas não mudam.</p></div>
           <div className="sm:col-span-2"><L id="reference">Referência do documento (opcional)</L><input id="reference" name="reference" maxLength={200} defaultValue={v.reference ?? ""} placeholder="Ex.: 2º aditivo assinado em 10/10/2026, pasta Contratos/2026" className={inputClass} /></div>
         </fieldset>
       )}

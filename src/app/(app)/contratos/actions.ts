@@ -7,6 +7,7 @@ import { Forbidden, Invalid } from "@/modules/identity/service";
 import { setContractCommission } from "@/modules/commissions/service";
 import { cancelScheduledVersion, createContract, decideVersion, todayManaus, proposeAndApprove, proposeChange, setStatus, type ContractStatus } from "@/modules/contracts/service";
 import { addNote } from "@/modules/notes/service";
+import { saveAdjustmentRule, snoozeAlert, unsnoozeAlert } from "@/modules/contracts/adjustment";
 
 export type FormState = { error?: string; values?: Record<string, string> } | undefined;
 
@@ -82,4 +83,25 @@ export async function cancelScheduleAction(fd: FormData) {
   catch (e) { err = msg(e); }
   revalidatePath(`/contratos/${contractId}`); revalidatePath("/contratos"); revalidatePath("/faturamento");
   redirect(`/contratos/${contractId}${err ? `?erro=${encodeURIComponent(err)}` : ""}`);
+}
+
+// E31 — regra de reajuste do contrato e silenciar alertas (um ciclo)
+export async function saveRuleAction(fd: FormData) {
+  const contractId = String(fd.get("contractId") ?? ""); let err = "";
+  try { const c = await ctx(); await saveAdjustmentRule(db, c.userId, c.companyId, contractId, { index: String(fd.get("index") ?? ""), fixedPct: String(fd.get("fixedPct") ?? ""), note: String(fd.get("note") ?? "") }); } catch (e) { err = msg(e); }
+  revalidatePath(`/contratos/${contractId}`); revalidatePath("/contratos/alertas");
+  redirect(`/contratos/${contractId}${err ? `?erro=${encodeURIComponent(err)}` : "?regra=1"}`);
+}
+export async function snoozeAction(fd: FormData) {
+  let err = "";
+  const days = String(fd.get("days") ?? "");
+  try { const c = await ctx(); await snoozeAlert(db, c.userId, c.companyId, { contractId: String(fd.get("contractId") ?? ""), kind: String(fd.get("kind") ?? ""), dueDate: String(fd.get("dueDate") ?? ""), days: days ? Number(days) : undefined, note: String(fd.get("note") ?? "") }); } catch (e) { err = msg(e); }
+  revalidatePath("/contratos/alertas"); revalidatePath("/contratos");
+  redirect(`/contratos/alertas${err ? `?erro=${encodeURIComponent(err)}` : ""}`);
+}
+export async function unsnoozeAction(fd: FormData) {
+  let err = "";
+  try { const c = await ctx(); await unsnoozeAlert(db, c.userId, c.companyId, String(fd.get("snoozeId") ?? "")); } catch (e) { err = msg(e); }
+  revalidatePath("/contratos/alertas"); revalidatePath("/contratos");
+  redirect(`/contratos/alertas${err ? `?erro=${encodeURIComponent(err)}` : ""}`);
 }
