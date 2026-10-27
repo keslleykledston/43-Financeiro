@@ -139,7 +139,7 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [ ] Certificado digital A1 / credenciais de prefeitura, se a NFS-e da Cora exigir (cofre; fase própria).
 - [ ] Papel "contabilidade" ver (somente leitura) os dados fiscais da empresa.
 
-- [ ] (Codex E22 P2) Adaptador SMTP real: resolver DNS (A/AAAA) na hora de conectar, bloquear faixas internas/loopback/link-local, proteger contra DNS rebinding e restringir o egress do container. A validação atual só barra IP literal e nomes internos comuns.
+- [x] (feito na E23, `net-guard.ts`; falta só restringir o egress do container, que é infra) (Codex E22 P2) Adaptador SMTP real: resolver DNS (A/AAAA) na hora de conectar, bloquear faixas internas/loopback/link-local, proteger contra DNS rebinding e restringir o egress do container. A validação atual só barra IP literal e nomes internos comuns.
 - [ ] (Codex E22 P2) Código do serviço (LC 116) só confere o formato: validar contra a lista aceita pela prefeitura quando a NFS-e for ligada; até lá, confirmar com o contador.
 
 ## E23 — Adaptador de e-mail real (canário) (2026-10-24, ADR-020)
