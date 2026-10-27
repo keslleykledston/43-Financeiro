@@ -15,4 +15,13 @@
 ## Senha e sessões
 **Regras da senha:** mínimo de 12 caracteres; são recusadas senhas só com números (até 15 dígitos), sequências e repetições, as mais comuns e as que contêm o nome do seu e-mail. Uma frase com palavras sem relação funciona bem.
 
+## Verificação em duas etapas (2FA)
+Em **Minha conta → Verificação em duas etapas** você liga um segundo passo no login: além da senha, o sistema pede um código de 6 dígitos de um aplicativo autenticador (Google Authenticator, Microsoft Authenticator, Authy, 1Password…). É **recomendado para diretoria e admin técnico**.
+1. Informe a senha, copie a **chave** mostrada para o aplicativo (conta do tipo "baseado em tempo") e digite o código que ele gerar.
+2. Guarde os **10 códigos de recuperação** (aparecem uma vez só; cada um vale uma vez). Eles servem se você perder o celular.
+3. Para **desligar** ou gerar novos códigos, o sistema pede a senha e um código atual.
+
+Errar o código 5 vezes trava o login dessa conta por alguns minutos. O mesmo código não funciona duas vezes. **Perdeu o celular e os códigos?** Quem administra os acessos (Configurações → Usuários → **Remover 2FA**) remove o 2FA da pessoa, que passa a entrar só com a senha e deve ativar de novo; as sessões abertas dela são encerradas. A diretoria remove de qualquer papel; o admin técnico, dos papéis abaixo da diretoria.
+
+## Sessões
 Trocar a senha (Minha conta) encerra todas as sessões abertas dessa pessoa, inclusive a atual: entre de novo. Em **Minha conta → Sair em todos os dispositivos** você faz o mesmo sem trocar a senha. Veja também o [Registro de atividades](registro-de-atividades.md).

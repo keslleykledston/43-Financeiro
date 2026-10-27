@@ -8,7 +8,7 @@ import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass } from "@/components/k3g/button";
 import { InviteForm } from "./invite-form";
 import { removeAction } from "./actions";
-import { PendingInvites, ResetLinkButton } from "./row-actions";
+import { PendingInvites, ResetLinkButton, ResetTwoFactorButton } from "./row-actions";
 import { formatDate } from "@/lib/format";
 
 const ALL: Role[] = ["diretoria", "gerente", "assistente", "contabilidade", "admin_tecnico"];
@@ -46,9 +46,10 @@ export default async function Configuracoes({ searchParams }: { searchParams: Pr
         <ul className="divide-y divide-border">
           {members.map((m) => (
             <li key={m.membershipId} className="flex items-center justify-between gap-3 py-2.5 text-sm">
-              <div className="min-w-0"><p className="truncate font-medium">{m.name}</p><p className="truncate text-muted-foreground">{m.email} · {ROLE_LABEL[m.role]}</p></div>
+              <div className="min-w-0"><p className="truncate font-medium">{m.name}</p><p className="truncate text-muted-foreground">{m.email} · {ROLE_LABEL[m.role]}{m.twoFactor ? " · 2FA ativo" : ""}</p></div>
               <div className="flex flex-col items-end gap-2">
                 {canInvite && m.userId !== ctx.user.id && canGrant(role, m.role) && (m.role !== "diretoria" || role === "diretoria") && <ResetLinkButton membershipId={m.membershipId} />}
+                {canInvite && m.twoFactor && m.userId !== ctx.user.id && canGrant(role, m.role) && (m.role !== "diretoria" || role === "diretoria") && <ResetTwoFactorButton membershipId={m.membershipId} />}
                 {can(role, "members.remove") && m.userId !== ctx.user.id && canGrant(role, m.role) && (
                   <form action={removeAction}><input type="hidden" name="membershipId" value={m.membershipId} /><button className="rounded-lg px-3 py-1.5 text-negative-foreground ring-1 ring-negative/30">Remover</button></form>
                 )}

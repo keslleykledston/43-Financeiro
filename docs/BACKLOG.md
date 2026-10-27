@@ -187,3 +187,5 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [x] D3c: carro/moto/consórcio da aba Casa viram despesa da empresa (reclassificação + parcelamentos); sem migração.
 - [x] D4b (parcial): previsto × realizado mês a mês no plano (/socios/plano). Fora: reajustes/fim de contrato (sem dado de índice), sazonalidade e imposto sobre o lucro (dependem de premissas do dono).
 - [x] Relatório de despesas por categoria/mês/centro (/contas-a-pagar/relatorio) com CSV.
+- [x] E28: 2FA (TOTP) opcional, recomendado à diretoria/admin; códigos de recuperação; remoção pelo administrador; migração 0037. Falta: QR code; obrigar 2FA para diretoria (decisão do dono); aviso por e-mail de troca de senha (depende do e-mail real).
+- [x] Busca dentro da central de ajuda (sem acento, todos os termos, trecho).

@@ -260,6 +260,13 @@
       "when": 1793041036868,
       "tag": "0036_worthless_jocasta",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793076624485,
+      "tag": "0037_violet_ricochet",
+      "breakpoints": true
     }
   ]
 }

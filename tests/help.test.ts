@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { renderMarkdown } from "@/lib/markdown";
-import { getArticle, listArticles } from "@/modules/help/service";
+import { getArticle, listArticles, searchArticles } from "@/modules/help/service";
 import { HELP_ROUTES, helpSlugFor } from "@/modules/help/routes";
 
 const html = (md: string) => renderToStaticMarkup(createElement("div", null, renderMarkdown(md)));
@@ -84,5 +84,25 @@ describe("artigos de ajuda (pasta help/)", () => {
       const body = (await getArticle(a.slug))!.body;
       for (const m of body.matchAll(/\]\(([a-z0-9-]+)\.md(?:#[\w-]*)?\)/g)) expect(slugs.has(m[1]), `${a.slug} → ${m[1]}`).toBe(true);
     }
+  });
+});
+
+describe("busca na ajuda", () => {
+  it("ignora acento e maiúsculas, exige todos os termos e traz um trecho", async () => {
+    const a = await searchArticles("VERIFICACAO duas etapas");
+    expect(a.map((h) => h.slug)).toContain("usuarios-e-acessos");
+    expect(a[0].snippet.length).toBeGreaterThan(20);
+    expect((await searchArticles("verificação")).length).toBeGreaterThan(0);
+    expect(await searchArticles("zzzxyznaoexiste")).toEqual([]);
+    expect(await searchArticles("verificacao zzzxyznaoexiste")).toEqual([]);
+  });
+  it("consulta vazia, curta, com símbolos ou gigante não quebra nem devolve tudo", async () => {
+    for (const q of ["", " ", "a", "!!", "../../etc/passwd", "x".repeat(5000)]) expect(Array.isArray(await searchArticles(q))).toBe(true);
+    expect(await searchArticles("")).toEqual([]);
+    expect((await searchArticles("../../etc/passwd")).every((h) => /^[a-z0-9-]+$/.test(h.slug))).toBe(true);
+  });
+  it("título pesa mais que o corpo", async () => {
+    const a = await searchArticles("contas a pagar");
+    expect(a[0].title.toLowerCase()).toContain("contas a pagar");
   });
 });

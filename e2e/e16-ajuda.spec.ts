@@ -13,6 +13,15 @@ test("Ajuda — lista de artigos, artigo renderizado e o '?' do cabeçalho abre 
   await expect(page).toHaveURL(/\/ajuda\/contas-a-pagar$/);
   await expect(page.getByRole("heading", { level: 1, name: /pagar/i })).toBeVisible();
 
+  // busca: ignora acento; sem resultado mostra aviso
+  await page.goto("/ajuda");
+  await page.getByLabel("Buscar na ajuda").fill("verificacao duas etapas");
+  await page.getByRole("button", { name: "Buscar" }).click();
+  await expect(page.getByRole("link", { name: /Usuários e acessos/ })).toBeVisible();
+  await page.getByLabel("Buscar na ajuda").fill("zzzxyznaoexiste");
+  await page.getByRole("button", { name: "Buscar" }).click();
+  await expect(page.getByText("Nada encontrado")).toBeVisible();
+
   // slug inexistente / travessia: 404, nunca um arquivo
   const r = await page.goto("/ajuda/..%2Fpackage");
   expect(r?.status()).toBe(404);

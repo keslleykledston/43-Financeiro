@@ -49,7 +49,7 @@ export async function requirePerm(db: DB, userId: string, companyId: string, per
 
 export async function listMembers(db: DB, actorId: string, companyId: string) {
   await requirePerm(db, actorId, companyId, "members.read");
-  return db.select({ membershipId: memberships.id, userId: users.id, name: users.name, email: users.email, role: memberships.role })
+  return db.select({ membershipId: memberships.id, userId: users.id, name: users.name, email: users.email, role: memberships.role, twoFactor: sql<boolean>`${users.totpEnabledAt} is not null` })
     .from(memberships).innerJoin(users, eq(users.id, memberships.userId))
     .where(and(eq(memberships.companyId, companyId), eq(memberships.status, "active")));
 }

@@ -102,18 +102,29 @@ export async function completePasswordReset(db: DB, token: string, password: str
  * admin técnico não redefine diretoria (senão assumiria a conta e os dados financeiros); se a pessoa também tem acesso a OUTRA empresa,
  * o ator precisa poder conceder o papel dela lá também (senão o link serviria para assumir um acesso que ele não administra).
  */
-export async function issueResetLink(db: DB, actorId: string, companyId: string, membershipId: string, baseUrl: string, now = new Date()) {
+/** Regras comuns de quem administra o acesso de outro membro (link de senha, remoção do 2FA). Devolve o usuário-alvo. */
+export async function adminTarget(db: DB, actorId: string, companyId: string, membershipId: string, what: string) {
   const actorRole = await requirePerm(db, actorId, companyId, "members.invite");
   const [m] = await db.select().from(memberships).where(and(eq(memberships.id, membershipId), eq(memberships.companyId, companyId), eq(memberships.status, "active")));
   if (!m) throw new Invalid("Membro não encontrado");
-  if (m.userId === actorId) throw new Invalid("Para trocar a sua própria senha, use Minha conta");
-  if (!canGrant(actorRole, m.role) || (m.role === "diretoria" && actorRole !== "diretoria")) throw new Forbidden("Você não pode redefinir a senha deste papel");
+  if (m.userId === actorId) throw new Invalid(`Para ${what} da sua própria conta, use Minha conta`);
+  if (!canGrant(actorRole, m.role) || (m.role === "diretoria" && actorRole !== "diretoria")) throw new Forbidden(`Você não pode ${what === "trocar a senha" ? "redefinir a senha" : "alterar a segurança"} deste papel`);
   const others = await db.select({ companyId: memberships.companyId, role: memberships.role }).from(memberships).where(and(eq(memberships.userId, m.userId), eq(memberships.status, "active")));
   for (const o of others) {
     if (o.companyId === companyId) continue;
     const mine: Role | null = await activeRole(db, actorId, o.companyId);
     if (!mine || !can2(mine, o.role)) throw new Forbidden("Esta pessoa também acessa outra empresa, onde você não administra acessos");
   }
+  return m;
+}
+
+/**
+ * Link gerado por quem administra acessos. Regras: papel que o ator pode conceder; não para si mesmo (use "Minha conta");
+ * admin técnico não redefine diretoria (senão assumiria a conta e os dados financeiros); se a pessoa também tem acesso a OUTRA empresa,
+ * o ator precisa poder conceder o papel dela lá também (senão o link serviria para assumir um acesso que ele não administra).
+ */
+export async function issueResetLink(db: DB, actorId: string, companyId: string, membershipId: string, baseUrl: string, now = new Date()) {
+  const m = await adminTarget(db, actorId, companyId, membershipId, "trocar a senha");
   const [u] = await db.select({ id: users.id, disabledAt: users.disabledAt }).from(users).where(eq(users.id, m.userId));
   if (!u || u.disabledAt) throw new Invalid("Usuário desativado");
   const token = randomBytes(32).toString("base64url");

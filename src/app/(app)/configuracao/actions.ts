@@ -5,6 +5,7 @@ import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { Forbidden, Invalid, INVITE_TTL_MS, inviteMember, reissueInvitation, removeMember, revokeInvitation } from "@/modules/identity/service";
 import { issueResetLink } from "@/modules/identity/recovery";
+import { adminResetTwoFactor } from "@/modules/identity/twofactor";
 import { ROLE_LABEL, type Role } from "@/modules/identity/permissions";
 import { inviteMail, reasonText, sendSystemEmail } from "@/modules/providers/email-system";
 
@@ -87,5 +88,16 @@ export async function resetLinkAction(_: ResetLinkState, fd: FormData): Promise<
   const m = id.safeParse(fd.get("membershipId"));
   if (!m.success) return { error: "Membro inválido." };
   try { return await issueResetLink(db, ctx.user.id, ctx.current.id, m.data, baseUrl()); }
+  catch (e) { if (e instanceof Forbidden || e instanceof Invalid) return { error: e.message }; throw e; }
+}
+
+export type TfResetState = { error?: string; ok?: boolean } | undefined;
+/** Remove o 2FA de um membro que perdeu o aparelho (mesmas regras do link de senha). Ele passa a entrar só com a senha e deve ativar de novo. */
+export async function resetTwoFactorAction(_: TfResetState, fd: FormData): Promise<TfResetState> {
+  const ctx = await requireContext();
+  if (!ctx.current) return { error: "Nenhuma empresa ativa." };
+  const m = id.safeParse(fd.get("membershipId"));
+  if (!m.success) return { error: "Membro inválido." };
+  try { await adminResetTwoFactor(db, ctx.user.id, ctx.current.id, m.data); revalidatePath("/configuracao"); return { ok: true }; }
   catch (e) { if (e instanceof Forbidden || e instanceof Invalid) return { error: e.message }; throw e; }
 }

@@ -1,6 +1,6 @@
 "use client";
 import { useActionState } from "react";
-import { reissueInviteAction, resetLinkAction, revokeInviteAction } from "./actions";
+import { reissueInviteAction, resetLinkAction, resetTwoFactorAction, revokeInviteAction } from "./actions";
 import { buttonClass } from "@/components/k3g/button";
 import { LinkOnce } from "@/components/k3g/link-once";
 
@@ -39,5 +39,18 @@ export function ResetLinkButton({ membershipId }: { membershipId: string }) {
       {state?.error && <p role="alert" className="text-xs text-negative-foreground">{state.error}</p>}
       {state?.link && <LinkOnce link={state.link} note={`Link de redefinição criado (vale ${state.hours} h, uso único). Entregue à pessoa por um canal seguro. Ele não será exibido de novo:`} />}
     </div>
+  );
+}
+
+/** Remove o 2FA do membro (perdeu o aparelho e os códigos). Pede confirmação no próprio botão. */
+export function ResetTwoFactorButton({ membershipId }: { membershipId: string }) {
+  const [state, action, pending] = useActionState(resetTwoFactorAction, undefined);
+  if (state?.ok) return <p role="status" className="text-xs text-positive-foreground">2FA removido. A pessoa entra só com a senha e deve ativar de novo.</p>;
+  return (
+    <form action={action} onSubmit={(e) => { if (!confirm("Remover a verificação em duas etapas desta pessoa? As sessões abertas dela serão encerradas.")) e.preventDefault(); }}>
+      <input type="hidden" name="membershipId" value={membershipId} />
+      <button disabled={pending} className={buttonClass("outline", "sm")}>Remover 2FA</button>
+      {state?.error && <p role="alert" className="mt-1 text-xs text-negative-foreground">{state.error}</p>}
+    </form>
   );
 }

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb, pgEnum, integer, boolean, unique, foreignKey, check, numeric, date } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb, pgEnum, integer, boolean, unique, foreignKey, check, numeric, date, bigint } from "drizzle-orm/pg-core";
 
 export const roleEnum = pgEnum("role", ["admin_tecnico", "diretoria", "gerente", "assistente", "contabilidade"]);
 export const statusEnum = pgEnum("member_status", ["active", "invited", "removed"]);
@@ -18,7 +18,23 @@ export const users = pgTable("users", {
   disabledAt: timestamp("disabled_at", { withTimezone: true }),
   // sobe a cada troca de senha / "encerrar todas as sessões": o JWT carrega o valor do login e deixa de valer se divergir
   sessionVersion: integer("session_version").notNull().default(0),
-}, (t) => [uniqueIndex("users_email_uq").on(sql`lower(${t.email})`)]);
+  // E28 — 2FA (TOTP). O segredo fica CIFRADO (secretbox); `totp_pending` é o segredo ainda não confirmado; `totp_last_step` impede reuso do mesmo código.
+  totpSecret: text("totp_secret"),
+  totpPending: text("totp_pending"),
+  totpEnabledAt: timestamp("totp_enabled_at", { withTimezone: true }),
+  totpLastStep: bigint("totp_last_step", { mode: "number" }),
+}, (t) => [
+  uniqueIndex("users_email_uq").on(sql`lower(${t.email})`),
+  check("users_totp_chk", sql`(${t.totpEnabledAt} is null) = (${t.totpSecret} is null)`),
+]);
+
+/** E28 — códigos de recuperação do 2FA: só o hash (SHA-256) fica no banco; cada código vale uma vez. */
+export const userRecoveryCodes = pgTable("user_recovery_codes", {
+  ...base,
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  codeHash: text("code_hash").notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+}, (t) => [uniqueIndex("user_recovery_codes_uq").on(t.userId, t.codeHash)]);
 
 export const companies = pgTable("companies", {
   ...base,
