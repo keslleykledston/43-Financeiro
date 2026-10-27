@@ -40,7 +40,7 @@ export function ContractForm({ action, defaults, customers, submit, withReason, 
         <fieldset className="grid gap-4 rounded-md border bg-muted/30 p-3 sm:grid-cols-2">
           <legend className="px-1 text-sm font-medium">Aditivo</legend>
           <div><L id="kind">Tipo</L><select id="kind" name="kind" defaultValue={v.kind ?? "alteracao"} className={inputClass}>{KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
-          <div><L id="effectiveOn">Vale a partir de (opcional)</L><input id="effectiveOn" name="effectiveOn" type="date" defaultValue={v.effectiveOn ?? ""} className={inputClass} /><p className="mt-1 text-xs text-muted-foreground">Não pode ser futura. Cobranças já geradas não mudam.</p></div>
+          <div><L id="effectiveOn">Vale a partir de (opcional)</L><input id="effectiveOn" name="effectiveOn" type="date" defaultValue={v.effectiveOn ?? ""} className={inputClass} /><p className="mt-1 text-xs text-muted-foreground">Data futura = aditivo <strong>agendado</strong>: aprovado agora, passa a valer sozinho nessa data. Cobranças já geradas não mudam.</p></div>
           <div className="sm:col-span-2"><L id="reference">Referência do documento (opcional)</L><input id="reference" name="reference" maxLength={200} defaultValue={v.reference ?? ""} placeholder="Ex.: 2º aditivo assinado em 10/10/2026, pasta Contratos/2026" className={inputClass} /></div>
         </fieldset>
       )}

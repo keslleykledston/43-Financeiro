@@ -31,14 +31,14 @@ test("E21 — aditivo com aprovação na hora, comentários só de acréscimo e 
   await page.getByRole("button", { name: "Aprovar", exact: true }).click();
   await expect(page.getByText("Termos vigentes")).toBeVisible();
 
-  await test.step("aditivo de reajuste: data futura é recusada; válido, aprovado na hora", async () => {
+  await test.step("aditivo de reajuste: data além de 3 anos é recusada; válido, aprovado na hora", async () => {
     await expect(page.getByRole("heading", { name: "Aditivo ou ajuste de valor" })).toBeVisible();
     await page.getByLabel("Tipo", { exact: true }).selectOption("reajuste");
     await page.getByLabel("Valor mensal (R$)").fill("2.750,00");
     await page.getByLabel("Vale a partir de (opcional)").fill("2999-01-01");
     await page.getByLabel("Aprovar agora (diretoria)", { exact: false }).check();
     await page.getByRole("button", { name: "Enviar para aprovação" }).click();
-    await expect(page.getByRole("alert").filter({ hasText: "não pode ser futura" })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "no máximo 3 anos" })).toBeVisible();
     await page.getByLabel("Tipo", { exact: true }).selectOption("reajuste");
     await page.getByLabel("Valor mensal (R$)").fill("2.750,00");
     await page.getByLabel("Vale a partir de (opcional)").fill("2026-06-01");

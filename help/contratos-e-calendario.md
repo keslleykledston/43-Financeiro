@@ -7,7 +7,8 @@ O K3G CRM não tem contratos; eles são mantidos **neste sistema**, ligados a um
 1. *Novo contrato*: cliente, serviço, **valor mensal** (ex.: `2.500,00`), **dia de vencimento** (1–31), início da vigência (o **fim** só se o cliente encerrar), se o cliente **exige NF junto do boleto** e, se precisar, um dia de emissão personalizado.
 2. O contrato nasce como **rascunho** e só passa a valer depois de **aprovado** por gerente ou diretoria. Quem cadastrou não aprova o próprio (a diretoria pode).
 3. **Alterações** (valor, vencimento, vigência…) viram uma *versão pendente*. **Os termos atuais continuam valendo até a aprovação.** Tudo fica no histórico de versões.
-4. *Suspender* e *Encerrar* são imediatos. *Reativar* exige gerente ou diretoria. **Encerrar é definitivo.**
+4. **Aditivo com data futura (agendado).** No campo *Vale a partir de*, uma data **futura** agenda o aditivo: ele é aprovado agora (do jeito normal) e **passa a valer sozinho naquele dia**; até lá os termos atuais continuam valendo e as prévias de lote usam os valores atuais. Enquanto houver um aditivo agendado, nenhuma outra alteração pode ser proposta no contrato (cancele o agendamento no *Histórico de versões* para mudar de ideia). Se o contrato for encerrado antes da data, o agendamento é cancelado sozinho. **Atenção:** cobranças de lotes que já foram aprovados antes da data continuam com o valor antigo; o lote aparece como "desatualizado" e precisa ser reaberto e revalidado por uma pessoa (o registro de atividades informa quantas cobranças aprovadas ficaram com o valor antigo). Limite: até 3 anos à frente; contrato em rascunho não aceita data futura.
+5. *Suspender* e *Encerrar* são imediatos. *Reativar* exige gerente ou diretoria. **Encerrar é definitivo.**
 
 ## Quem gera cobrança
 Só entra no calendário contrato **ativo** de cliente **ativo** (não arquivado) cuja **vigência cubra a competência**. Cliente suspenso ou cancelado fica de fora, mesmo com contrato ativo.

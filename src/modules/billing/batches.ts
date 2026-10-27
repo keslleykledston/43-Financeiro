@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { applyDueAmendments } from "@/modules/contracts/service";
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
 import { auditLog, billingBatches, charges, customers } from "@/lib/db/schema";
@@ -70,6 +71,7 @@ const audit = (x: DB, companyId: string, actorId: string, action: string, detail
 export async function generateBatch(db: DB, actorId: string, companyId: string, issueDate: string) {
   await requirePerm(db, actorId, companyId, "billing.write");
   if (!isoDate(issueDate)) throw new Invalid("Data inválida");
+  await applyDueAmendments(db, companyId); // aditivos agendados que já chegaram na data valem antes de calcular a prévia (o agendador também faz isso)
   return db.transaction(async (tx) => {
     const x = tx as unknown as DB;
     await lockCompany(x, companyId);

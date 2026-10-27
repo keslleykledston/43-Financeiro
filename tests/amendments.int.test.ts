@@ -8,7 +8,7 @@ import * as schema from "@/lib/db/schema";
 import type { DB } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
 import { createParty } from "@/modules/crm/service";
-import { createContract, decideVersion, getContract, proposeAndApprove, proposeChange } from "@/modules/contracts/service";
+import { applyDueAmendments, cancelScheduledVersion, createContract, decideVersion, getContract, proposeAndApprove, proposeChange } from "@/modules/contracts/service";
 import { listContractAlerts } from "@/modules/contracts/alerts";
 import { addNote, listNotes } from "@/modules/notes/service";
 import { getCompanyProfile, updateCompanyProfile } from "@/modules/companies/service";
@@ -18,6 +18,8 @@ const CNPJ1 = "11.222.333/0001-81", COMPANY_CNPJ = "12.ABC.345/01DE-35";
 const terms = (o: Record<string, unknown> = {}) => ({ description: "Monitoramento", monthlyAmount: "2.500,00", startAt: "2026-01-01", endAt: "", dueDay: "5", invoiceJointRequired: false, issueDayOverride: "", ...o });
 const why = (e: unknown) => String((e as { cause?: { message?: string } })?.cause?.message ?? (e as Error)?.message ?? e);
 const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Manaus" });
+const plus = (days: number) => new Date(new Date(today() + "T12:00:00Z").getTime() + days * 86400000).toISOString().slice(0, 10);
+const br = (d: string) => d.split("-").reverse().join("/");
 
 describe.skipIf(!enabled)("E21 — aditivos, comentários e dados da empresa (DB de teste)", () => {
   let admin: ReturnType<typeof postgres>, conn: ReturnType<typeof postgres>, db: DB;
@@ -68,10 +70,10 @@ describe.skipIf(!enabled)("E21 — aditivos, comentários e dados da empresa (DB
       expect(log[0].detail).toMatchObject({ contractId: id, version: 2, kind: "reajuste" });
     });
 
-    it("regras: data futura recusada; reajuste/valor exigem valor diferente; prorrogação exige outro fim; tipo inválido", async () => {
+    it("regras: data além de 3 anos recusada; reajuste/valor exigem valor diferente; prorrogação exige outro fim; tipo inválido", async () => {
       const id = await active();
       const bad = (am: Record<string, unknown>, o: Record<string, unknown>, re: RegExp) => expect(proposeChange(db, asstA, A, id, terms(o), "x", am)).rejects.toThrow(re);
-      await bad({ kind: "reajuste", effectiveOn: "2999-01-01" }, { monthlyAmount: "3.000,00" }, /não pode ser futura/);
+      await bad({ kind: "reajuste", effectiveOn: "2999-01-01" }, { monthlyAmount: "3.000,00" }, /no máximo 3 anos/);
       await bad({ kind: "reajuste" }, { dueDay: "6" }, /igual ao vigente/);
       await bad({ kind: "valor" }, { dueDay: "6" }, /igual ao vigente/);
       await bad({ kind: "prorrogacao" }, { monthlyAmount: "3.000,00" }, /igual à vigente/);
@@ -89,6 +91,57 @@ describe.skipIf(!enabled)("E21 — aditivos, comentários e dados da empresa (DB
       const c = (await getContract(db, dirA, A, id))!;
       expect(c.amountCents).toBe(300000);
       expect(c.versions[0]).toMatchObject({ state: "aprovada", kind: "valor", requestedBy: dirA, decidedBy: dirA });
+    });
+
+    it("agendado: data futura aprovada NÃO muda o contrato; vale sozinho na data, uma vez; bloqueia outra alteração; cancelável", async () => {
+      const id = await active();
+      const future = plus(40);
+      await proposeAndApprove(db, dirA, A, id, terms({ monthlyAmount: "2.800,00" }), "Reajuste combinado", { kind: "reajuste", effectiveOn: future, reference: "aditivo 3" });
+      let c = (await getContract(db, dirA, A, id))!;
+      expect(c.amountCents).toBe(250000); // continua o vigente
+      expect(c.versions[0]).toMatchObject({ state: "agendada", effectiveOn: future, appliedAt: null });
+      await expect(proposeChange(db, asstA, A, id, terms({ monthlyAmount: "2.900,00" }), "x", { kind: "valor" })).rejects.toThrow(new RegExp(`aditivo agendado para ${br(future).replace(/\//g, "\\/")}`));
+      expect(await applyDueAmendments(db, A, plus(39))).toBe(0); // ainda não chegou
+      expect((await getContract(db, dirA, A, id))!.amountCents).toBe(250000);
+      expect(await applyDueAmendments(db, null, future)).toBe(1);
+      expect(await applyDueAmendments(db, null, plus(400))).toBe(0); // idempotente
+      c = (await getContract(db, dirA, A, id))!;
+      expect(c.amountCents).toBe(280000);
+      expect(c.versions[0]).toMatchObject({ state: "aprovada" }); expect(c.versions[0].appliedAt).toBeTruthy();
+      const acts = (await db.select().from(schema.auditLog)).map((a) => a.action);
+      expect(acts).toEqual(expect.arrayContaining(["contract.version_scheduled", "contract.version_applied"]));
+      const applied = (await db.select().from(schema.auditLog)).find((a) => a.action === "contract.version_applied")!;
+      expect(applied.actorId).toBeNull(); expect(applied.detail).toMatchObject({ contractId: id, version: 2, approvedChargesWithOldValue: 0 });
+      // depois de valer, nova alteração é possível de novo
+      await expect(proposeChange(db, asstA, A, id, terms({ monthlyAmount: "2.900,00" }), "x", { kind: "valor" })).resolves.toBe(3);
+    });
+
+    it("agendado: proposta pendente (gerente) só agenda quando aprovada; cancelar desfaz sem mudar nada", async () => {
+      const id = await active();
+      await proposeChange(db, asstA, A, id, terms({ monthlyAmount: "2.600,00" }), "x", { kind: "reajuste", effectiveOn: plus(60) });
+      const v2 = (await getContract(db, dirA, A, id))!.versions[0];
+      expect(v2.state).toBe("pendente");
+      await decideVersion(db, gerA, A, v2.id, "aprovar");
+      expect((await getContract(db, dirA, A, id))!.versions[0].state).toBe("agendada");
+      await expect(cancelScheduledVersion(db, asstA, A, v2.id, "x")).rejects.toBeInstanceOf(Forbidden);
+      await expect(cancelScheduledVersion(db, dirB, B, v2.id, "x")).rejects.toThrow(/não encontrada/); // outra empresa
+      await cancelScheduledVersion(db, gerA, A, v2.id, "cliente desistiu");
+      const c = (await getContract(db, dirA, A, id))!;
+      expect(c.versions[0]).toMatchObject({ state: "cancelada", decisionNote: "cliente desistiu" });
+      expect(c.amountCents).toBe(250000);
+      expect(await applyDueAmendments(db, null, plus(400))).toBe(0);
+      await expect(cancelScheduledVersion(db, gerA, A, v2.id, "x")).rejects.toThrow(/não está mais agendado/);
+    });
+
+    it("agendado: contrato encerrado antes da data cancela o agendamento; rascunho não aceita data futura", async () => {
+      const id = await active();
+      await proposeAndApprove(db, dirA, A, id, terms({ monthlyAmount: "2.800,00" }), "x", { kind: "reajuste", effectiveOn: plus(40) });
+      await db.update(schema.contracts).set({ status: "encerrado" }).where(eq(schema.contracts.id, id));
+      expect(await applyDueAmendments(db, null, plus(40))).toBe(0);
+      const c = (await getContract(db, dirA, A, id))!;
+      expect(c.versions[0]).toMatchObject({ state: "cancelada" }); expect(c.amountCents).toBe(250000);
+      const draft = await createContract(db, asstA, A, cliA, terms());
+      await expect(proposeChange(db, asstA, A, draft.id, terms({ monthlyAmount: "2.800,00" }), "x", { kind: "reajuste", effectiveOn: plus(40) })).rejects.toThrow(/rascunho/);
     });
 
     it("alerta de reajuste conta a partir da data de efeito do aditivo", async () => {

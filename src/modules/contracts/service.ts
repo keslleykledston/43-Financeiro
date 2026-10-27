@@ -43,12 +43,11 @@ const amendmentSchema = z.object({
   effectiveOn: z.preprocess((v) => (v === "" || v === undefined ? null : v), iso.nullable()),
   reference: z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? null : v), z.string().trim().max(200, "Referência muito longa (máximo 200)").nullable().optional()),
 });
-const todayManaus = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Manaus" });
+export const todayManaus = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Manaus" });
 export function parseAmendment(input: unknown): Amendment {
   const p = amendmentSchema.safeParse(input ?? {});
   if (!p.success) throw new Invalid(p.error.issues[0]?.message ?? "Dados do aditivo inválidos");
-  // as cobranças usam o valor vigente no momento da prévia do lote; por isso o aditivo não pode ficar agendado para o futuro
-  if (p.data.effectiveOn && p.data.effectiveOn > todayManaus()) throw new Invalid("A data de efeito não pode ser futura: registre o aditivo quando ele passar a valer");
+  // data futura = aditivo AGENDADO (E29): vale só depois de aprovado E quando a data chegar; quem decide se pode agendar é proposeChange (depende do status do contrato)
   return { kind: p.data.kind, effectiveOn: p.data.effectiveOn, reference: p.data.reference ?? null };
 }
 
@@ -57,6 +56,8 @@ export const termsOf = (c: Row): Terms => ({ description: c.description, monthly
 const sameTerms = (a: Terms, b: Terms) => JSON.stringify(a) === JSON.stringify(b);
 const columns = (t: Terms) => ({ description: t.description, monthlyAmount: numericFromCents(t.monthlyAmountCents), startAt: t.startAt, endAt: t.endAt, dueDay: t.dueDay, invoiceJointRequired: t.invoiceJointRequired, issueDayOverride: t.issueDayOverride });
 const audit = (db: DB, companyId: string, actorId: string, action: string, detail: Record<string, unknown>) => db.insert(auditLog).values({ companyId, actorId, action, detail });
+const MAX_SCHEDULE_YEARS = 3;
+const addYears = (d: string, n: number) => `${Number(d.slice(0, 4)) + n}${d.slice(4)}`;
 const pgCode = (e: unknown) => (e as { code?: string })?.code ?? (e as { cause?: { code?: string } })?.cause?.code;
 
 /** Elegível para gerar cobrança da competência: contrato ATIVO, cliente ATIVO (não arquivado) e vigência cobrindo o mês. */
@@ -97,11 +98,15 @@ export async function proposeChange(db: DB, actorId: string, companyId: string, 
   const t = parseTerms(input);
   const am = parseAmendment(amendmentInput);
   const meta = { kind: am.kind, effectiveOn: am.effectiveOn, reference: am.reference };
+  const today = todayManaus();
+  const scheduling = !!am.effectiveOn && am.effectiveOn > today;
+  if (scheduling && am.effectiveOn! > addYears(today, MAX_SCHEDULE_YEARS)) throw new Invalid(`A data de efeito pode ser no máximo ${MAX_SCHEDULE_YEARS} anos à frente`);
   return db.transaction(async (tx) => {
     const x = tx as unknown as DB;
     const [c] = await x.select().from(contracts).where(and(eq(contracts.id, contractId), eq(contracts.companyId, companyId))).for("update");
     if (!c) throw new Invalid("Contrato não encontrado");
     if (c.status === "encerrado") throw new Invalid("Contrato encerrado não pode ser alterado");
+    if (scheduling && c.status === "rascunho") throw new Invalid("Contrato em rascunho não aceita data de efeito futura: aprove a versão inicial primeiro");
     const vs = await x.select().from(contractVersions).where(and(eq(contractVersions.contractId, contractId), eq(contractVersions.companyId, companyId))).orderBy(desc(contractVersions.version));
     const pending = vs.find((v) => v.state === "pendente");
     if (c.status === "rascunho") {
@@ -115,6 +120,8 @@ export async function proposeChange(db: DB, actorId: string, companyId: string, 
       }
     } else {
       if (pending) throw new Invalid("Já existe uma alteração pendente de aprovação para este contrato");
+      const sched = vs.find((v) => v.state === "agendada");
+      if (sched) throw new Invalid(`Já existe um aditivo agendado para ${sched.effectiveOn?.split("-").reverse().join("/")}: cancele o agendamento ou espere ele valer antes de propor outro`);
       if (sameTerms(t, termsOf(c))) throw new Invalid("Nenhuma alteração em relação aos termos vigentes");
       if ((am.kind === "reajuste" || am.kind === "valor") && t.monthlyAmountCents === centsFromNumeric(c.monthlyAmount)) throw new Invalid("Este tipo de aditivo muda o valor mensal, mas o valor informado é igual ao vigente");
       if (am.kind === "prorrogacao" && t.endAt === c.endAt) throw new Invalid("Prorrogação muda o fim da vigência, mas a data informada é igual à vigente");
@@ -156,14 +163,64 @@ export async function decideVersion(db: DB, actorId: string, companyId: string, 
     if (!v || v.state !== "pendente") throw new Invalid("Versão não encontrada ou já decidida");
     if (v.requestedBy === actorId && role !== "diretoria") throw new Forbidden("Quem solicitou a alteração não pode aprová-la (exige outro gerente ou a diretoria)");
     const [c] = await x.select().from(contracts).where(and(eq(contracts.id, v.contractId), eq(contracts.companyId, companyId))).for("update");
-    if (decision === "aprovar") {
+    const schedule = decision === "aprovar" && c.status !== "rascunho" && !!v.effectiveOn && v.effectiveOn > todayManaus(); // aprovado agora, vale na data (E29)
+    if (decision === "aprovar" && !schedule) {
       if (c.status === "encerrado") throw new Invalid("Contrato encerrado");
       const t = v.terms as Terms;
       await x.update(contracts).set({ ...columns(t), status: c.status === "rascunho" ? "ativo" : c.status, updatedAt: new Date() }).where(eq(contracts.id, c.id));
     }
-    await x.update(contractVersions).set({ state: decision === "aprovar" ? "aprovada" : "rejeitada", decidedBy: actorId, decidedAt: new Date(), decisionNote: note?.trim().slice(0, 500) || null, updatedAt: new Date() }).where(eq(contractVersions.id, v.id));
-    await audit(x, companyId, actorId, decision === "aprovar" ? "contract.version_approved" : "contract.version_rejected", { contractId: c.id, version: v.version });
+    if (schedule && c.status === "encerrado") throw new Invalid("Contrato encerrado");
+    await x.update(contractVersions).set({ state: decision === "rejeitar" ? "rejeitada" : schedule ? "agendada" : "aprovada", decidedBy: actorId, decidedAt: new Date(), decisionNote: note?.trim().slice(0, 500) || null, updatedAt: new Date() }).where(eq(contractVersions.id, v.id));
+    await audit(x, companyId, actorId, decision === "aprovar" ? (schedule ? "contract.version_scheduled" : "contract.version_approved") : "contract.version_rejected", { contractId: c.id, version: v.version });
   });
+}
+
+/** Desfaz um aditivo agendado (ainda não valeu). Quem aprova alterações de contrato. */
+export async function cancelScheduledVersion(db: DB, actorId: string, companyId: string, versionId: string, reason = "") {
+  await requirePerm(db, actorId, companyId, "contracts.approve");
+  if (!z.string().uuid().safeParse(versionId).success) throw new Invalid("Versão não encontrada");
+  await db.transaction(async (tx) => {
+    const x = tx as unknown as DB;
+    const [v0] = await x.select({ contractId: contractVersions.contractId }).from(contractVersions).where(and(eq(contractVersions.id, versionId), eq(contractVersions.companyId, companyId)));
+    if (!v0) throw new Invalid("Versão não encontrada");
+    await x.select({ id: contracts.id }).from(contracts).where(and(eq(contracts.id, v0.contractId), eq(contracts.companyId, companyId))).for("update");
+    const r = await x.update(contractVersions).set({ state: "cancelada", decidedBy: actorId, decidedAt: new Date(), decisionNote: (reason.trim().slice(0, 500) || "Agendamento cancelado"), updatedAt: new Date() })
+      .where(and(eq(contractVersions.id, versionId), eq(contractVersions.companyId, companyId), eq(contractVersions.state, "agendada"))).returning({ id: contractVersions.id });
+    if (r.length !== 1) throw new Invalid("Este aditivo não está mais agendado");
+    await audit(x, companyId, actorId, "contract.schedule_cancelled", { contractId: v0.contractId, versionId });
+  });
+}
+
+/**
+ * Aplica os aditivos AGENDADOS que já chegaram na data (E29). Chamado pelo agendador e antes de gerar a prévia de um lote. Idempotente e seguro em paralelo:
+ * trava o contrato, só aplica versão ainda "agendada". Contrato encerrado nesse meio-tempo: o agendamento é cancelado, nada muda.
+ */
+export async function applyDueAmendments(db: DB, companyId: string | null, today = todayManaus()): Promise<number> {
+  const due = await db.select({ id: contractVersions.id, companyId: contractVersions.companyId, contractId: contractVersions.contractId }).from(contractVersions)
+    .where(and(eq(contractVersions.state, "agendada"), sql`${contractVersions.effectiveOn} <= ${today}::date`, companyId ? eq(contractVersions.companyId, companyId) : undefined))
+    .orderBy(asc(contractVersions.effectiveOn), asc(contractVersions.version)).limit(500);
+  let applied = 0;
+  for (const d of due) {
+    await db.transaction(async (tx) => {
+      const x = tx as unknown as DB;
+      const [c] = await x.select().from(contracts).where(and(eq(contracts.id, d.contractId), eq(contracts.companyId, d.companyId))).for("update");
+      const [v] = await x.select().from(contractVersions).where(and(eq(contractVersions.id, d.id), eq(contractVersions.companyId, d.companyId))).for("update");
+      if (!c || !v || v.state !== "agendada") return;
+      const now = new Date();
+      if (c.status === "encerrado") {
+        await x.update(contractVersions).set({ state: "cancelada", decisionNote: "Contrato encerrado antes da data de efeito", updatedAt: now }).where(eq(contractVersions.id, v.id));
+        await x.insert(auditLog).values({ companyId: d.companyId, actorId: null, action: "contract.schedule_cancelled", detail: { contractId: c.id, versionId: v.id, reason: "encerrado" } });
+        return;
+      }
+      await x.update(contracts).set({ ...columns(v.terms as Terms), updatedAt: now }).where(eq(contracts.id, c.id));
+      await x.update(contractVersions).set({ state: "aprovada", appliedAt: now, updatedAt: now }).where(eq(contractVersions.id, v.id));
+      // cobranças JÁ aprovadas em lote com o valor antigo não mudam sozinhas: o lote aparece como desatualizado e precisa ser reaberto/revalidado por uma pessoa
+      const [stale] = (await x.execute(sql`select count(*)::int n from charges where company_id = ${d.companyId} and contract_id = ${c.id} and status = 'aprovada' and base_amount <> ${numericFromCents((v.terms as Terms).monthlyAmountCents)}::numeric`)) as unknown as { n: number }[];
+      await x.insert(auditLog).values({ companyId: d.companyId, actorId: null, action: "contract.version_applied", detail: { contractId: c.id, version: v.version, approvedChargesWithOldValue: stale?.n ?? 0 } });
+      applied++;
+    });
+  }
+  return applied;
 }
 
 /** Suspender/encerrar reduz cobrança (qualquer escritor). Voltar a ATIVO muda a cobrança futura: exige aprovação (gerente/diretoria). */

@@ -13,14 +13,14 @@ import { Callout, Money, PageHeader, SectionCard, StatusPill, type StatusTone } 
 import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass, inputClass } from "@/components/k3g/button";
 import { ContractForm } from "../contract-form";
-import { commissionAction, decideAction, noteAction, proposeAction, statusAction } from "../actions";
+import { cancelScheduleAction, commissionAction, decideAction, noteAction, proposeAction, statusAction } from "../actions";
 import { percentLabel } from "@/modules/commissions/calc";
 
 const TONE: Record<ContractStatus, StatusTone> = { rascunho: "info", ativo: "positive", suspenso: "warning", encerrado: "neutral" };
-const VTONE = { pendente: "info", aprovada: "positive", rejeitada: "negative", substituida: "neutral" } as const;
+const VTONE = { pendente: "info", aprovada: "positive", rejeitada: "negative", substituida: "neutral", agendada: "warning", cancelada: "neutral" } as const;
 const brMoney = (c: number) => (c / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); // 250000 → "2.500,00" (aceito pelo parser estrito)
 
-export default async function Detalhe({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ erro?: string; proposta?: string; comissao?: string; aprovado?: string; comentario?: string }> }) {
+export default async function Detalhe({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ erro?: string; agendado?: string; proposta?: string; comissao?: string; aprovado?: string; comentario?: string }> }) {
   const [{ id }, sp, ctx] = await Promise.all([params, searchParams, requireContext()]);
   const role = ctx.current ? await activeRole(db, ctx.user.id, ctx.current.id) : null;
   if (!ctx.current || !role || !can(role, "contracts.read")) return <Callout tone="warning">Seu papel não tem acesso a contratos.</Callout>;
@@ -29,6 +29,7 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
   const write = can(role, "contracts.write"), approve = can(role, "contracts.approve"), commRead = can(role, "commissions.read"), commManage = can(role, "commissions.manage");
   const notes = await listNotes(db, ctx.user.id, ctx.current.id, { contractId: id });
   const pending = c.versions.find((v) => v.state === "pendente");
+  const scheduled = c.versions.find((v) => v.state === "agendada");
   const nextComp = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Manaus" }).slice(0, 7);
   const sched = billingSchedule({ competenceMonth: nextComp, dueDay: c.dueDay, jointInvoice: c.invoiceJointRequired, issueDayOverride: c.issueDayOverride });
   const status = c.status as ContractStatus;
@@ -39,6 +40,8 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
       <PageHeader title={c.customer.displayName} description={c.customer.displayName !== c.customer.legalName ? `${c.description} · razão social: ${c.customer.legalName}` : c.description} actions={<StatusPill tone={TONE[status]}>{STATUS_LABEL[status]}</StatusPill>} />
       {sp.erro && <Callout tone="negative" role="alert">{sp.erro}</Callout>}
       {sp.aprovado && <Callout tone="positive" role="status">Aditivo aprovado e já em vigor. Cobranças já geradas não mudam; as próximas prévias de lote usam os novos termos.</Callout>}
+      {sp.agendado && <Callout tone="positive" role="status">Aditivo aprovado e <strong>agendado</strong>: os termos vigentes continuam os mesmos até a data de efeito; nesse dia o sistema aplica sozinho.</Callout>}
+      {scheduled && <Callout tone="warning" role="status">Há um aditivo <strong>agendado para {formatDate(scheduled.effectiveOn!)}</strong> ({t(scheduled.terms)}). Até lá os termos acima continuam valendo. Novas alterações ficam bloqueadas até ele valer ou ser cancelado.</Callout>}
       {sp.comentario && <Callout tone="positive" role="status">Comentário registrado.</Callout>}
       {sp.proposta && <Callout tone="positive" role="status">Alteração enviada para aprovação. Os termos vigentes continuam os mesmos até lá.</Callout>}
       {c.customer.status !== "ativo" && <Callout tone="warning">Cliente <strong>{c.customer.status}</strong>: este contrato não gera cobrança enquanto o cliente não voltar a ser ativo.</Callout>}
@@ -118,6 +121,10 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
               <p>{t(v.terms)}</p>
               {v.reason && <p className="text-muted-foreground">Motivo: {v.reason}</p>}
               {(v.effectiveOn || v.reference) && <p className="text-muted-foreground">{v.effectiveOn ? `Vale a partir de ${formatDate(v.effectiveOn)}` : ""}{v.effectiveOn && v.reference ? " · " : ""}{v.reference ? `Documento: ${v.reference}` : ""}</p>}
+              {v.state === "agendada" && approve && (
+                <form action={cancelScheduleAction} className="mt-1 flex flex-wrap items-center gap-2"><input type="hidden" name="contractId" value={c.id} /><input type="hidden" name="versionId" value={v.id} /><input name="note" aria-label="Motivo do cancelamento" placeholder="Motivo (opcional)" maxLength={200} className={inputClass} /><button className={buttonClass("outline", "sm")}>Cancelar agendamento</button></form>
+              )}
+              {v.appliedAt && <p className="text-muted-foreground">Passou a valer em {formatDateTime(v.appliedAt)}</p>}
               {v.decidedAt && <p className="text-muted-foreground">Decidida em {formatDateTime(v.decidedAt)}{v.decisionNote ? ` — ${v.decisionNote}` : ""}</p>}
             </li>
           ))}

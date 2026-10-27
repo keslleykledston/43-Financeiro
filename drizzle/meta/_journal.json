@@ -267,6 +267,13 @@
       "when": 1793076624485,
       "tag": "0037_violet_ricochet",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1793077729382,
+      "tag": "0038_flippant_toro",
+      "breakpoints": true
     }
   ]
 }

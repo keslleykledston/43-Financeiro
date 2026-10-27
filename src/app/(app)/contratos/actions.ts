@@ -5,7 +5,7 @@ import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
 import { setContractCommission } from "@/modules/commissions/service";
-import { createContract, decideVersion, proposeAndApprove, proposeChange, setStatus, type ContractStatus } from "@/modules/contracts/service";
+import { cancelScheduledVersion, createContract, decideVersion, todayManaus, proposeAndApprove, proposeChange, setStatus, type ContractStatus } from "@/modules/contracts/service";
 import { addNote } from "@/modules/notes/service";
 
 export type FormState = { error?: string; values?: Record<string, string> } | undefined;
@@ -37,7 +37,8 @@ export async function proposeAction(contractId: string, _: FormState, fd: FormDa
   }
   catch (e) { return { error: msg(e), values: keep(fd) }; }
   revalidatePath(`/contratos/${contractId}`); revalidatePath("/contratos"); revalidatePath("/faturamento"); revalidatePath("/contratos/alertas");
-  redirect(`/contratos/${contractId}?${now ? "aprovado=1" : "proposta=1"}`);
+  const future = String(am.effectiveOn ?? "") > todayManaus();
+  redirect(`/contratos/${contractId}?${now ? (future ? "agendado=1" : "aprovado=1") : "proposta=1"}`);
 }
 
 export async function decideAction(fd: FormData) {
@@ -71,4 +72,14 @@ export async function noteAction(fd: FormData) {
   try { const c = await ctx(); await addNote(db, c.userId, c.companyId, { contractId }, String(fd.get("body") ?? "")); } catch (e) { err = msg(e); }
   revalidatePath(`/contratos/${contractId}`);
   redirect(`/contratos/${contractId}${err ? `?erro=${encodeURIComponent(err)}` : "?comentario=1"}#comentarios`);
+}
+
+/** Desfaz um aditivo agendado (ainda não valeu). */
+export async function cancelScheduleAction(fd: FormData) {
+  const contractId = String(fd.get("contractId") ?? "");
+  let err = "";
+  try { const c = await ctx(); await cancelScheduledVersion(db, c.userId, c.companyId, String(fd.get("versionId") ?? ""), String(fd.get("note") ?? "")); }
+  catch (e) { err = msg(e); }
+  revalidatePath(`/contratos/${contractId}`); revalidatePath("/contratos"); revalidatePath("/faturamento");
+  redirect(`/contratos/${contractId}${err ? `?erro=${encodeURIComponent(err)}` : ""}`);
 }

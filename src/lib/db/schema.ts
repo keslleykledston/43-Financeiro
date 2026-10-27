@@ -262,7 +262,7 @@ export const contractVersions = pgTable("contract_versions", {
   companyId: uuid("company_id").notNull().references(() => companies.id),
   contractId: uuid("contract_id").notNull(),
   version: integer("version").notNull(),
-  state: text("state").notNull().default("pendente"), // pendente | aprovada | rejeitada | substituida (rascunho reenviado)
+  state: text("state").notNull().default("pendente"), // pendente | aprovada | rejeitada | substituida (rascunho reenviado) | agendada (aprovada, vale numa data futura) | cancelada (agendamento desfeito)
   terms: jsonb("terms").notNull(), // {description, monthlyAmountCents, startAt, endAt, dueDay, invoiceJointRequired, issueDayOverride}
   reason: text("reason"),
   // E21 — aditivo: tipo, data em que passa a valer e referência do documento assinado
@@ -273,11 +273,13 @@ export const contractVersions = pgTable("contract_versions", {
   decidedBy: uuid("decided_by").references(() => users.id),
   decidedAt: timestamp("decided_at", { withTimezone: true }),
   decisionNote: text("decision_note"),
+  appliedAt: timestamp("applied_at", { withTimezone: true }), // E29: quando um aditivo AGENDADO passou a valer (nulo nos demais)
 }, (t) => [
   foreignKey({ columns: [t.companyId, t.contractId], foreignColumns: [contracts.companyId, contracts.id] }),
   unique("contract_versions_uq").on(t.contractId, t.version),
   uniqueIndex("contract_versions_one_pending_uq").on(t.contractId).where(sql`${t.state} = 'pendente'`), // no máximo uma alteração pendente por contrato
-  check("contract_versions_state_chk", sql`${t.state} in ('pendente', 'aprovada', 'rejeitada', 'substituida')`),
+  check("contract_versions_state_chk", sql`${t.state} in ('pendente', 'aprovada', 'rejeitada', 'substituida', 'agendada', 'cancelada')`),
+  uniqueIndex("contract_versions_one_scheduled_uq").on(t.contractId).where(sql`${t.state} = 'agendada'`), // no máximo um aditivo agendado por contrato
   check("contract_versions_kind_chk", sql`${t.kind} in ('alteracao', 'reajuste', 'valor', 'prorrogacao', 'outros')`),
   check("contract_versions_reference_chk", sql`char_length(${t.reference}) <= 200`),
 ]);
