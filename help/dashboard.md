@@ -26,6 +26,9 @@ O painel mostra **números reais** calculados no momento em que a página abre. 
   - O que **já venceu** não entra como entrada projetada: o sistema não inventa quando será pago. Aparece à parte, em vermelho.
   - **Só entradas.** Contas a pagar ainda não existem, então as saídas não estão consideradas.
 
+## Despesas e retiradas do mês
+Mostra o total de **despesas pagas no mês** e as **cinco maiores categorias** (quem vê contas a pagar), e o total de **retiradas dos sócios no mês** (quem vê a área de sócios), com atalhos para *Despesas por categoria* e *Plano de retiradas*. Só na visão de uma empresa (não no Grupo). Conta o que foi pago (baixas), pela data do pagamento.
+
 ## "O que precisa de atenção"
 Regras simples, sem IA, cada uma com botão para onde se resolve: cobranças vencidas (crítico se ≥ 10% do valor em aberto ou há mais de 30 dias de atraso), lote em prévia perto ou depois da data de emissão, cobranças previstas por contrato sem emissão, vencimentos em até 3 dias, créditos a conciliar, extrato desatualizado (> 7 dias), mensagens bloqueadas, emissões com falha, clientes ativos sem contrato e sem contato financeiro com e-mail.
 

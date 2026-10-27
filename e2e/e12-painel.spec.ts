@@ -18,6 +18,12 @@ test("E12 — painel executivo com números reais: indicadores rastreáveis, gr�
     await expect(page.locator('section[aria-label="Indicadores"]').getByRole("link", { name: /^Recebido no mês/ })).toHaveAttribute("href", /\/contas-a-receber\/recebimentos\?mes=\d{4}-\d{2}/);
   });
 
+  await test.step("despesas e retiradas do mês, com atalhos para o relatório e o plano", async () => {
+    await expect(page.getByRole("heading", { name: "Despesas e retiradas do mês" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Por categoria" })).toHaveAttribute("href", /\/contas-a-pagar\/relatorio\?de=\d{4}-\d{2}&ate=\d{4}-\d{2}/);
+    await expect(page.getByRole("link", { name: "Plano de retiradas" })).toBeVisible();
+  });
+
   await test.step("gráficos têm nome acessível e tabela alternativa; previsão avisa que só tem entradas", async () => {
     await expect(page.getByRole("img", { name: "Emitido e recebido por mês" })).toBeVisible();
     await expect(page.getByRole("img", { name: "Entradas projetadas por semana" })).toBeVisible();

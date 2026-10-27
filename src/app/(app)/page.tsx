@@ -5,6 +5,8 @@ import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
 import { getGroupOverview, getOverview, type Overview } from "@/modules/insights/service";
 import { QUALITY_LABEL } from "@/modules/insights/calc";
+import { spendReport } from "@/modules/payables/report";
+import { partnerBalances } from "@/modules/expenses/ledger";
 import { Callout, Money, PageHeader, SectionCard, SeverityBadge, StatusPill } from "@/components/k3g/primitives";
 import { EmptyState } from "@/components/k3g/states";
 import { AppLink } from "@/components/k3g/app-link";
@@ -59,6 +61,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const outWeeks = (g?.outWeeks ?? o?.outflow?.weeks ?? []).map((w) => ({ start: w.start, end: w.end, confirmedCents: w.approvedCents, plannedCents: w.pendingCents }));
   const hasPayables = g ? g.companies.some((c) => c.payables) : !!o?.payables;
   const inConfirmed = weeks.reduce((s, w) => s + w.confirmedCents, 0), outApproved = outWeeks.reduce((s, w) => s + w.confirmedCents, 0);
+  // Despesas pagas no mês por categoria e retiradas dos sócios (só visão de uma empresa; cada bloco só para quem tem a permissão)
+  const spend = !group && can(role, "payables.read") ? await spendReport(db, ctx.user.id, current.id, { from: mes, to: mes, basis: "pago" }, view.today).catch(() => null) : null;
+  const withdrawn = !group && can(role, "partners.read") ? (await partnerBalances(db, ctx.user.id, current.id, view.today).catch(() => [])).reduce((a, b) => a + b.withdrawnMonthCents, 0) : null;
   const noBank = g ? g.companies.every((c) => !c.bank || c.bank.accounts === 0) : !o!.bank || o!.bank.accounts === 0;
 
   return (
@@ -105,6 +110,20 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <li><strong>Resultado projetado apenas do confirmado:</strong> entradas confirmadas <Money cents={inConfirmed} /> − saídas aprovadas <Money cents={outApproved} /> = <Money cents={inConfirmed - outApproved} className={inConfirmed - outApproved < 0 ? "font-semibold text-negative-foreground" : "font-semibold"} />. Previstos por contrato e contas ainda sem aprovação não entram neste resultado.</li>
             <li>Só entram contas lançadas aqui; despesas não cadastradas (folha, impostos, tarifas…) não aparecem.</li>
           </ul>
+        </SectionCard>
+      )}
+
+      {(spend || withdrawn !== null) && (
+        <SectionCard title="Despesas e retiradas do mês" action={<span className="flex gap-2">{spend && <AppLink href={`/contas-a-pagar/relatorio?de=${mes}&ate=${mes}`} className={buttonClass("outline", "sm")}>Por categoria</AppLink>}{withdrawn !== null && <AppLink href="/socios/plano" className={buttonClass("outline", "sm")}>Plano de retiradas</AppLink>}</span>}>
+          {spend && (spend.categories.length === 0 ? <p className="text-sm text-muted-foreground">Nenhuma despesa paga neste mês ainda.</p> : (
+            <>
+              <p className="text-sm">Despesas pagas no mês: <strong><Money cents={spend.totalCents} /></strong></p>
+              <ul className="mt-2 divide-y divide-border text-sm" aria-label="Maiores categorias de despesa do mês">
+                {spend.categories.slice(0, 5).map((c) => <li key={c.key} className="flex justify-between gap-3 py-1.5"><span className="truncate">{c.name}</span><Money cents={c.totalCents} /></li>)}
+              </ul>
+            </>
+          ))}
+          {withdrawn !== null && <p className="mt-3 text-sm">Retiradas dos sócios no mês: <strong><Money cents={withdrawn} /></strong></p>}
         </SectionCard>
       )}
 
