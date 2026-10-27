@@ -184,3 +184,4 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [ ] D4b: reajustes/aditivos futuros e fim de contrato na projeção; sazonalidade; imposto sobre o lucro; comparar previsto × realizado mês a mês.
 - [ ] D5: fatura de cartão aberta em compras; D6: conciliação com extrato Cora/OFX.
 - [ ] Mostrar sócios/categorias no painel; relatório de despesas por categoria/mês/centro.
+- [x] D3c: carro/moto/consórcio da aba Casa viram despesa da empresa (reclassificação + parcelamentos); sem migração.

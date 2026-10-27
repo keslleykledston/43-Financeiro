@@ -9,7 +9,8 @@ import type { DB } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
 import type { ExpenseRow } from "@/modules/expenses/planilha";
 import { importExpenses, removeExpenseImport, sha256 } from "@/modules/expenses/history";
-import { applicationStatus, applyExpenseHistory, buildApplyPlan, previewExpenseApplication, proposeRecurring, summarize, type StagedRow } from "@/modules/expenses/apply";
+import { analyzeExpenses } from "@/modules/expenses/report";
+import { applicationStatus, applyExpenseHistory, buildApplyPlan, isVehicleExpense, previewExpenseApplication, proposeRecurring, reclassifyVehicleWithdrawals, summarize, type StagedRow } from "@/modules/expenses/apply";
 import { savePartner, saveCostCenter } from "@/modules/expenses/catalog";
 import { partnerBalances } from "@/modules/expenses/ledger";
 import { listPayables } from "@/modules/payables/service";
@@ -51,6 +52,33 @@ describe("D3b — regras puras de aplicação", () => {
     const s = summarize(p);
     expect(s.paid).toEqual({ n: 3, cents: 10000 + 15000 + 10000 }); // VIVO, ENERGIA, FGTS / CALL
     expect(s.open.n).toBe(3); expect(s.withdrawals).toEqual({ n: 1, cents: 10000 });
+  });
+});
+
+describe("D3b — carro, moto e consórcio da aba Casa são despesa da empresa", () => {
+  it("reconhece só palavra inteira", () => {
+    for (const d of ["CARRO 20/48", "IPVA CARRO / 2026", "MOTO 16/36", "TAXAS MOTO PRETA", "CONSÓRCIO/CARRO 2/84", "Consorcio"]) expect(isVehicleExpense(d)).toBe(true);
+    for (const d of ["ALUGUEL / MOTOR", "MOTORISTA", "CARROSSEL", "ÁGUA", "RASTREAMENTO MOTOS"]) expect(isVehicleExpense(d)).toBe(false);
+  });
+  it("com data vira conta paga; sem data vira conta em aberto; categoria Veículos ou Consórcio", () => {
+    const rows: StagedRow[] = [
+      S(R({ description: "CARRO 29/48", row: 1, block: "casa" })),
+      S(R({ description: "MOTO 25/36", row: 2, block: "casa", paidOn: null, paidCents: null })),
+      S(R({ description: "CONSÓRCIO/CARRO 2/84", row: 3, block: "casa" })),
+      S(R({ description: "ÁGUA", row: 4, block: "casa" })),
+      S(R({ description: "MERCADO", row: 5, block: "casa", paidOn: null })),
+    ];
+    const p = buildApplyPlan(rows, TODAY);
+    const by = (d: string) => p.items.find((i) => i.description === d)!;
+    expect(by("CARRO 29/48")).toMatchObject({ kind: "conta_paga", categoryCode: "veiculos" });
+    expect(by("MOTO 25/36")).toMatchObject({ kind: "conta_aberta", categoryCode: "veiculos", amountCents: 10000 });
+    expect(by("CONSÓRCIO/CARRO 2/84")).toMatchObject({ kind: "conta_paga", categoryCode: "consorcio" });
+    expect(by("ÁGUA")).toMatchObject({ kind: "retirada" });
+    expect(p.skipped.casa_sem_data.n).toBe(1); // só o MERCADO
+  });
+  it("o relatório de staging também conta veículo da Casa como Empresa", () => {
+    const rep = analyzeExpenses([R({ description: "CARRO 29/48", row: 1, block: "casa", amountCents: 100000, paidCents: 100000 }), R({ description: "ÁGUA", row: 2, block: "casa", amountCents: 5000, paidCents: 5000 })]);
+    expect(rep.totals).toMatchObject({ empresaPaidCents: 100000, casaPaidCents: 5000 });
   });
 });
 
@@ -115,7 +143,7 @@ describe.skipIf(!enabled)("D3b — aplicar o histórico de despesas (DB de teste
     const bal = await partnerBalances(db, dirA, A, TODAY);
     expect(bal.find((b) => b.partnerId === keslley)!.balanceCents).toBe(-22419);
     expect(bal.find((b) => b.partnerId === ana)!.balanceCents).toBe(0);
-    expect(await applicationStatus(db, dirA, A)).toEqual({ paid: 6, open: 1, withdrawals: 1, total: 8 });
+    expect(await applicationStatus(db, dirA, A)).toEqual({ paid: 6, open: 1, withdrawals: 1, reclassified: 0, total: 8 });
     expect((await db.select().from(schema.auditLog)).map((a) => a.action)).toContain("expenses.history_applied");
   });
 
@@ -168,5 +196,38 @@ describe.skipIf(!enabled)("D3b — aplicar o histórico de despesas (DB de teste
     expect(s).toHaveLength(1); expect(s[0]).toMatchObject({ installments: 17, amountCents: 440893 });
     expect(s[0].description).toMatch(/restantes após 19\/36/);
     await expect(proposeRecurring(db, gerA, A, TODAY)).rejects.toBeInstanceOf(Forbidden);
+  });
+
+  it("reclassifica: retirada de carro/moto/consórcio já aplicada é estornada e vira conta paga da empresa (uma vez só)", async () => {
+    // estado antigo: as linhas de veículo da Casa já tinham virado retirada no Keslley
+    const [imp0] = await db.select().from(schema.expenseImports);
+    await removeExpenseImport(db, dirA, A, imp0.id);
+    const veh = [
+      R({ description: "CARRO 29/48", row: 40, block: "casa", amountCents: 261779, paidCents: 261779, paidOn: "2026-10-05", month: "2026-10" }),
+      R({ description: "MOTO 24/36", row: 41, block: "casa", amountCents: 72081, paidCents: 72081, paidOn: "2026-09-08", month: "2026-09" }),
+    ];
+    await importExpenses(db, dirA, A, { fileSha256: sha256("y"), fileLabel: "Despesas", year: 2026, rows: [...ROWS, ...veh] });
+    const rowsDb = await db.select().from(schema.expenseImportRows);
+    for (const r of rowsDb.filter((x) => /^(CARRO|MOTO)/.test(x.description))) {
+      const [e] = await db.insert(schema.partnerEntries).values({ companyId: A, partnerId: keslley, kind: "retirada", amount: r.paidAmount!, occurredOn: r.paidOn!, description: r.description, requestKey: `d3b:${r.id}`, createdBy: dirA }).returning();
+      await db.insert(schema.expenseApplications).values({ companyId: A, rowId: r.id, kind: "retirada", entryId: e.id, appliedBy: dirA });
+    }
+    await applyExpenseHistory(db, dirA, A, TODAY); // o resto da planilha entra normalmente
+    expect((await (await partnerBalances(db, dirA, A, TODAY)).find((b) => b.partnerId === keslley)!.balanceCents)).toBe(-(261779 + 72081 + 22419));
+    const r1 = await reclassifyVehicleWithdrawals(db, dirA, A);
+    expect(r1).toEqual({ reclassified: 2, cents: 261779 + 72081 });
+    expect((await (await partnerBalances(db, dirA, A, TODAY)).find((b) => b.partnerId === keslley)!.balanceCents)).toBe(-22419); // só a água segue como retirada
+    const list = await listPayables(db, dirA, A, { status: "todas" }, TODAY);
+    expect(list.find((p) => p.description === "CARRO 29/48")).toMatchObject({ situation: "paga", paidCents: 261779, categoryName: expect.stringMatching(/Veículos/) });
+    expect(list.find((p) => p.description === "MOTO 24/36")).toMatchObject({ situation: "paga", paidCents: 72081 });
+    const entries = await db.select().from(schema.partnerEntries);
+    expect(entries.filter((e) => e.status === "estornado")).toHaveLength(2);
+    expect(entries.find((e) => e.status === "estornado")!.reverseReason).toMatch(/despesa da empresa/);
+    expect(await applicationStatus(db, dirA, A)).toMatchObject({ paid: 8, reclassified: 2, withdrawals: 1 + 0 });
+    // segunda vez: nada a fazer
+    expect(await reclassifyVehicleWithdrawals(db, dirA, A)).toEqual({ reclassified: 0, cents: 0 });
+    expect((await db.select().from(schema.payables)).length).toBe(7 + 2);
+    await expect(reclassifyVehicleWithdrawals(db, gerA, A)).rejects.toBeInstanceOf(Forbidden);
+    expect((await db.select().from(schema.auditLog)).map((a) => a.action)).toContain("expenses.history_reclassified");
   });
 });

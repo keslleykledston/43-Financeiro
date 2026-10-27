@@ -1,5 +1,5 @@
 import type { ExpenseRow } from "./planilha";
-import { recurringCandidates, seriesCandidates, suggest, type Nature, type Recurring, type SeriesCandidate } from "./classify";
+import { effectiveBlock, recurringCandidates, seriesCandidates, suggest, type Nature, type Recurring, type SeriesCandidate } from "./classify";
 
 /** D3 — relatório PURO do staging de despesas: totais, classificação sugerida, o que falta classificar, recorrências, parcelas e divergências. */
 export type DivKind = "sem_valor" | "pago_sem_data" | "pago_em_texto" | "vencimento_fora_do_mes" | "pago_diferente" | "pago_parcial" | "tem_aviso" | "e_da_call" | "e_do_k3g2";
@@ -25,7 +25,8 @@ export type ExpenseReport = {
 const eff = (r: ExpenseRow) => (r.paidOn || r.paidRaw ? (r.paidCents ?? 0) : 0);
 const monthOfDue = (d: string | null) => (d ? d.slice(0, 7) : null);
 
-export function analyzeExpenses(rows: ExpenseRow[]): ExpenseReport {
+export function analyzeExpenses(rawRows: ExpenseRow[]): ExpenseReport {
+  const rows = rawRows.map(effectiveBlock); // carro/moto/consórcio da Casa contam como Empresa (igual à aplicação)
   const money = rows.filter((r) => r.block === "empresa" || r.block === "casa");
   const byBlock: Record<string, number> = {};
   for (const r of rows) byBlock[r.block] = (byBlock[r.block] ?? 0) + 1;

@@ -84,7 +84,9 @@ describe("D3 — sugestão de classificação, recorrências e parcelas", () => 
   it("casa: sempre retirada; cartão pessoal, veículos, educação, moradia, presentes; sem regra vira 'a classificar'", () => {
     expect(s("casa", "ÁGUA")).toMatchObject({ categoryCode: "moradia", nature: "retirada" });
     expect(s("casa", "NUBANK")).toMatchObject({ categoryCode: "cartao_pf", ambiguous: expect.any(String) });
-    expect(s("casa", "CARRO 23/48").categoryCode).toBe("veiculos_pessoais");
+    expect(s("casa", "CARRO 23/48")).toMatchObject({ categoryCode: "veiculos", nature: "empresa" }); // decisão do dono (26/10): carro/moto/consórcio são despesa da empresa
+    expect(s("casa", "IPVA MOTO PRETA")).toMatchObject({ categoryCode: "veiculos", nature: "empresa" });
+    expect(s("casa", "CONSÓRCIO/CARRO 2/84")).toMatchObject({ categoryCode: "consorcio", nature: "empresa" });
     expect(s("casa", "FACULDADE FULANO").categoryCode).toBe("educacao");
     expect(s("casa", "PRESENTE / ALGUÉM 1/4").categoryCode).toBe("presentes");
     expect(s("casa", "ELETRICA IGREJA").categoryCode).toBe("a_classificar_pessoal");

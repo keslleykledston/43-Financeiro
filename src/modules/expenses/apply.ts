@@ -7,7 +7,7 @@ import { todayManaus } from "@/modules/messaging/service";
 import { addMonths } from "@/modules/payables/schedule";
 import { createSeries, createTemplate } from "@/modules/payables/planning";
 import { ensureExpenseDefaults } from "./catalog";
-import { recurringCandidates, seriesCandidates, suggest, vendorKeyOf } from "./classify";
+import { effectiveBlock, isVehicleExpense, recurringCandidates, seriesCandidates, suggest, vehicleCategory, vendorKeyOf } from "./classify";
 import type { ExpenseRow } from "./planilha";
 
 /**
@@ -16,6 +16,7 @@ import type { ExpenseRow } from "./planilha";
  *  - Aba Empresa: com data de pagamento → conta a pagar APROVADA + baixa (valor = o que foi pago; se difere da conta, a diferença vai na observação da baixa, sem criar dívida fantasma).
  *    Sem data → conta APROVADA em aberto (valor da conta). Categoria e centro (K3G 2) pela sugestão do D3.
  *  - Aba Casa: com data de pagamento → RETIRADA na conta-corrente do Keslley (decisão do dono). Sem data: não vira nada (não há "retirada pendente"); fica no relatório.
+ *    EXCEÇÃO (decisão do dono, 26/10): carro, moto e consórcio da aba Casa são DESPESA DA EMPRESA — seguem as regras da aba Empresa (paga / em aberto), categoria "Veículos" ou "Consórcio".
  *  - Ficam de fora (e o motivo é contado): faturas de cartão (referência), dízimos (a planilha não diz se foi pago), linhas sem valor, data escrita como texto ("19/02").
  * Fornecedor: um cadastro único "Histórico da planilha" (a planilha não tem CNPJ de fornecedor); a descrição original fica na conta.
  * Idempotente: cada linha tem no máximo uma aplicação (índice único). Tudo numa transação: ou entra tudo ou nada.
@@ -32,6 +33,8 @@ export type ApplyPlan = { items: ApplyItem[]; skipped: Record<SkipReason, { n: n
 export const HISTORY_VENDOR_DOC = "00000000000000";
 export const HISTORY_VENDOR_NAME = "Histórico da planilha (fornecedor a conferir)";
 const MIN_RECENT = "2026-09"; // só vira recorrente/parcelamento o que ainda aparecia nos últimos meses
+
+export { isVehicleExpense };
 
 const brl = (c: number) => (c / 100).toFixed(2).replace(".", ",");
 const lastDayOf = (month: string) => { const [y, m] = month.split("-").map(Number); return `${month}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`; };
@@ -50,9 +53,10 @@ export function buildApplyPlan(rows: StagedRow[], today: string): ApplyPlan {
     const account = r.amountCents !== null && r.amountCents > 0 ? r.amountCents : null;
     if (paid === null && account === null) { skip(r, "sem_valor"); continue; }
     if (!r.paidOn && r.paidRaw) { skip(r, "data_em_texto"); continue; }
-    const s = suggest(r);
+    const vehicle = r.block === "casa" && isVehicleExpense(r.description);
+    const s = suggest(r); // veículo da Casa já sai com categoria de empresa
     const isPaid = !!r.paidOn && r.paidOn <= today;
-    if (r.block === "casa") {
+    if (r.block === "casa" && !vehicle) {
       if (!isPaid) { skip(r, "casa_sem_data"); continue; }
       items.push({ kind: "retirada", rowId: r.id, description: desc2(r.description), month: r.month, occurredOn: r.paidOn!, amountCents: (paid ?? account)!, categoryCode: s.categoryCode });
       continue;
@@ -100,13 +104,15 @@ export async function previewExpenseApplication(db: DB, actorId: string, company
   return { ...summarize(buildApplyPlan(cur.pending, today)), alreadyApplied: cur.appliedRows };
 }
 
-/** Situação para a tela (leitura): quanto já foi aplicado. */
+/** Situação para a tela (leitura): quanto já foi aplicado. "Reclassificadas" = eram retirada e viraram conta paga da empresa (carro/moto/consórcio): contam como contas pagas. */
 export async function applicationStatus(db: DB, actorId: string, companyId: string) {
   await requirePerm(db, actorId, companyId, "partners.read");
-  const r = (await db.execute(sql`select a.kind, count(*)::int n from expense_applications a join expense_import_rows r on r.id = a.row_id and r.company_id = a.company_id
-    where a.company_id = ${companyId} and r.import_id = (select id from expense_imports where company_id = ${companyId} order by created_at desc limit 1) group by a.kind`)) as unknown as { kind: string; n: number }[];
+  const r = (await db.execute(sql`select case when a.kind = 'retirada' and e.status = 'estornado' then 'reclassificada' else a.kind end kind, count(*)::int n
+    from expense_applications a join expense_import_rows r on r.id = a.row_id and r.company_id = a.company_id
+    left join partner_entries e on e.company_id = a.company_id and e.id = a.entry_id
+    where a.company_id = ${companyId} and r.import_id = (select id from expense_imports where company_id = ${companyId} order by created_at desc limit 1) group by 1`)) as unknown as { kind: string; n: number }[];
   const get = (k: string) => r.find((x) => x.kind === k)?.n ?? 0;
-  return { paid: get("conta_paga"), open: get("conta_aberta"), withdrawals: get("retirada"), total: get("conta_paga") + get("conta_aberta") + get("retirada") };
+  return { paid: get("conta_paga") + get("reclassificada"), open: get("conta_aberta"), withdrawals: get("retirada"), reclassified: get("reclassificada"), total: get("conta_paga") + get("reclassificada") + get("conta_aberta") + get("retirada") };
 }
 
 async function historyVendor(x: DB, companyId: string, actorId: string): Promise<string> {
@@ -156,6 +162,46 @@ export async function applyExpenseHistory(db: DB, actorId: string, companyId: st
   });
 }
 
+/**
+ * Carro, moto e consórcio que já tinham virado RETIRADA viram conta paga da empresa: a retirada é ESTORNADA (fica no histórico, com motivo) e a conta paga
+ * é criada com a mesma data e valor. Idempotente (retirada já estornada é ignorada). O vínculo com a linha da planilha fica na chave `d3b:<linha>` da baixa.
+ */
+export async function reclassifyVehicleWithdrawals(db: DB, actorId: string, companyId: string): Promise<{ reclassified: number; cents: number }> {
+  await perms(db, actorId, companyId);
+  return db.transaction(async (tx) => {
+    const x = tx as unknown as DB;
+    await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"expense-apply:" + companyId}))`);
+    await ensureExpenseDefaults(x, companyId);
+    const cur = await loadCurrent(x, companyId);
+    const byId = new Map(cur.all.map((r) => [r.id, r]));
+    const apps = await x.select({ rowId: expenseApplications.rowId, entryId: expenseApplications.entryId }).from(expenseApplications).where(and(eq(expenseApplications.companyId, companyId), eq(expenseApplications.kind, "retirada")));
+    const cats = new Map((await x.select({ id: expenseCategories.id, code: expenseCategories.code, kind: expenseCategories.kind }).from(expenseCategories).where(eq(expenseCategories.companyId, companyId))).map((c) => [c.code, c]));
+    const catId = (code: string) => { const c = cats.get(code); return (c && c.kind === "empresa" ? c : cats.get("a_classificar"))?.id ?? null; };
+    let vendorId: string | null = null;
+    const now = new Date();
+    let n = 0, cents = 0;
+    for (const a of apps) { // só a importação atual (a única existente em produção); retirada de outra importação não é tocada
+      const r = byId.get(a.rowId);
+      if (!r || !a.entryId || !isVehicleExpense(r.description)) continue;
+      const [e] = await x.select().from(partnerEntries).where(and(eq(partnerEntries.id, a.entryId), eq(partnerEntries.companyId, companyId))).for("update");
+      if (!e || e.status !== "ativo") continue;
+      const value = centsFromNumeric(e.amount);
+      const done = await x.update(partnerEntries).set({ status: "estornado", reversedBy: actorId, reversedAt: now, reverseReason: "Carro, moto e consórcio são despesa da empresa (decisão do dono)", updatedAt: now })
+        .where(and(eq(partnerEntries.id, e.id), eq(partnerEntries.companyId, companyId), eq(partnerEntries.status, "ativo"))).returning({ id: partnerEntries.id });
+      if (done.length !== 1) continue;
+      vendorId ??= await historyVendor(x, companyId, actorId);
+      const [p] = await x.insert(payables).values({
+        companyId, vendorId, description: desc2(r.description), amount: e.amount, dueDate: r.dueOn ?? e.occurredOn, categoryId: catId(vehicleCategory(r.description)),
+        competence: `${r.month}-01`, status: "aprovado", createdBy: actorId, submittedAt: now, decidedBy: actorId, decidedAt: now, decisionNote: "Histórico da planilha (carro/moto/consórcio: despesa da empresa, aplicado com autorização do dono)",
+      }).returning({ id: payables.id });
+      await x.insert(payablePayments).values({ companyId, payableId: p.id, amount: e.amount, paidAt: e.occurredOn, method: "outro", reference: "planilha", note: null, requestKey: `d3b:${r.id}`, registeredBy: actorId });
+      n++; cents += value;
+    }
+    if (n) await audit(x, companyId, actorId, "expenses.history_reclassified", { importId: cur.importId, rows: n });
+    return { reclassified: n, cents };
+  });
+}
+
 const EXCLUDED_RECURRING = new Set(["cartao_pj", "a_classificar", "comissoes"]); // fatura variável; sem classe; comissão já é calculada pelos contratos (D4)
 const stripInstallment = (s: string) => s.replace(/\s*\d{1,3}\s*\/\s*\d{1,3}\s*$/, "").replace(/\s*\d{1,3}\s*[ºO°]\s*$/, "").trim();
 const clampDay = (month: string, day: number) => Math.min(day, Number(lastDayOf(month).slice(8, 10)));
@@ -167,7 +213,7 @@ export async function proposeRecurring(db: DB, actorId: string, companyId: strin
   const cur = await loadCurrent(db, companyId);
   return db.transaction(async (tx) => { // tudo ou nada: falha no meio não deixa metade criada
   const x = tx as unknown as DB;
-  const emp = cur.all.filter((r) => r.block === "empresa");
+  const emp: StagedRow[] = cur.all.map(effectiveBlock).filter((r) => r.block === "empresa"); // carro/moto/consórcio da Casa contam como empresa
   const series = seriesCandidates(emp).filter((s) => s.block === "empresa" && s.total !== null && s.lastMonth >= MIN_RECENT);
   const recurring = recurringCandidates(emp).filter((c) => c.block === "empresa" && c.lastMonth >= MIN_RECENT && !EXCLUDED_RECURRING.has(c.categoryCode));
   const inSeries = new Set(series.map((s) => s.vendorKey));
@@ -188,7 +234,7 @@ export async function proposeRecurring(db: DB, actorId: string, companyId: strin
     const month = addMonths(s.lastMonth, 1);
     const day = lastRow?.dueOn ? Number(lastRow.dueOn.slice(8, 10)) : 10;
     const sg = suggest({ block: "empresa", description: s.sample });
-    await createSeries(x, actorId, companyId, { vendorId, description: name, installments: s.remaining, firstDue: `${month}-${String(clampDay(month, day)).padStart(2, "0")}`, amount: (s.installmentCents / 100).toFixed(2).replace(".", ","), categoryId: catId(sg.categoryCode), costCenterId: sg.centerHint === "k3g2" ? k3g2?.id : undefined });
+    await createSeries(x, actorId, companyId, { vendorId, description: name, installments: s.remaining, firstDue: `${month}-${String(clampDay(month, day)).padStart(2, "0")}`, amount: (s.installmentCents / 100).toFixed(2).replace(".", ","), categoryId: catId(isVehicleExpense(s.sample) ? vehicleCategory(s.sample) : sg.categoryCode), costCenterId: sg.centerHint === "k3g2" ? k3g2?.id : undefined });
     haveS.add(name); out.series++;
   }
   for (const c of recurring) {
@@ -196,7 +242,7 @@ export async function proposeRecurring(db: DB, actorId: string, companyId: strin
     const name = stripInstallment(c.sample).slice(0, 200);
     if (name.length < 2 || haveT.has(name)) continue;
     const sg = suggest({ block: "empresa", description: c.sample });
-    await createTemplate(x, actorId, companyId, { vendorId, description: name, amount: (c.typicalCents / 100).toFixed(2).replace(".", ","), dueDay: c.typicalDay ?? 10, categoryId: catId(c.categoryCode), costCenterId: sg.centerHint === "k3g2" ? k3g2?.id : undefined, startMonth });
+    await createTemplate(x, actorId, companyId, { vendorId, description: name, amount: (c.typicalCents / 100).toFixed(2).replace(".", ","), dueDay: c.typicalDay ?? 10, categoryId: catId(isVehicleExpense(c.sample) ? vehicleCategory(c.sample) : c.categoryCode), costCenterId: sg.centerHint === "k3g2" ? k3g2?.id : undefined, startMonth });
     haveT.add(name); out.templates++;
   }
   await audit(x, companyId, actorId, "expenses.recurring_proposed", { ...out });

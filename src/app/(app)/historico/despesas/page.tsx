@@ -53,7 +53,7 @@ export default async function HistoricoDespesas({ searchParams }: { searchParams
           {applied.total === 0 ? (
             <p className="text-sm text-muted-foreground">Ainda <strong>não aplicada</strong>: nenhuma conta a pagar nem retirada foi criada a partir desta planilha. A aplicação é feita pela operação, com a sua autorização escrita.</p>
           ) : (
-            <p className="text-sm">Aplicada: <strong>{applied.paid}</strong> contas pagas · <strong>{applied.open}</strong> contas em aberto (sem data de pagamento) · <strong>{applied.withdrawals}</strong> retiradas da Casa lançadas no Keslley. Confira em <AppLink href="/contas-a-pagar" className="underline">Contas a pagar</AppLink> e <AppLink href="/socios" className="underline">Sócios</AppLink>. O fornecedor dessas contas é &quot;Histórico da planilha&quot;; a descrição original está em cada conta.</p>
+            <p className="text-sm">Aplicada: <strong>{applied.paid}</strong> contas pagas · <strong>{applied.open}</strong> contas em aberto (sem data de pagamento) · <strong>{applied.withdrawals}</strong> retiradas da Casa lançadas no Keslley{applied.reclassified > 0 ? <> (carro, moto e consórcio, {applied.reclassified} lançamentos, são despesa da empresa e já estão nas contas pagas)</> : null}. Confira em <AppLink href="/contas-a-pagar" className="underline">Contas a pagar</AppLink> e <AppLink href="/socios" className="underline">Sócios</AppLink>. O fornecedor dessas contas é &quot;Histórico da planilha&quot;; a descrição original está em cada conta.</p>
           )}
         </SectionCard>
 

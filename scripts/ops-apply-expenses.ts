@@ -1,7 +1,8 @@
 // Operação auditada (D3b): aplica o histórico de despesas já importado em staging ao sistema (contas a pagar pagas/em aberto, retiradas da Casa no sócio Keslley)
 // e, com OPS_RECURRING=1, cria modelos recorrentes e parcelamentos ativos a partir do que a planilha ainda mostra nos últimos meses.
+// Com OPS_RECLASSIFY=1 (antes de aplicar) carro/moto/consórcio que já viraram retirada são estornados e viram conta paga da empresa (decisão do dono, 26/10).
 // Sem OPS_CONFIRM=1 só mostra a PRÉVIA. Exige AUTORIZAÇÃO ESCRITA do dono e backup feito antes (bash scripts/backup.sh). Idempotente: cada linha é aplicada uma vez.
-// Uso: OPS_USER_EMAIL=... [OPS_COMPANY="K3G Solutions"] [OPS_CONFIRM=1] [OPS_RECURRING=1] docker compose --profile tools run --rm -e OPS_USER_EMAIL -e OPS_COMPANY -e OPS_CONFIRM -e OPS_RECURRING tools pnpm tsx scripts/ops-apply-expenses.ts
+// Uso: OPS_USER_EMAIL=... [OPS_COMPANY="K3G Solutions"] [OPS_CONFIRM=1] [OPS_RECLASSIFY=1] [OPS_RECURRING=1] docker compose --profile tools run --rm -e OPS_USER_EMAIL -e OPS_COMPANY -e OPS_CONFIRM -e OPS_RECLASSIFY -e OPS_RECURRING tools pnpm tsx scripts/ops-apply-expenses.ts
 import { loadEnvConfig } from "@next/env";
 loadEnvConfig(process.cwd());
 
@@ -11,7 +12,7 @@ loadEnvConfig(process.cwd());
   const { db } = await import("../src/lib/db");
   const { companies, users } = await import("../src/lib/db/schema");
   const { eq, sql } = await import("drizzle-orm");
-  const { applyExpenseHistory, previewExpenseApplication, proposeRecurring, SKIP_LABEL } = await import("../src/modules/expenses/apply");
+  const { applyExpenseHistory, previewExpenseApplication, proposeRecurring, reclassifyVehicleWithdrawals, SKIP_LABEL } = await import("../src/modules/expenses/apply");
   const [u] = await db.select().from(users).where(eq(sql`lower(${users.email})`, email.toLowerCase()));
   if (!u) throw new Error("Usuário não encontrado");
   const found = await db.select().from(companies).where(eq(companies.name, companyName));
@@ -29,6 +30,10 @@ loadEnvConfig(process.cwd());
   console.log(`empresa ${companyName} · linhas já aplicadas antes: ${prev.alreadyApplied}`);
   show(prev);
   if (process.env.OPS_CONFIRM !== "1") { console.log("(só prévia: nada foi gravado; use OPS_CONFIRM=1 — exige autorização escrita do dono e backup)"); process.exit(0); }
+  if (process.env.OPS_RECLASSIFY === "1") {
+    const rc = await reclassifyVehicleWithdrawals(db, u.id, c.id);
+    console.log(`reclassificadas (retirada → conta paga da empresa): ${rc.reclassified} · ${money(rc.cents)}`);
+  }
   const r = await applyExpenseHistory(db, u.id, c.id);
   console.log(`aplicado: ${r.applied} linhas`);
   if (process.env.OPS_RECURRING === "1") {

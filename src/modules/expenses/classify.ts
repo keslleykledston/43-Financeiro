@@ -36,7 +36,14 @@ export function vendorKeyOf(desc: string): string {
   return norm(desc).replace(/\b\d{1,3}\s*\/\s*\d{1,3}\b/g, " ").replace(/\b\d{1,3}\s*[ºO°]\b/g, " ").replace(/\b\d+\b/g, " ").replace(/[^A-Z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
+/** Carro, moto e consórcio — mesmo escritos na aba Casa — são despesa da empresa (decisão do dono, 26/10). Palavra inteira: "MOTOR" não casa. */
+export const isVehicleExpense = (description: string) => /\b(CARRO|MOTO|CONSORCIO)\b/.test(norm(description));
+export const vehicleCategory = (description: string) => (/\bCONSORCIO\b/.test(norm(description)) ? "consorcio" : "veiculos");
+/** Aba efetiva: veículo da Casa conta como Empresa. */
+export const effectiveBlock = <T extends Pick<ExpenseRow, "block" | "description">>(r: T): T => (r.block === "casa" && isVehicleExpense(r.description) ? { ...r, block: "empresa" as const } : r);
+
 export function suggest(row: Pick<ExpenseRow, "block" | "description">): Suggestion {
+  if (row.block === "casa" && isVehicleExpense(row.description)) return { ...suggest({ block: "empresa", description: row.description }), categoryCode: vehicleCategory(row.description) };
   const n = norm(row.description);
   const companyHint = /\bCALL\b|\bN\. CALL\b/.test(n) ? "call" : null;
   const centerHint = /K3G ?2\b/.test(n) ? "k3g2" : null;
