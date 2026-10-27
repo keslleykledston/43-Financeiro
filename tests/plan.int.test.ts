@@ -134,6 +134,9 @@ describe.skipIf(!enabled)("D4 — plano de retiradas e previsão de lucro (DB de
     expect(v.realized).toHaveLength(6);
     expect(v.realized.at(-1)).toMatchObject({ month: "2026-10", paidExpensesCents: 50000, withdrawalsCents: 120000, receiptsCents: 0 });
     expect(v.ytd).toMatchObject({ paidExpensesCents: 50000, withdrawalsCents: 150000, receiptsCents: 0, resultCents: -50000 });
+    const out = v.variance.months.at(-1)!; // outubro: mês corrente, parcial; a conta de R$ 500 vence em outubro
+    expect(out).toMatchObject({ month: "2026-10", partial: true, dueExpensesCents: 50000, paidExpensesCents: 50000, withdrawnCents: 120000 });
+    expect(v.variance.totals.paidExpensesCents).toBe(0); // corrente fora dos totais
     await expect(buildPlan(db, gerA, A, TODAY)).rejects.toBeInstanceOf(Forbidden);
     await expect(buildPlan(db, dirB, A, TODAY)).rejects.toBeInstanceOf(Forbidden);
     const b = await buildPlan(db, dirB, B, TODAY);

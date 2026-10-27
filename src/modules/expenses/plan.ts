@@ -7,7 +7,7 @@ import { Invalid, requirePerm } from "@/modules/identity/service";
 import { todayManaus } from "@/modules/messaging/service";
 import { pendingForecasts } from "@/modules/payables/planning";
 import { addMonths } from "@/modules/payables/schedule";
-import { buildForecast, type ContractLite, type PlanResult, type PlanSettings } from "./plan-calc";
+import { buildForecast, buildVariance, type ContractLite, type PlanResult, type PlanSettings, type VarianceResult } from "./plan-calc";
 import { partnerBalances, type Balance } from "./ledger";
 
 /**
@@ -79,7 +79,7 @@ export async function setPartnerPlan(db: DB, actorId: string, companyId: string,
 export type RealizedMonth = { month: string; receiptsCents: number; paidExpensesCents: number; withdrawalsCents: number };
 export type PlanView = {
   today: string; settings: Settings & { isDefault: boolean }; plan: PlanResult; partners: (Balance & { plannedCents: number })[];
-  plannedTotalCents: number; realized: RealizedMonth[]; ytd: { receiptsCents: number; paidExpensesCents: number; withdrawalsCents: number; resultCents: number };
+  plannedTotalCents: number; realized: RealizedMonth[]; variance: VarianceResult; ytd: { receiptsCents: number; paidExpensesCents: number; withdrawalsCents: number; resultCents: number };
   contracts: { activeCount: number; activeMonthlyCents: number; draftCount: number; draftMonthlyCents: number; suspendedCount: number };
   warnings: string[];
 };
@@ -88,7 +88,8 @@ export async function buildPlan(db: DB, actorId: string, companyId: string, toda
   await requirePerm(db, actorId, companyId, "partners.read");
   const settings = await getProfitSettings(db, actorId, companyId);
   const first = today.slice(0, 7), last = addMonths(first, horizon - 1);
-  const [cons, bal, planned, realized, known] = await Promise.all([
+  const back = addMonths(first, -5);
+  const [cons, bal, planned, realized, known, dueRows] = await Promise.all([
     db.execute(sql`select monthly_amount::text amt, start_at::text start_at, end_at::text end_at, status, commission_bps from contracts where company_id = ${companyId}`),
     partnerBalances(db, actorId, companyId, today),
     db.select({ id: partners.id, p: partners.plannedMonthly, active: partners.active }).from(partners).where(eq(partners.companyId, companyId)),
@@ -99,6 +100,7 @@ export async function buildPlan(db: DB, actorId: string, companyId: string, toda
         coalesce((select sum(e.amount) from partner_entries e where e.company_id = ${companyId} and e.status = 'ativo' and e.kind = 'retirada' and to_char(e.occurred_on, 'YYYY-MM') = m.month), 0)::text withdrawals
       from m order by m.month`),
     db.execute(sql`select to_char(due_date, 'YYYY-MM') as month, coalesce(sum(amount), 0)::text s from payables where company_id = ${companyId} and status not in ('cancelado', 'rejeitado') and due_date >= ${first + "-01"}::date and due_date < (${last + "-01"}::date + interval '1 month') group by 1`),
+    db.execute(sql`select to_char(due_date, 'YYYY-MM') as month, coalesce(sum(amount), 0)::text s from payables where company_id = ${companyId} and status not in ('cancelado', 'rejeitado', 'rascunho') and due_date >= ${back + "-01"}::date and due_date < (${first + "-01"}::date + interval '1 month') group by 1`),
   ]);
   const contracts: ContractLite[] = rows(cons).map((c) => ({ monthlyCents: centsFromNumeric(String(c.amt)), startAt: String(c.start_at), status: String(c.status), commissionBps: c.commission_bps === null ? null : Number(c.commission_bps) }));
   const knownMap: Record<string, number> = {};
@@ -111,6 +113,11 @@ export async function buildPlan(db: DB, actorId: string, companyId: string, toda
   const s: PlanSettings = { delinquencyBps: settings.delinquencyBps, unplannedBps: settings.unplannedBps, reserveMonths: settings.reserveMonths, retentionBps: settings.retentionBps, cashNowCents: settings.cashNowCents };
   const plan = buildForecast({ firstMonth: first, months: horizon, settings: s, contracts, knownExpensesCents: knownMap, plannedWithdrawalCents: activePlanned });
   const real: RealizedMonth[] = rows(realized).map((r) => ({ month: String(r.month), receiptsCents: centsFromNumeric(String(r.receipts)), paidExpensesCents: centsFromNumeric(String(r.paid)), withdrawalsCents: centsFromNumeric(String(r.withdrawals)) }));
+  const dueByMonth: Record<string, number> = {};
+  for (const d of rows(dueRows)) dueByMonth[String(d.month)] = centsFromNumeric(String(d.s));
+  const variance = buildVariance({ months: real.map((r) => r.month), currentMonth: first, delinquencyBps: settings.delinquencyBps, contracts, dueByMonth,
+    paidByMonth: Object.fromEntries(real.map((r) => [r.month, r.paidExpensesCents])), receivedByMonth: Object.fromEntries(real.map((r) => [r.month, r.receiptsCents])),
+    withdrawnByMonth: Object.fromEntries(real.map((r) => [r.month, r.withdrawalsCents])), plannedWithdrawalCents: activePlanned });
   const y = today.slice(0, 4);
   const [ytdRow] = rows(await db.execute(sql`select
       coalesce((select sum(p.amount + p.interest_amount - p.discount_amount) from payments p where p.company_id = ${companyId} and p.status = 'ativo' and p.paid_at >= ${y + "-01-01"}::date and p.paid_at <= ${today}::date), 0)::text r,
@@ -129,5 +136,5 @@ export async function buildPlan(db: DB, actorId: string, companyId: string, toda
   if (plan.firstNegativeCash.base) warnings.push(`No cenário base o caixa fica negativo em ${plan.firstNegativeCash.base.slice(5)}/${plan.firstNegativeCash.base.slice(0, 4)}.`);
   else if (plan.firstNegativeCash.pessimistic) warnings.push(`No cenário pessimista o caixa fica negativo em ${plan.firstNegativeCash.pessimistic.slice(5)}/${plan.firstNegativeCash.pessimistic.slice(0, 4)}.`);
   if (settings.cashNowCents === null) warnings.push("Informe o caixa atual para ver a projeção de caixa e a reposição da reserva.");
-  return { today, settings, plan, partners: bal.map((b) => ({ ...b, plannedCents: plannedBy.get(b.partnerId) ?? 0 })), plannedTotalCents: activePlanned, realized: real, ytd, contracts: cinfo, warnings };
+  return { today, settings, plan, partners: bal.map((b) => ({ ...b, plannedCents: plannedBy.get(b.partnerId) ?? 0 })), plannedTotalCents: activePlanned, realized: real, variance, ytd, contracts: cinfo, warnings };
 }

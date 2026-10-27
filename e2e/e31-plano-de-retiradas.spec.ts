@@ -15,6 +15,7 @@ test("D4 — plano de retiradas: premissas, retirada planejada por sócio, tabel
   await expect(page.getByText(/projeção para decidir/)).toBeVisible();
   await expect(page.locator("tbody tr").first()).toBeVisible();
   await expect(page.locator("section[aria-label='Resumo']")).toContainText("Retirada sugerida por mês");
+  await expect(page.getByText("Previsto × realizado (meses fechados)")).toBeVisible(); // D4b
 
   const linha = page.locator("li", { hasText: socio });
   await linha.getByLabel("Planejado por mês (R$)").fill("5.000,00");

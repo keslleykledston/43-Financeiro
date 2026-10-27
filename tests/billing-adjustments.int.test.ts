@@ -144,7 +144,7 @@ describe.skipIf(!enabled)("E05c ajustes da competência (excedente/acréscimo/de
     const logs = await db.select().from(schema.auditLog).where(sql`${schema.auditLog.action} like 'billing.adjustment.%'`);
     expect(logs.map((l) => l.action)).toEqual(["billing.adjustment.added", "billing.adjustment.removed"]);
     const txt = JSON.stringify(logs.map((l) => l.detail));
-    for (const bad of ["SEGREDO", "412", "Cliente Um", "Excedente de minutos"]) expect(txt).not.toContain(bad);
+    for (const bad of ["SEGREDO", "412,64", "412.64", "41264", "Cliente Um", "Excedente de minutos"]) expect(txt).not.toContain(bad);
     expect(await n("charge_adjustments where removed_at is null")).toBe(0);
     expect(await n("charge_adjustments")).toBe(1); // remover não apaga: o ajuste fica no histórico, fora do cálculo
     const row = (await db.select().from(schema.chargeAdjustments))[0];

@@ -31,6 +31,7 @@ export default async function ContasAPagar({ searchParams }: { searchParams: Pro
           {write && <AppLink href="/contas-a-pagar/novo" className={buttonClass("primary")}>Nova conta</AppLink>}
           <AppLink href="/contas-a-pagar/execucao" className={buttonClass("outline")}>Fila de execução</AppLink>
           <AppLink href="/contas-a-pagar/calendario" className={buttonClass("outline")}>Calendário</AppLink>
+          <AppLink href="/contas-a-pagar/relatorio" className={buttonClass("outline")}>Despesas por categoria</AppLink>
           <AppLink href="/contas-a-pagar/recorrentes" className={buttonClass("outline")}>Recorrentes e parcelas</AppLink>
           {can(role, "payables.export") && <a href={`/contas-a-pagar/exportar?${qs}`} className={buttonClass("outline")}>Exportar CSV</a>}
         </div>} />

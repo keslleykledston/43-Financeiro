@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeIn, buildForecast, type PlanInput } from "@/modules/expenses/plan-calc";
+import { activeIn, buildForecast, buildVariance, type PlanInput } from "@/modules/expenses/plan-calc";
 
 const S = { delinquencyBps: 0, unplannedBps: 0, reserveMonths: 2, retentionBps: 0, cashNowCents: null };
 const C = (monthlyCents: number, startAt = "2026-01-01", status = "ativo", commissionBps: number | null = null) => ({ monthlyCents, startAt, status, commissionBps });
@@ -65,5 +65,23 @@ describe("D4 — previsão de lucro e plano de retiradas (cálculo puro)", () =>
   });
   it("valor acima do inteiro seguro falha de forma explícita", () => {
     expect(() => buildForecast(base({ knownExpensesCents: { "2026-11": Number.MAX_SAFE_INTEGER } }))).toThrow(RangeError);
+  });
+});
+
+describe("D4b — previsto × realizado (cálculo puro)", () => {
+  const vi = { months: ["2026-08", "2026-09", "2026-10"], currentMonth: "2026-10", delinquencyBps: 1000, contracts: [C(100000)], dueByMonth: { "2026-09": 50000 }, paidByMonth: { "2026-09": 30000, "2026-10": 10000 }, receivedByMonth: { "2026-09": 80000 }, withdrawnByMonth: { "2026-09": 20000 }, plannedWithdrawalCents: 25000 };
+  it("entrada prevista = contratos do mês anterior menos inadimplência; diferenças com sinal (realizado − previsto)", () => {
+    const v = buildVariance(vi);
+    expect(v.months[1]).toMatchObject({ expectedReceiptsCents: 90000, receivedCents: 80000, receiptsGapCents: -10000, dueExpensesCents: 50000, paidExpensesCents: 30000, expensesGapCents: -20000, withdrawnCents: 20000, withdrawalGapCents: -5000, partial: false });
+  });
+  it("mês corrente é parcial e fica fora dos totais", () => {
+    const v = buildVariance(vi);
+    expect(v.months[2].partial).toBe(true);
+    expect(v.closedMonths).toBe(2);
+    expect(v.totals).toMatchObject({ paidExpensesCents: 30000, plannedWithdrawalCents: 50000, expectedReceiptsCents: 90000 * 2 });
+  });
+  it("inadimplência acima de 100% é limitada; valor fora do inteiro seguro vira erro", () => {
+    expect(buildVariance({ ...vi, delinquencyBps: 99999 }).months[0].expectedReceiptsCents).toBe(0);
+    expect(() => buildVariance({ ...vi, contracts: [C(Number.MAX_SAFE_INTEGER), C(5)] })).toThrow(RangeError);
   });
 });

@@ -26,5 +26,8 @@ Sem contrato ativo; contratos em rascunho que ficam de fora; contratos ativos ve
 ## Realizado
 Mostra os últimos 6 meses do que **realmente passou pelo sistema**: recebimentos, baixas de contas a pagar e retiradas lançadas. O histórico anterior entra depois que a planilha for conferida e aplicada.
 
+## Previsto × realizado
+Compara, mês a mês, o que a projeção esperava com o que aconteceu: **entrada prevista** (contratos de hoje do mês anterior, menos a inadimplência das premissas) × **recebido**; **contas a vencer** no mês × **pago** no mês; **retirada planejada** × **retirado**. O mês em andamento aparece, mas fica fora do total. Pagar uma conta em outro mês que o vencimento aparece como diferença, não como erro. O sistema não guarda o histórico de mudanças dos contratos, então o previsto usa os contratos de hoje; e as cobranças anteriores ao sistema ainda não foram lançadas, por isso o "recebido" pode ficar abaixo do previsto.
+
 ## Limites
 Não considera impostos sobre o lucro nem a regra de distribuição de lucros: **confirme com o contador** antes de definir os valores. Comissões de parceiros não devem ser lançadas também como conta a pagar (entrariam duas vezes).

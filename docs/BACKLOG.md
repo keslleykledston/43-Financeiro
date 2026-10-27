@@ -185,3 +185,5 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [ ] D5: fatura de cartão aberta em compras; D6: conciliação com extrato Cora/OFX.
 - [ ] Mostrar sócios/categorias no painel; relatório de despesas por categoria/mês/centro.
 - [x] D3c: carro/moto/consórcio da aba Casa viram despesa da empresa (reclassificação + parcelamentos); sem migração.
+- [x] D4b (parcial): previsto × realizado mês a mês no plano (/socios/plano). Fora: reajustes/fim de contrato (sem dado de índice), sazonalidade e imposto sobre o lucro (dependem de premissas do dono).
+- [x] Relatório de despesas por categoria/mês/centro (/contas-a-pagar/relatorio) com CSV.

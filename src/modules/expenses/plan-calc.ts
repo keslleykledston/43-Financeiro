@@ -60,3 +60,26 @@ export function buildForecast(i: PlanInput): PlanResult {
   const neg = (key: "base" | "pessimistic") => months.find((m) => m[key].cashEndCents !== null && m[key].cashEndCents! < 0)?.month ?? null;
   return { months, reserveTargetCents: reserveTarget, suggestedMonthlyCents: suggested, avgOperatingCents: avgOperating, avgExpensesCents: avgExpenses, reserveGapCents: reserveGap, firstNegativeCash: { base: neg("base"), pessimistic: neg("pessimistic") } };
 }
+
+/**
+ * D4b — previsto × realizado (PURO). Usa as MESMAS regras da projeção, aplicadas aos meses passados com os contratos de hoje (não há histórico de mudança de status):
+ *  - Entrada prevista do mês X = contratos ativos em X−1 menos a inadimplência esperada; realizada = o que foi recebido (baixas) em X.
+ *  - Despesa prevista = contas com vencimento em X (não canceladas); realizada = baixas de contas feitas em X. Diferença de calendário (pagou em outro mês) aparece como diferença, não como erro.
+ *  - Retirada planejada (soma dos sócios ativos, valor de hoje) × retirada lançada em X.
+ * O mês corrente é PARCIAL (ainda não terminou) e fica fora dos totais.
+ */
+export type VarianceInput = { months: string[]; currentMonth: string; delinquencyBps: number; contracts: ContractLite[]; dueByMonth: Record<string, number>; paidByMonth: Record<string, number>; receivedByMonth: Record<string, number>; withdrawnByMonth: Record<string, number>; plannedWithdrawalCents: number };
+export type VarianceMonth = { month: string; partial: boolean; expectedReceiptsCents: number; receivedCents: number; receiptsGapCents: number; dueExpensesCents: number; paidExpensesCents: number; expensesGapCents: number; plannedWithdrawalCents: number; withdrawnCents: number; withdrawalGapCents: number };
+export type VarianceResult = { months: VarianceMonth[]; totals: Omit<VarianceMonth, "month" | "partial">; closedMonths: number };
+
+export function buildVariance(i: VarianceInput): VarianceResult {
+  const d = Math.min(10000, i.delinquencyBps);
+  const months = i.months.map((month): VarianceMonth => {
+    const expected = safe(bps(safe(grossOf(i.contracts, addMonths(month, -1))), 10000 - d));
+    const received = i.receivedByMonth[month] ?? 0, due = i.dueByMonth[month] ?? 0, paid = i.paidByMonth[month] ?? 0, wd = i.withdrawnByMonth[month] ?? 0;
+    return { month, partial: month >= i.currentMonth, expectedReceiptsCents: expected, receivedCents: received, receiptsGapCents: received - expected, dueExpensesCents: due, paidExpensesCents: paid, expensesGapCents: paid - due, plannedWithdrawalCents: i.plannedWithdrawalCents, withdrawnCents: wd, withdrawalGapCents: wd - i.plannedWithdrawalCents };
+  });
+  const closed = months.filter((m) => !m.partial);
+  const sum = (f: (m: VarianceMonth) => number) => safe(closed.reduce((a, m) => a + f(m), 0));
+  return { months, closedMonths: closed.length, totals: { expectedReceiptsCents: sum((m) => m.expectedReceiptsCents), receivedCents: sum((m) => m.receivedCents), receiptsGapCents: sum((m) => m.receiptsGapCents), dueExpensesCents: sum((m) => m.dueExpensesCents), paidExpensesCents: sum((m) => m.paidExpensesCents), expensesGapCents: sum((m) => m.expensesGapCents), plannedWithdrawalCents: sum((m) => m.plannedWithdrawalCents), withdrawnCents: sum((m) => m.withdrawnCents), withdrawalGapCents: sum((m) => m.withdrawalGapCents) } };
+}
