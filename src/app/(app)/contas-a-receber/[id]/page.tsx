@@ -12,13 +12,14 @@ import { Callout, Money, PageHeader, SectionCard, StatusPill, type StatusTone } 
 import { AppLink } from "@/components/k3g/app-link";
 import { PendingButton } from "@/components/k3g/pending-button";
 import { buttonClass, inputClass, selectClass } from "@/components/k3g/button";
-import { cancelBoletoAction, payAction, recheckBoletoAction, reverseAction } from "../actions";
+import { cancelBoletoAction, decideCancelRequestAction, payAction, recheckBoletoAction, requestCancelAction, reverseAction, withdrawCancelRequestAction } from "../actions";
+import { REQUEST_STATUS_LABEL, cancelRequestsForCharge } from "@/modules/issuance/cancel-request";
 import { boletoPanel, CANCEL_ERROR_LABEL, CANCEL_STATUS_LABEL } from "@/modules/issuance/cancel";
 import { STATUS_LABEL as ISSUANCE_LABEL } from "@/modules/issuance/service";
 
 const TONE: Record<Situation, StatusTone> = { quitada: "positive", parcial: "warning", vencida: "negative", a_vencer: "info" };
 const br = (d: string) => d.split("-").reverse().join("/");
-const OK: Record<string, string> = { pago: "Pagamento registrado.", quitada: "Pagamento registrado. Cobrança quitada: as mensagens da régua foram interrompidas.", boleto_cancelado: "Boleto cancelado e registrado. A régua de mensagens desta cobrança foi interrompida; para cobrar de novo, solicite uma nova emissão.", boleto_sem_resposta: "O provedor não respondeu de forma conclusiva. Use «Reconsultar» antes de tentar de novo.", estornado: "Pagamento estornado. O saldo voltou; se quiser retomar a régua, use Mensagens → Programar." };
+const OK: Record<string, string> = { pago: "Pagamento registrado.", quitada: "Pagamento registrado. Cobrança quitada: as mensagens da régua foram interrompidas.", pedido_enviado: "Pedido de cancelamento enviado para a diretoria. Nada muda no boleto até ela decidir.", pedido_retirado: "Pedido de cancelamento retirado.", pedido_recusado: "Pedido de cancelamento recusado. O boleto continua valendo.", boleto_cancelado: "Boleto cancelado e registrado. A régua de mensagens desta cobrança foi interrompida; para cobrar de novo, solicite uma nova emissão.", boleto_sem_resposta: "O provedor não respondeu de forma conclusiva. Use «Reconsultar» antes de tentar de novo.", estornado: "Pagamento estornado. O saldo voltou; se quiser retomar a régua, use Mensagens → Programar." };
 
 export default async function Cobranca({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ erro?: string; ok?: string }> }) {
   const [{ id }, sp, ctx] = await Promise.all([params, searchParams, requireContext()]);
@@ -26,8 +27,11 @@ export default async function Cobranca({ params, searchParams }: { params: Promi
   if (!ctx.current || !role || !can(role, "receivables.read")) return <Callout tone="warning">Seu papel não tem acesso às contas a receber.</Callout>;
   const r = await getReceivable(db, ctx.user.id, ctx.current.id, id);
   if (!r) notFound();
-  const pay = can(role, "receivables.pay"), reverse = can(role, "receivables.reverse"), cancelBoletoPerm = can(role, "boletos.cancel");
+  const pay = can(role, "receivables.pay"), reverse = can(role, "receivables.reverse"), cancelBoletoPerm = can(role, "boletos.cancel"), requestCancelPerm = can(role, "boletos.request") && !can(role, "boletos.cancel");
   const panel = can(role, "issuance.read") ? await boletoPanel(db, ctx.user.id, ctx.current.id, r.id) : null;
+  const cancelRequests = can(role, "issuance.read") ? await cancelRequestsForCharge(db, ctx.user.id, ctx.current.id, r.id) : [];
+  const pendingRequest = cancelRequests.find((q) => q.status === "pendente" || q.stuck);
+  const canApproveNow = !!panel && panel.request?.status === "emitido" && r.payments.length === 0;
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Manaus" });
   const requestKey = randomUUID().replace(/-/g, ""); // um por exibição da página: reenviar o mesmo formulário não duplica
   const openText = (r.openCents / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -73,6 +77,49 @@ export default async function Cobranca({ params, searchParams }: { params: Promi
                 <label className="flex items-start gap-2 text-sm"><input type="checkbox" name="confirm" required className="mt-1" /> Confirmo o cancelamento deste boleto. A ação fica registrada com meu nome, data e motivo e não pode ser desfeita.</label>
                 <div><PendingButton className={buttonClass("danger")} pendingText="Cancelando…">Cancelar boleto</PendingButton></div>
               </form></details>
+          )}
+          {requestCancelPerm && panel.request?.status === "emitido" && r.payments.length === 0 && !pendingRequest && !panel.history.some((h) => h.status === "enviando" || h.status === "desconhecido") && (
+            <details className="mt-3"><summary className="cursor-pointer text-sm font-medium">Pedir o cancelamento deste boleto (a diretoria decide)</summary>
+              <form action={requestCancelAction} className="mt-2 grid max-w-xl gap-3">
+                <input type="hidden" name="id" value={r.id} />
+                <div><label htmlFor="req-reason" className="mb-1 block text-sm font-medium">Motivo do pedido (3 a 200 caracteres)</label><input id="req-reason" name="reason" required minLength={3} maxLength={200} className={inputClass} placeholder="Ex.: valor errado; cliente pediu novo vencimento" /></div>
+                <div><PendingButton className={buttonClass("outline")} pendingText="Enviando…">Enviar pedido</PendingButton></div>
+              </form></details>
+          )}
+          {pendingRequest && (
+            <div className="mt-3 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm" role="status">
+              <p><strong>Pedido de cancelamento aguardando a diretoria</strong> · {pendingRequest.requestedByName} · {formatDateTime(pendingRequest.createdAt)}</p>
+              <p className="text-muted-foreground">Motivo: {pendingRequest.reason}</p>
+              {pendingRequest.stuck && <p className="mt-1 text-warning-foreground">Foi aprovado em {formatDateTime(pendingRequest.decidedAt!)}, mas o cancelamento não chegou a ser concluído. Aprove de novo para concluir.</p>}
+              {cancelBoletoPerm && (
+                <div className="mt-2 grid max-w-xl gap-2">
+                  {canApproveNow ? (
+                    <form action={decideCancelRequestAction} className="grid gap-2">
+                      <input type="hidden" name="id" value={r.id} /><input type="hidden" name="requestId" value={pendingRequest.id} /><input type="hidden" name="decision" value="aprovar" />
+                      <label className="flex items-start gap-2"><input type="checkbox" name="confirm" required className="mt-1" /> Confirmo o cancelamento deste boleto. A ação fica registrada com meu nome e não pode ser desfeita.</label>
+                      <div><PendingButton className={buttonClass("danger")} pendingText="Cancelando…">Aprovar e cancelar o boleto</PendingButton></div>
+                    </form>
+                  ) : <p className="text-muted-foreground">O boleto não está mais disponível para cancelar (já cancelado ou com pagamento). Você pode encerrar o pedido recusando-o.</p>}
+                  {!pendingRequest.stuck && (
+                    <form action={decideCancelRequestAction} className="flex flex-wrap items-center gap-2">
+                      <input type="hidden" name="id" value={r.id} /><input type="hidden" name="requestId" value={pendingRequest.id} /><input type="hidden" name="decision" value="recusar" />
+                      <input name="note" aria-label="Motivo da recusa" required minLength={3} maxLength={200} placeholder="Por que recusar? (3 a 200 caracteres)" className={inputClass} />
+                      <PendingButton className={buttonClass("outline", "sm")} pendingText="Recusando…">Recusar pedido</PendingButton>
+                    </form>
+                  )}
+                </div>
+              )}
+              {pendingRequest.status === "pendente" && pendingRequest.requestedBy === ctx.user.id && !cancelBoletoPerm && (
+                <form action={withdrawCancelRequestAction} className="mt-2"><input type="hidden" name="id" value={r.id} /><input type="hidden" name="requestId" value={pendingRequest.id} /><PendingButton className={buttonClass("outline", "sm")} pendingText="Retirando…">Retirar meu pedido</PendingButton></form>
+              )}
+            </div>
+          )}
+          {cancelRequests.some((q) => q.status !== "pendente") && (
+            <ul className="mt-3 divide-y divide-border text-sm" aria-label="Pedidos de cancelamento anteriores">
+              {cancelRequests.filter((q) => q.status !== "pendente").map((q) => (
+                <li key={q.id} className="py-2"><p>{formatDateTime(q.createdAt)} · pedido de {q.requestedByName} · <strong>{REQUEST_STATUS_LABEL[q.status] ?? q.status}</strong>{q.decidedByName ? ` por ${q.decidedByName}` : ""}</p><p className="text-muted-foreground">Motivo: {q.reason}{q.decisionNote ? ` · Resposta: ${q.decisionNote}` : ""}</p></li>
+              ))}
+            </ul>
           )}
           {cancelBoletoPerm && panel.request?.status === "emitido" && r.payments.length > 0 && <p className="mt-2 text-xs text-muted-foreground">Há pagamento registrado: estorne-o antes de cancelar o boleto.</p>}
           {panel.history.length > 0 && (

@@ -274,6 +274,13 @@
       "when": 1793077729382,
       "tag": "0038_flippant_toro",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1793078731859,
+      "tag": "0039_boring_strong_guy",
+      "breakpoints": true
     }
   ]
 }

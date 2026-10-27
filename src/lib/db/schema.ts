@@ -1234,3 +1234,28 @@ export const legacyDocumentFixes = pgTable("legacy_document_fixes", {
   check("legacy_doc_fix_len_chk", sql`char_length(${t.nameKey}) between 1 and 200 and char_length(${t.note}) <= 200`),
 ]);
 
+
+/**
+ * E30 — pedido de cancelamento de boleto feito por gerente/assistente; QUEM CANCELA continua sendo só a diretoria (ADR-017).
+ * Aprovar executa o cancelamento normal (`cancelBoleto`) com o nome de quem aprovou; recusar ou retirar não muda nada no boleto.
+ */
+export const boletoCancelRequests = pgTable("boleto_cancel_requests", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  chargeId: uuid("charge_id").notNull(),
+  reason: text("reason").notNull(),
+  status: text("status").notNull().default("pendente"), // pendente | aprovado | recusado | retirado
+  requestedBy: uuid("requested_by").notNull().references(() => users.id),
+  decidedBy: uuid("decided_by").references(() => users.id),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  decisionNote: text("decision_note"),
+  cancellationId: uuid("cancellation_id"), // preenchido ao aprovar (o cancelamento normal que foi executado)
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.chargeId], foreignColumns: [charges.companyId, charges.id] }),
+  foreignKey({ columns: [t.companyId, t.cancellationId], foreignColumns: [boletoCancellations.companyId, boletoCancellations.id] }),
+  uniqueIndex("boleto_cancel_requests_one_pending_uq").on(t.companyId, t.chargeId).where(sql`${t.status} = 'pendente'`),
+  index("boleto_cancel_requests_company_idx").on(t.companyId, t.status, t.createdAt),
+  check("boleto_cancel_requests_status_chk", sql`${t.status} in ('pendente', 'aprovado', 'recusado', 'retirado')`),
+  check("boleto_cancel_requests_reason_chk", sql`char_length(${t.reason}) between 3 and 200`),
+  check("boleto_cancel_requests_decided_chk", sql`(${t.status} = 'pendente') = (${t.decidedAt} is null)`),
+]);

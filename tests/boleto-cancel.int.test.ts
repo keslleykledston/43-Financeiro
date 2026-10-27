@@ -37,7 +37,7 @@ describe.skipIf(!enabled)("E20 cancelar boleto (simulado): só diretoria, tudo r
   afterAll(async () => { await conn?.end(); await admin?.end(); });
 
   beforeEach(async () => {
-    await db.execute(sql`truncate boleto_cancellations, issuance_requests, issuance_settings, payments, messaging_settings, message_queue, message_template_versions, message_templates, charges, billing_batches, holidays, contract_versions, contracts, integration_conflicts, integration_sync_runs, integration_connections, rate_limits, customer_contacts, vendor_contacts, customers, vendors, audit_log, invitations, memberships, companies, users restart identity cascade`);
+    await db.execute(sql`truncate boleto_cancel_requests, boleto_cancellations, issuance_requests, issuance_settings, payments, messaging_settings, message_queue, message_template_versions, message_templates, charges, billing_batches, holidays, contract_versions, contracts, integration_conflicts, integration_sync_runs, integration_connections, rate_limits, customer_contacts, vendor_contacts, customers, vendors, audit_log, invitations, memberships, companies, users restart identity cascade`);
     const [a, b] = await db.insert(schema.companies).values([{ name: "Empresa A" }, { name: "Empresa B" }]).returning();
     A = a.id; B = b.id;
     const mk = async (e: string) => (await db.insert(schema.users).values({ email: e, name: e.split("@")[0], passwordHash: "x" }).returning())[0].id;
@@ -158,7 +158,7 @@ describe.skipIf(!enabled)("E20 cancelar boleto (simulado): só diretoria, tudo r
     await expect(recheckCancellation(db, dirA, A, c.id, a.p)).rejects.toThrow(/já foi decidido/);
 
     // (b) o provedor cancelou mas a resposta se perdeu: a reconsulta enxerga 'cancelado' e NÃO pede de novo
-    await db.execute(sql`truncate boleto_cancellations, issuance_requests, audit_log`);
+    await db.execute(sql`truncate boleto_cancel_requests, boleto_cancellations, issuance_requests, audit_log`);
     const b = prov(async () => { throw new IssuanceTimeout(); });
     const i2 = await issued(cli2, b.p);
     await b.base.boleto.cancel((await db.select().from(schema.issuanceRequests).where(eq(schema.issuanceRequests.id, i2.requestId)))[0].externalRef!);   // cancelou "por fora"
@@ -178,7 +178,7 @@ describe.skipIf(!enabled)("E20 cancelar boleto (simulado): só diretoria, tudo r
     await recheckCancellation(db, dirA, A, c.id, p);                                                                // tentativa 5 = limite
     expect((await rows())[0]).toMatchObject({ status: "falhou", lastError: "tentativas_esgotadas", attempts: 5 });
 
-    await db.execute(sql`truncate boleto_cancellations`);
+    await db.execute(sql`truncate boleto_cancel_requests, boleto_cancellations`);
     await db.execute(sql`insert into boleto_cancellations (company_id, charge_id, request_id, external_ref, reason, requested_by, status) select company_id, charge_id, id, external_ref, 'preso no meio', ${dirA}, 'enviando' from issuance_requests limit 1`);
     const [s] = await rows();
     await expect(recheckCancellation(db, dirA, A, s.id, p)).rejects.toThrow(/ainda está em andamento/);
@@ -194,7 +194,7 @@ describe.skipIf(!enabled)("E20 cancelar boleto (simulado): só diretoria, tudo r
     await cancelBoleto(db, dirA, A, ok(chargeId), p);
     await expect(registerPayment(db, asstA, A, chargeId, { amount: "100,00", paidAt: "2026-10-15", method: "pix" }, "2026-10-20")).rejects.toThrow(/cancelamento de boleto em andamento/);
     // (b) durante a chamada ao provedor, outra sessão tenta registrar a baixa: bloqueada pelo registro "enviando"
-    await db.execute(sql`truncate boleto_cancellations, issuance_requests, audit_log`);
+    await db.execute(sql`truncate boleto_cancel_requests, boleto_cancellations, issuance_requests, audit_log`);
     const gate: { release?: () => void } = {};
     const slow = prov(async () => { await new Promise<void>((res) => { gate.release = res; }); });
     const i2 = await issued(cli2, slow.p);

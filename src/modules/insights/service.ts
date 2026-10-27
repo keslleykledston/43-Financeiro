@@ -133,6 +133,11 @@ export async function getOverview(db: DB, actorId: string, companyId: string, to
     alertIn.customersNoContact = Number(a.n); alertIn.customersNoContract = Number(b.n);
   }
   ov.alerts = buildAlerts(alertIn, today);
+  if (ok("boletos.cancel")) { // pedidos de cancelamento de boleto aguardando a diretoria (E30)
+    const [q] = rows(await db.execute(sql`select count(*)::int n, min(charge_id::text) first_charge from boleto_cancel_requests where company_id = ${companyId} and status = 'pendente'`));
+    const n = Number(q?.n ?? 0);
+    if (n > 0) ov.alerts.unshift({ key: "cancel-requests", severity: "warning", title: `${n} ${n === 1 ? "pedido de cancelamento de boleto" : "pedidos de cancelamento de boleto"} aguardando decisão`, detail: "Gerente ou assistente pediu o cancelamento; só a diretoria decide.", href: n === 1 && q?.first_charge ? `/contas-a-receber/${String(q.first_charge)}` : "/contas-a-receber" });
+  }
   return ov;
 }
 

@@ -1,11 +1,12 @@
 import { test, expect } from "@playwright/test";
+import { aceitarConvite } from "./helpers";
 
 const dv = (b: string, w: number[]) => { const r = [...b].reduce((s, c, i) => s + +c * w[i], 0) % 11; return r < 2 ? 0 : 11 - r; };
 const cnpj = (n: number) => { const base = `${String(60000000 + n).padStart(8, "0")}0001`; const d1 = dv(base, [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]); return base + d1 + dv(base + d1, [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]); };
 const run = Date.now() % 100000;
 const NOME = `Cliente Emissao ${run}`;
 
-test("E10 — motor de emissão SIMULADO: nasce pausado, solicita, processa uma vez, trava reabertura, checklist do portão", async ({ page }) => {
+test("E10 — motor de emissão SIMULADO: nasce pausado, solicita, processa uma vez, trava reabertura, checklist do portão", async ({ page, browser }) => {
   await test.step("cliente + contrato (vence dia 12 → emite 25/09/2026) + lote aprovado", async () => {
     await page.goto("/clientes/novo");
     await page.getByLabel("Razão social / nome").fill(NOME);
@@ -64,6 +65,40 @@ test("E10 — motor de emissão SIMULADO: nasce pausado, solicita, processa uma 
     await page.getByLabel("Motivo para reabrir").fill("tentar reabrir depois de emitir");
     await page.getByRole("button", { name: "Reabrir para revalidar" }).click();
     await expect(page.getByText(/emissões em andamento ou concluídas/)).toBeVisible();
+  });
+
+  await test.step("E30 — gerente PEDE o cancelamento; a diretoria recusa com motivo e o boleto continua valendo", async () => {
+    const email = `gerente-pedido-${Date.now()}@sandbox.test`;
+    await page.goto("/configuracao?aba=usuarios");
+    await page.getByLabel("E-mail").fill(email);
+    await page.getByLabel("Papel").selectOption({ label: "Gerente" });
+    await page.getByRole("button", { name: "Convidar" }).click();
+    const link = page.getByRole("status").filter({ hasText: "Convite criado" }).locator("code");
+    const path = new URL((await link.innerText()).trim()).pathname;
+    const guest = await aceitarConvite(browser, path, "Gerente Pedido", "Gerente-Pedido-Senha-321");
+    const g = guest.page;
+    await g.goto("/contas-a-receber");
+    await g.locator('a[href^="/contas-a-receber/"]', { hasText: NOME }).first().click();
+    await expect(g.getByText("Cancelar boleto (só a diretoria)")).toHaveCount(0); // gerente não cancela
+    await g.getByText("Pedir o cancelamento deste boleto").click();
+    await g.getByLabel(/Motivo do pedido/).fill("cliente pediu novo vencimento");
+    await g.getByRole("button", { name: "Enviar pedido" }).click();
+    await expect(g.getByText(/Pedido de cancelamento enviado para a diretoria/)).toBeVisible();
+    await expect(g.getByText("Pedido de cancelamento aguardando a diretoria")).toBeVisible();
+    await expect(g.getByRole("button", { name: "Retirar meu pedido" })).toBeVisible();
+    await guest.ctx.close();
+    // diretoria
+    await page.goto("/");
+    await expect(page.getByText(/pedido de cancelamento de boleto aguardando decisão/)).toBeVisible();
+    await page.goto("/contas-a-receber");
+    await page.locator('a[href^="/contas-a-receber/"]', { hasText: NOME }).first().click();
+    await expect(page.getByText("Pedido de cancelamento aguardando a diretoria")).toBeVisible();
+    await expect(page.getByText("Motivo: cliente pediu novo vencimento")).toBeVisible();
+    await page.getByLabel("Motivo da recusa").fill("ainda vale a emissão atual");
+    await page.getByRole("button", { name: "Recusar pedido" }).click();
+    await expect(page.getByText(/Pedido de cancelamento recusado/)).toBeVisible();
+    await expect(page.getByText(/Situação da emissão: Emitido/)).toBeVisible();
+    await expect(page.getByLabel("Pedidos de cancelamento anteriores")).toContainText("Recusado");
   });
 
   await test.step("E20 — cancelar o boleto (diretoria): motivo e confirmação obrigatórios, fica registrado", async () => {

@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
 import { registerPayment, reversePayment } from "@/modules/receivables/service";
 import { cancelBoleto, recheckCancellation } from "@/modules/issuance/cancel";
+import { decideCancelRequest, requestBoletoCancel, withdrawCancelRequest } from "@/modules/issuance/cancel-request";
 
 // A empresa vem SEMPRE do contexto validado no servidor, nunca do formulário.
 async function ctx() { const c = await requireContext(); if (!c.current) throw new Forbidden(); return { userId: c.user.id, companyId: c.current.id }; }
@@ -51,5 +52,32 @@ export async function recheckBoletoAction(fd: FormData) {
     else if (r.status === "desconhecido") ok = "boleto_sem_resposta";
   } catch (e) { err = known(e); }
   revalidatePath("/contas-a-receber"); revalidatePath("/mensagens"); revalidatePath("/faturamento/emissoes");
+  back(id, err, ok);
+}
+
+// E30 — pedido de cancelamento (gerente/assistente) e decisão da diretoria
+export async function requestCancelAction(fd: FormData) {
+  const id = String(fd.get("id") ?? ""); let err = "";
+  try { const c = await ctx(); await requestBoletoCancel(db, c.userId, c.companyId, { chargeId: id, reason: String(fd.get("reason") ?? "") }); } catch (e) { err = known(e); }
+  revalidatePath(`/contas-a-receber/${id}`); revalidatePath("/");
+  back(id, err, "pedido_enviado");
+}
+export async function withdrawCancelRequestAction(fd: FormData) {
+  const id = String(fd.get("id") ?? ""); let err = "";
+  try { const c = await ctx(); await withdrawCancelRequest(db, c.userId, c.companyId, String(fd.get("requestId") ?? "")); } catch (e) { err = known(e); }
+  revalidatePath(`/contas-a-receber/${id}`); revalidatePath("/");
+  back(id, err, "pedido_retirado");
+}
+export async function decideCancelRequestAction(fd: FormData) {
+  const id = String(fd.get("id") ?? ""); let err = "", ok = "boleto_cancelado";
+  try {
+    const c = await ctx(); const approve = fd.get("decision") === "aprovar";
+    if (approve && fd.get("confirm") !== "on") throw new Invalid("Confirme o cancelamento marcando a caixa de confirmação");
+    const r = await decideCancelRequest(db, c.userId, c.companyId, String(fd.get("requestId") ?? ""), approve ? "aprovar" : "recusar", String(fd.get("note") ?? ""));
+    if (r.status === "recusado") ok = "pedido_recusado";
+    else if (r.result === "falhou") err = "O provedor não cancelou o boleto. Veja o motivo no histórico do boleto";
+    else if (r.result === "desconhecido") ok = "boleto_sem_resposta";
+  } catch (e) { err = known(e); }
+  revalidatePath("/contas-a-receber"); revalidatePath("/mensagens"); revalidatePath("/faturamento/emissoes"); revalidatePath("/");
   back(id, err, ok);
 }

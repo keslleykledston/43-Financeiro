@@ -21,3 +21,11 @@ Boleto emitido com valor, vencimento ou cliente errado, ou que não deve mais se
 
 ## Registro
 Cada cancelamento fica no histórico do bloco **Boleto** e no *Registro de atividades* (sem dados do cliente). O registro **não pode ser apagado nem alterado**: o próprio banco de dados recusa.
+
+## Pedir o cancelamento (gerente e assistente)
+Quem não é da diretoria pode **pedir** o cancelamento: na cobrança, bloco *Boleto*, **Pedir o cancelamento deste boleto (a diretoria decide)**, com o motivo. Nada muda no boleto até a diretoria decidir.
+- **Diretoria:** o pedido aparece na própria cobrança (e como aviso na Visão executiva). **Aprovar e cancelar o boleto** executa o cancelamento normal, com o nome de quem aprovou; **Recusar** exige uma resposta e o boleto continua valendo.
+- **Quem pediu** pode **retirar** o pedido enquanto ele estiver aguardando.
+- Se, entre o pedido e a aprovação, entrar um pagamento (ou o boleto já tiver sido cancelado), a aprovação não segue e o pedido volta para a fila.
+- Se o sistema for interrompido no meio da aprovação (raro), o pedido fica "aprovado" sem o boleto cancelado; depois de 10 minutos a diretoria aprova de novo para concluir. Se a diretoria cancelar direto ou entrar um pagamento, o pedido pode ser encerrado recusando-o.
+- Só pode haver um pedido aguardando por cobrança. Tudo fica no registro de atividades (apenas os identificadores, sem o motivo).

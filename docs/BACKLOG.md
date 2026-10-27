@@ -191,3 +191,4 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [x] Busca dentro da central de ajuda (sem acento, todos os termos, trecho).
 - [x] E29: aditivo agendado (data futura aplicada sozinha na data).
 - [x] Painel: bloco "Despesas e retiradas do mês" (top categorias + retiradas dos sócios).
+- [x] E30: pedido de cancelamento de boleto por gerente/assistente com decisão da diretoria.
