@@ -130,7 +130,7 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [ ] Aditivo agendado (data futura aplicada sozinha na data) — hoje a data de efeito não pode ser futura.
 - [ ] Cliente do CRM: correção de nome/CNPJ continua no CRM (somente leitura aqui); aguardando o dono dizer o que está errado em "19.534.417 LTDA".
 - [ ] H1 (histórico a partir das abas da planilha) — aguarda "pode seguir" e respostas (docs/HISTORICO_E_CAIXA.md §6).
-- [ ] Endurecer o papel de banco da aplicação (sem TRUNCATE/DDL; papel de migração separado) — protege as tabelas só-de-acréscimo (notes, commission_*, boleto_cancellations). Ver review E21 #2.
+- [~] (E32: TRUNCATE já bloqueado por gatilho; falta DDL) Endurecer o papel de banco da aplicação (sem TRUNCATE/DDL; papel de migração separado) — protege as tabelas só-de-acréscimo (notes, commission_*, boleto_cancellations). Ver review E21 #2.
 
 ## E22 — Conta de e-mail e dados da contabilidade/fiscais (pedido do dono, 2026-10-24, ADR-019)
 - [x] Integrações → "E-mail (SMTP)": servidor, porta, segurança, remetente, resposta, usuário/senha cifrados (escrita apenas), só diretoria (migração 0026).
