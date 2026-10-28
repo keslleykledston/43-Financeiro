@@ -12,6 +12,13 @@
 4. **NFS-e** é assíncrona: fica *Processando no provedor* até a consulta de status confirmar.
 5. Se a cobrança for quitada ou cancelada antes do envio, a solicitação é cancelada automaticamente.
 
+## Provedor de boleto (simulado ou Cora de testes)
+Em *Controle* há o campo **Provedor de boleto**. O padrão é **Simulado**. A diretoria pode escolher **Cora — testes (homologação)**: o boleto passa a ser criado de verdade no ambiente de testes da Cora (com número e linha digitável de teste), mas **não é um boleto real e não cobra ninguém**. NFS-e continua simulada.
+- Só funciona se o servidor estiver com a Cora de testes ligada e a empresa tiver as credenciais de **Homologação** em *Integrações → Cora*. Sem isso a troca é recusada e nada é enviado.
+- Só dá para trocar de provedor quando **não há boletos em andamento** (aguardando, enviando ou a reconsultar). O boleto guarda para sempre o provedor que o emitiu: reconsulta e cancelamento falam com ele.
+- **Não existe emissão em produção** nesta versão: ela exige autorização escrita da diretoria e uma nova fase de desenvolvimento.
+- O cancelamento de um boleto da Cora de testes cancela de fato lá (ambiente de testes).
+
 ## Controles
 - Começa **pausado**. A diretoria libera, define o **limite diário** e pode pausar de novo a qualquer momento.
 - **Lote com emissão em andamento ou concluída não pode ser reaberto.** Solicitações ainda não enviadas são canceladas ao reabrir.

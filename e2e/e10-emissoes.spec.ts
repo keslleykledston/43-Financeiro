@@ -59,6 +59,16 @@ test("E10 — motor de emissão SIMULADO: nasce pausado, solicita, processa uma 
     await page.screenshot({ path: "e2e-results/shots/desktop-emissoes.png", fullPage: true });
   });
 
+  await test.step("E10b-1 — provedor de boleto: padrão Simulado; a Cora de testes aparece desligada no servidor e não pode ser escolhida", async () => {
+    await page.goto("/faturamento/emissoes");
+    const sel = page.getByLabel("Provedor de boleto");
+    await expect(sel).toHaveValue("simulado");
+    const cora = sel.locator("option", { hasText: "Cora — testes (homologação)" });
+    await expect(cora).toHaveText(/desligado no servidor/);
+    await expect(cora).toBeDisabled();
+    await expect(page.getByText(/Simulação: este motor ensaia o fluxo/)).toBeVisible();
+  });
+
   await test.step("lote com emissão concluída não pode ser reaberto", async () => {
     await page.goto("/faturamento/lotes?mes=2026-09");
     await page.getByRole("link", { name: /Emissão 25\/09\/2026/ }).click();

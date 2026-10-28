@@ -17,7 +17,8 @@ describe("Cora — escopo estrutural (só boletos; produção só leitura)", () 
     expect(routeAllowed("GET", "/v2/invoices")).toBe(true);
     expect(routeAllowed("GET", "/v2/invoices/inv_abc1234")).toBe(true);
     expect(routeAllowed("POST", "/v2/invoices")).toBe(true);
-    for (const [m, p] of [["POST", "/v2/invoices/pay"], ["POST", "/v2/transfers"], ["GET", "/v2/accounts/balance"], ["GET", "/bank-statement"], ["DELETE", "/v2/invoices/inv_abc1234"], ["POST", "/v2/invoices/installments"], ["GET", "/v2/invoices/../transfers"], ["POST", "/v2/payments"]]) expect(routeAllowed(m, p)).toBe(false);
+    expect(routeAllowed("DELETE", "/v2/invoices/inv_abc1234")).toBe(true); // cancelar boleto (só stage; produção bloqueia abaixo)
+    for (const [m, p] of [["POST", "/v2/invoices/pay"], ["POST", "/v2/transfers"], ["GET", "/v2/accounts/balance"], ["GET", "/bank-statement"], ["DELETE", "/v2/invoices"], ["DELETE", "/v2/accounts/acc_1234"], ["PUT", "/v2/invoices/inv_abc1234"], ["POST", "/v2/invoices/installments"], ["GET", "/v2/invoices/../transfers"], ["POST", "/v2/payments"]]) expect(routeAllowed(m, p)).toBe(false);
   });
   it("hosts: stage e produção, só mTLS; produção é somente leitura", () => {
     expect(CORA_HOSTS.homologacao).toBe("matls-clients.api.stage.cora.com.br");
@@ -29,7 +30,8 @@ describe("Cora — escopo estrutural (só boletos; produção só leitura)", () 
     const { t, calls } = fake(ok);
     const c = new CoraClient(creds, "producao", t);
     expect((await c.listInvoices()).items).toHaveLength(1);
-    await expect(c.createInvoice({ idempotencyKey: UUID, code: "x", amountCents: 500, dueDate: "2026-12-01", customerName: "T", customerDocument: "52998224725", description: "d" })).rejects.toThrow(/bloqueada em produção/);
+    await expect(c.createInvoice({ idempotencyKey: UUID, code: "x", amountCents: 500, dueDate: "2026-12-01", customerName: "T", customerDocument: "52998224725", description: "d" })).rejects.toThrow(/bloqueados em produção/);
+    await expect(c.cancelInvoice("inv_abc1234")).rejects.toThrow(/bloqueados em produção/);
     expect(calls.every((x) => x.host === "matls-clients.api.cora.com.br" && (x.method === "GET" || x.path === "/token"))).toBe(true);
   });
   it("homologação: emite com Idempotency-Key, JSON e Bearer; valida entrada", async () => {

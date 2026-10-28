@@ -13,6 +13,8 @@ x-app-env: &app-env
   BILLING_LIVE_ENABLED: "false"
   EMAIL_EXTERNAL_ENABLED: "false"
   CORA_LIVE_ENABLED: "false"
+  # Cora de TESTES (stage): permite que uma empresa escolha "Cora — testes (homologação)" como provedor de boleto (diretoria, auditado). Não existe produção.
+  CORA_STAGE_ENABLED: "true"
   FISCAL_LIVE_ENABLED: "false"
   WHATSAPP_LIVE_ENABLED: "false"
 

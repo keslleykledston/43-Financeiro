@@ -22,7 +22,7 @@ export interface BoletoProvider { // Cora (boletos v2)
   readonly mode: "mock" | "live";
   issue(i: BoletoInput): Promise<BoletoResult>;
   /** Reconsulta por chave de idempotência: já existe? (usada quando a resposta da emissão se perdeu). null = não existe. */
-  find(idempotencyKey: string): Promise<BoletoResult | null>;
+  find(idempotencyKey: string, ctx?: { customerDocument: string; dueDate: string }): Promise<BoletoResult | null>;
   status(ref: string): Promise<BoletoResult["status"]>;
   /** Cancela um boleto EMITIDO e ainda sem pagamento. Só é chamado pelo fluxo de cancelamento da diretoria (E20). */
   cancel(ref: string): Promise<void>;

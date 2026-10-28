@@ -3,7 +3,7 @@ import type { DB } from "@/lib/db";
 import { auditLog, boletoCancellations, charges, issuanceRequests, users } from "@/lib/db/schema";
 import { Invalid, requirePerm } from "@/modules/identity/service";
 import { cancelQueueForCharges } from "@/modules/messaging/service";
-import { resolveProviders } from "@/modules/providers/registry";
+import { resolveProvidersForMode } from "@/modules/providers/registry";
 import type { Providers } from "@/modules/providers/types";
 
 /**
@@ -81,7 +81,10 @@ export async function cancelBoleto(db: DB, actorId: string, companyId: string, i
   if (!uuidOk(input.chargeId ?? "")) throw new Invalid("Cobrança não encontrada");
   const reason = cleanReason(input.reason);
   if (input.confirm !== true) throw new Invalid("Confirme o cancelamento marcando a caixa de confirmação");
-  const prov = resolveProviders(providers); // falha FECHADA antes de reservar qualquer coisa
+  // O cancelamento fala com o provedor que EMITIU o boleto (modo da solicitação), não com o configurado hoje. Falha FECHADA antes de reservar qualquer coisa.
+  const [pre] = await db.select({ mode: issuanceRequests.mode }).from(issuanceRequests).where(and(eq(issuanceRequests.companyId, companyId), eq(issuanceRequests.chargeId, input.chargeId), eq(issuanceRequests.kind, "boleto"), eq(issuanceRequests.status, "emitido")));
+  if (!pre) throw new Invalid("Esta cobrança não tem boleto emitido para cancelar");
+  const prov = await resolveProvidersForMode(db, companyId, pre.mode, providers);
 
   const row = await db.transaction(async (tx) => {
     const x = tx as unknown as DB;
@@ -90,11 +93,12 @@ export async function cancelBoleto(db: DB, actorId: string, companyId: string, i
     if (!ch) throw new Invalid("Cobrança não encontrada");
     const [req] = await x.select().from(issuanceRequests).where(and(eq(issuanceRequests.companyId, companyId), eq(issuanceRequests.chargeId, input.chargeId), eq(issuanceRequests.kind, "boleto"), eq(issuanceRequests.status, "emitido")));
     if (!req || !req.externalRef) throw new Invalid("Esta cobrança não tem boleto emitido para cancelar");
+    if (req.mode !== pre.mode) throw new Invalid("O boleto mudou durante a operação. Tente de novo");
     const [{ paid }] = (await x.execute(sql`select count(*)::int paid from payments where company_id = ${companyId} and charge_id = ${input.chargeId} and status = 'ativo'`)) as unknown as { paid: number }[];
     if (paid > 0) throw new Invalid("Esta cobrança tem pagamento registrado. Estorne o pagamento antes de cancelar o boleto");
     const [open] = await x.select({ id: boletoCancellations.id }).from(boletoCancellations).where(and(eq(boletoCancellations.companyId, companyId), eq(boletoCancellations.requestId, req.id), inArray(boletoCancellations.status, ["enviando", "desconhecido", "cancelado"])));
     if (open) throw new Invalid("Já existe um cancelamento em andamento ou concluído para este boleto");
-    const [c] = await x.insert(boletoCancellations).values({ companyId, chargeId: input.chargeId, requestId: req.id, externalRef: req.externalRef, reason, requestedBy: actorId }).returning({ id: boletoCancellations.id });
+    const [c] = await x.insert(boletoCancellations).values({ companyId, chargeId: input.chargeId, requestId: req.id, externalRef: req.externalRef, mode: req.mode, reason, requestedBy: actorId }).returning({ id: boletoCancellations.id });
     await audit(x, companyId, actorId, "boleto.cancel_requested", { cancellationId: c.id, chargeId: input.chargeId, requestId: req.id });
     return { id: c.id, requestId: req.id, chargeId: input.chargeId, externalRef: req.externalRef, attempts: 1 };
   });
@@ -106,7 +110,9 @@ export async function cancelBoleto(db: DB, actorId: string, companyId: string, i
 export async function recheckCancellation(db: DB, actorId: string, companyId: string, cancellationId: string, providers?: Providers, now = new Date()) {
   await requirePerm(db, actorId, companyId, "boletos.cancel");
   if (!uuidOk(cancellationId ?? "")) throw new Invalid("Cancelamento não encontrado");
-  const prov = resolveProviders(providers);
+  const [mc] = await db.select({ mode: boletoCancellations.mode }).from(boletoCancellations).where(and(eq(boletoCancellations.id, cancellationId), eq(boletoCancellations.companyId, companyId)));
+  if (!mc) throw new Invalid("Cancelamento não encontrado");
+  const prov = await resolveProvidersForMode(db, companyId, mc.mode, providers);
   const row = await db.transaction(async (tx) => {
     const x = tx as unknown as DB;
     await lock(x, companyId);

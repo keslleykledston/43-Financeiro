@@ -19,6 +19,9 @@
 ## Estado da Cora (2026-10-28)
 Certificado de **produção** cadastrado (K3G Solutions). `cora-http.ts` valida a conexão e coleta boletos em **produção somente leitura**; emitir só existe contra o stage e **ainda não foi testado** (falta certificado de stage). Sonda: `docker compose --profile tools run --rm tools pnpm tsx scripts/ops-cora-probe.ts` (`OPS_CORA_ENV=homologacao OPS_CORA_CREATE=1` emite UM boleto de teste de R$ 5,00 no stage). Se um certificado for salvo no ambiente errado: `scripts/ops-cora-relabel.ts` (confirma por TLS).
 
+### Motor × Cora de testes (E10b-1)
+Em *Faturamento → Emissões → Controle*, o campo **Provedor de boleto** (diretoria) aceita *Simulado* (padrão) ou *Cora — testes (homologação)*. O segundo exige: `CORA_STAGE_ENABLED="true"` no compose, credencial de **Homologação** da empresa e nenhum boleto em andamento. O boleto nasce no stage da Cora (não é real). **Não existe modo de produção.** Para voltar: escolher *Simulado* (boletos já emitidos continuam ligados à Cora de testes para consultar/cancelar). Kill switch: pausar a emissão, ou `CORA_STAGE_ENABLED="false"` + restart do web (a rodada passa a falhar fechada).
+
 ## Escopo da Cora (decisão do dono, 2026-10-24)
 Só **boletos**: emitir, consultar situação (emitido/pago/atrasado), segunda via e **cancelar (somente diretoria, com motivo, tudo registrado; fase E20)**. **Nunca** pagamento, transferência, Pix enviado, saldo/extrato (por isso a conciliação não usa a API da Cora). Ver ADR-017. Definido em `src/modules/providers/cora.ts` (`CORA_SCOPE`) e coberto por teste.
 

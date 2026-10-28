@@ -20,17 +20,20 @@ export const CORA_TIMEOUT_MS = 30_000;
 const MAX_BODY = 2_000_000;
 
 export class CoraHttpError extends Error {
-  constructor(public status: number, message: string, public code?: string) { super(message); this.name = "CoraHttpError"; }
+  /** `code`: identificador curto da Cora (ex.: REC-0006). `field`: campo recusado na validação (ex.: paymentterms_duedate), já em formato seguro para guardar. */
+  constructor(public status: number, message: string, public code?: string, public field?: string) { super(message); this.name = "CoraHttpError"; }
 }
 /** Rede/timeout: o resultado da chamada é DESCONHECIDO (pode ter chegado à Cora). */
 export class CoraNetworkError extends Error { constructor(message: string) { super(message); this.name = "CoraNetworkError"; } }
 
-type Route = { method: "GET" | "POST"; re: RegExp };
+type Method = "GET" | "POST" | "DELETE";
+type Route = { method: Method; re: RegExp };
 const ROUTES: Route[] = [
   { method: "POST", re: /^\/token$/ },
   { method: "GET", re: /^\/v2\/invoices$/ },
   { method: "GET", re: /^\/v2\/invoices\/inv_[A-Za-z0-9_-]{4,64}$/ },
   { method: "POST", re: /^\/v2\/invoices$/ },
+  { method: "DELETE", re: /^\/v2\/invoices\/inv_[A-Za-z0-9_-]{4,64}$/ }, // cancelar boleto (só a diretoria chama, via fluxo E20/E30; bloqueado em produção)
 ];
 export const routeAllowed = (method: string, path: string) => ROUTES.some((r) => r.method === method && r.re.test(path));
 
@@ -59,15 +62,17 @@ function parseJson(raw: Raw): unknown {
   try { return raw.body ? JSON.parse(raw.body) : null; } catch { throw new CoraHttpError(raw.status, "Resposta da Cora não é JSON"); }
 }
 function fail(raw: Raw): never {
-  let code: string | undefined, msg = `Cora respondeu ${raw.status}`;
+  let code: string | undefined, field: string | undefined, msg = `Cora respondeu ${raw.status}`;
   try {
     const j = JSON.parse(raw.body) as { code?: string; error?: string; message?: string; errors?: { code?: string; message?: string }[] };
     const c = j.code ?? j.error;
     code = typeof c === "string" && /^[A-Za-z0-9_.:-]{1,60}$/.test(c) ? c : undefined; // só um identificador curto; texto livre (que poderia ecoar token) é descartado
     const first = j.errors?.[0];
+    const f = typeof first?.code === "string" ? first.code.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) : "";
+    field = f || undefined;
     msg = safeMsg([`Cora ${raw.status}`, j.message ?? j.error ?? "", first ? `${first.code ?? ""}: ${first.message ?? ""}` : ""].filter(Boolean).join(" — "));
   } catch { /* corpo não JSON: fica a mensagem padrão */ }
-  throw new CoraHttpError(raw.status, msg, code);
+  throw new CoraHttpError(raw.status, msg, code, field);
 }
 
 export type InvoiceStatus = "DRAFT" | "OPEN" | "IN_PAYMENT" | "LATE" | "PAID" | "CANCELLED";
@@ -76,6 +81,8 @@ export type Invoice = {
   customerName: string | null; digitable: string | null; barcode: string | null; pdfUrl: string | null;
 };
 
+/** CPF (11 dígitos) ou CNPJ (14; desde 2026 pode ter letras nas 12 primeiras posições): sem pontuação, em maiúsculas. */
+export const docOf = (raw: string) => raw.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
 const asObj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
 const str = (v: unknown) => (typeof v === "string" ? v : null);
 const int = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v) : 0);
@@ -96,10 +103,10 @@ export class CoraClient {
   constructor(private creds: Creds, private env: CoraEnvironment, private transport: Transport = httpsTransport, private now: () => number = Date.now) {
   }
 
-  private async send(method: "GET" | "POST", path: string, o: { headers?: Record<string, string>; body?: string } = {}): Promise<Raw> {
+  private async send(method: Method, path: string, o: { headers?: Record<string, string>; body?: string } = {}): Promise<Raw> {
     const bare = path.split("?")[0];
     if (!routeAllowed(method, bare)) throw new CoraHttpError(0, "Rota da Cora não permitida pelo escopo (somente boletos)");
-    if (method === "POST" && bare !== "/token" && READ_ONLY_ENVS.includes(this.env)) throw new CoraHttpError(0, "Emissão de boleto bloqueada em produção (somente leitura)");
+    if (method !== "GET" && bare !== "/token" && READ_ONLY_ENVS.includes(this.env)) throw new CoraHttpError(0, "Emissão/cancelamento de boleto bloqueados em produção (somente leitura)");
     return this.transport({ host: CORA_HOSTS[this.env], method, path, headers: { accept: "application/json", ...o.headers }, body: o.body, creds: this.creds });
   }
 
@@ -116,7 +123,7 @@ export class CoraClient {
     return { expiresInSec: exp };
   }
 
-  private async authed(method: "GET" | "POST", path: string, o: { headers?: Record<string, string>; json?: unknown } = {}): Promise<unknown> {
+  private async authed(method: Method, path: string, o: { headers?: Record<string, string>; json?: unknown } = {}): Promise<unknown> {
     await this.accessToken();
     const body = o.json === undefined ? undefined : JSON.stringify(o.json);
     const headers: Record<string, string> = { authorization: `Bearer ${this.token!.value}`, ...o.headers };
@@ -128,13 +135,14 @@ export class CoraClient {
   }
 
   /** Coleta (somente leitura). Filtros opcionais por vencimento (AAAA-MM-DD) e situação. */
-  async listInvoices(f: { start?: string; end?: string; state?: string; page?: number; perPage?: number } = {}): Promise<{ items: Invoice[]; totalItems: number | null }> {
+  async listInvoices(f: { start?: string; end?: string; state?: string; search?: string; page?: number; perPage?: number } = {}): Promise<{ items: Invoice[]; totalItems: number | null }> {
     const q = new URLSearchParams();
     if (f.start) q.set("start", f.start);
     if (f.end) q.set("end", f.end);
     if (f.state) q.set("state", f.state);
+    if (f.search) q.set("search", docOf(f.search)); // a Cora filtra por CPF/CNPJ do cliente
     q.set("page", String(f.page ?? 1));
-    q.set("perPage", String(Math.min(100, f.perPage ?? 20)));
+    q.set("perPage", String(Math.min(200, f.perPage ?? 20)));
     const j = asObj(await this.authed("GET", `/v2/invoices?${q}`));
     const items = (Array.isArray(j.items) ? j.items : []).map(normalizeInvoice);
     return { items, totalItems: typeof j.totalItems === "number" ? j.totalItems : null };
@@ -144,12 +152,17 @@ export class CoraClient {
     return normalizeInvoice(await this.authed("GET", `/v2/invoices/${id}`));
   }
 
+  /** Cancela um boleto ainda não pago (204 sem corpo). Só homologação; erro REC-0006 = já pago. */
+  async cancelInvoice(id: string): Promise<void> {
+    await this.authed("DELETE", `/v2/invoices/${id}`);
+  }
+
   /** Emite UM boleto. `idempotencyKey` deve ser UUID (a Cora usa para não duplicar se a resposta se perder). */
   async createInvoice(i: { idempotencyKey: string; code: string; amountCents: number; dueDate: string; customerName: string; customerDocument: string; description: string }): Promise<Invoice> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(i.idempotencyKey)) throw new RangeError("Idempotency-Key deve ser UUID");
     if (!Number.isSafeInteger(i.amountCents) || i.amountCents < 500) throw new RangeError("Boleto mínimo: R$ 5,00");
-    const digits = i.customerDocument.replace(/\D/g, "");
-    if (digits.length !== 11 && digits.length !== 14) throw new RangeError("Documento do cliente inválido");
+    const digits = docOf(i.customerDocument);
+    if (!(digits.length === 11 && /^\d+$/.test(digits)) && !(digits.length === 14 && /^[0-9A-Z]{12}\d{2}$/.test(digits))) throw new RangeError("Documento do cliente inválido");
     const body = {
       code: i.code,
       customer: { name: i.customerName, document: { identity: digits, type: digits.length === 11 ? "CPF" : "CNPJ" } },
