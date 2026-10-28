@@ -51,7 +51,7 @@ Saída: `/api/v1` com OpenAPI, API key hashed scopes/expiry/revocation, rate lim
 Aceite: contrato OpenAPI e testes auth/no cross-tenant/replay/idempotência; sandbox simulada.
 
 ## E10 — Emissão e envio REAL (GATE DE SEGURANÇA) [~]
-**E10a [x]** motor de emissão SIMULADO (reservar→chamar→registrar, reconsulta, idempotência, limites, pausa, checklist do portão, `docs/E10_GOLIVE.md`). **E10b [ ] BLOQUEADO** adaptadores reais: exigem credenciais, homologação e autorização escrita (ver go-live).
+**E10a [x]** motor de emissão SIMULADO (reservar→chamar→registrar, reconsulta, idempotência, limites, pausa, checklist do portão, `docs/E10_GOLIVE.md`). **E10b [~] PARCIAL** (2026-10-28): cliente HTTP da Cora pronto e validado em PRODUÇÃO somente leitura (token + coleta; ADR-032). Falta: certificado de STAGE para testar emissão/idempotência, adaptador `BoletoProvider` ligado ao motor (CHECK `mode`), webhooks, NFS-e, e autorização escrita para emitir de verdade.
 Pré-requisitos: disponibilidade documentada da API por CNPJ, homologação Cora e e-NF, calendário fiscal aprovado, credenciais guardadas fora Git, aprovação explícita de habilitação e limites de envio. Implementar um provedor por vez; flag desligada inicialmente.
 Aceite: emissão teste homologação, confirmação/reconsulta remota, comprovantes e falha segura, reconciliação, e-mails canários internos, kill switch; NUNCA executar em produção por conveniência.
 Pré-requisito (Codex E06, P2): antes de qualquer envio real, a FK `message_queue.charge_id` deve virar RESTRICT e `cancelBatch`/`generateBatch` devem marcar cobranças como `cancelada` em vez de apagar, preservando o histórico de envios.

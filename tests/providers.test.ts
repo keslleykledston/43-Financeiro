@@ -57,11 +57,12 @@ describe("E09 provedores simulados (contrato)", () => {
     expect(() => assertSimulated({ ...m, whatsapp: { mode: "live", send: async () => ({ ok: true, providerRef: "x" }) } }, {})).toThrow(/whatsapp/);
     expect(() => assertSimulated(m, { WHATSAPP_LIVE_ENABLED: "true" })).toThrow(LiveNotAvailable);
   });
-  it("rede só no adaptador de e-mail (E23): nenhum outro arquivo dos provedores abre conexão", () => {
+  it("rede só nos adaptadores reais (e-mail E23 e cliente Cora E10b): nenhum outro arquivo dos provedores abre conexão", () => {
     const dir = join(process.cwd(), "src/modules/providers");
     for (const f of readdirSync(dir)) {
       const src = readFileSync(join(dir, f), "utf8");
-      expect(src, f).not.toMatch(/\bfetch\s*\(|node:(http|https|tls|dgram)|from "(undici|axios|got)"|XMLHttpRequest/);
+      // cora-http.ts é o ÚNICO que fala HTTPS (mTLS), e só por node:https; nada de fetch/http/tls/dgram nem bibliotecas de terceiros
+      expect(src, f).not.toMatch(f === "cora-http.ts" ? /\bfetch\s*\(|node:(http|tls|dgram)["']|from "(undici|axios|got)"|XMLHttpRequest/ : /\bfetch\s*\(|node:(http|https|tls|dgram)|from "(undici|axios|got)"|XMLHttpRequest/);
       if (f !== "smtp.ts") expect(src, f).not.toMatch(/nodemailer|node:dns/); // só o adaptador SMTP resolve DNS e abre conexão
       if (f !== "net-guard.ts") expect(src, f).not.toMatch(/node:net/); // net-guard só usa isIPv4/isIPv6 (sem sockets)
     }

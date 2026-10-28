@@ -57,4 +57,9 @@ Regra: antes de `pnpm db:migrate` em produção, `scripts/backup.sh`. A reversã
 | 0040 | cria `contract_adjustment_rules` (regra de reajuste por contrato) e `contract_alert_snoozes` (alertas adiados/ignorados por ciclo) (E31) | `DROP TABLE contract_alert_snoozes; DROP TABLE contract_adjustment_rules;` (só anotações; não afetam valores nem cobranças). Backup antes. |
 | 0041 | gatilhos `BEFORE TRUNCATE` (função `forbid_truncate_guard`) nas 23 tabelas de registro imutável, inclusive `audit_log` (E32) | `DROP TRIGGER <tabela>_no_truncate_trg ON <tabela>;` (22 vezes) e `DROP FUNCTION forbid_truncate_guard();`. Depois de desfazer à mão, apague também o registro da migração (`DELETE FROM drizzle.__drizzle_migrations WHERE id = (SELECT max(id) FROM drizzle.__drizzle_migrations);`), senão o próximo `db:migrate` não recria os gatilhos. **Manutenção legítima que precise truncar** (raro; só com ordem do dono e backup): numa transação, `ALTER TABLE <t> DISABLE TRIGGER <t>_no_truncate_trg;` → truncar → `ENABLE TRIGGER` de novo. Banco com nome terminado em `_test` é isento. |
 
+### Cora (E10b-0) — operação, sem migração
+- Sonda (token + coleta, **somente leitura em produção**): `docker compose --profile tools run --rm tools pnpm tsx scripts/ops-cora-probe.ts`. Emissão de teste só no stage: `-e OPS_CORA_ENV=homologacao -e OPS_CORA_CREATE=1` (exige certificado de stage; boleto de R$ 5,00, cliente fictício).
+- Certificado salvo na aba errada: `OPS_FROM=homologacao OPS_TO=producao docker compose --profile tools run --rm -e OPS_FROM -e OPS_TO tools pnpm tsx scripts/ops-cora-relabel.ts` (confirma por TLS antes; auditado). Em 2026-10-28 o certificado da K3G Solutions foi movido de homologação para produção (backup k3gfinance-20261028T183735Z).
+- Rollback: `git revert` do commit. Nada do `web`/`scheduler` usa o cliente ainda.
+
 Cada nova migração deve acrescentar sua linha nesta tabela no mesmo commit.

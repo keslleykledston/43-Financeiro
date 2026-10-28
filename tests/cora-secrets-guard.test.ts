@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-// Quem pode importar `cora-secrets` (segredos em claro): só o adaptador real da Cora, quando existir (E10b). Hoje, ninguém.
-const AUTHORIZED: string[] = [];
+// Quem pode importar `cora-secrets` (segredos em claro): só o cliente HTTP da Cora (cora-http.ts, E10b).
+const AUTHORIZED: string[] = ["src/modules/providers/cora-http.ts"];
 const walk = (d: string): string[] => readdirSync(d).flatMap((n) => { const p = join(d, n); return statSync(p).isDirectory() ? walk(p) : /\.(ts|tsx)$/.test(n) ? [p] : []; });
 
 describe("segredos do e-mail (SMTP) em claro", () => {

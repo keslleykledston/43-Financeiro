@@ -16,6 +16,9 @@
 4. **WhatsApp (WAHA):** chave, número dedicado, lista de **opt-in** revisada, janelas e limites aprovados.
 5. **Autorização escrita da diretoria**, por provedor e por empresa, com limites de envio.
 
+## Estado da Cora (2026-10-28)
+Certificado de **produção** cadastrado (K3G Solutions). `cora-http.ts` valida a conexão e coleta boletos em **produção somente leitura**; emitir só existe contra o stage e **ainda não foi testado** (falta certificado de stage). Sonda: `docker compose --profile tools run --rm tools pnpm tsx scripts/ops-cora-probe.ts` (`OPS_CORA_ENV=homologacao OPS_CORA_CREATE=1` emite UM boleto de teste de R$ 5,00 no stage). Se um certificado for salvo no ambiente errado: `scripts/ops-cora-relabel.ts` (confirma por TLS).
+
 ## Escopo da Cora (decisão do dono, 2026-10-24)
 Só **boletos**: emitir, consultar situação (emitido/pago/atrasado), segunda via e **cancelar (somente diretoria, com motivo, tudo registrado; fase E20)**. **Nunca** pagamento, transferência, Pix enviado, saldo/extrato (por isso a conciliação não usa a API da Cora). Ver ADR-017. Definido em `src/modules/providers/cora.ts` (`CORA_SCOPE`) e coberto por teste.
 

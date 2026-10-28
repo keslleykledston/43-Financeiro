@@ -78,6 +78,8 @@ services:
       - .env.auth
       - path: .env.crm   # opcional: CRM_BASE_URL e CRM_API_TOKEN (somente leitura)
         required: false
+      - path: .env.credentials   # opcional: mesma chave do web, para os scripts de operação (ex.: sonda da Cora) abrirem as credenciais cifradas
+        required: false
     environment: *app-env
     depends_on:
       db: { condition: service_healthy }
