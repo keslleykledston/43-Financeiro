@@ -9,7 +9,7 @@ import { EmptyState } from "@/components/k3g/states";
 import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass, inputClass } from "@/components/k3g/button";
 import { BOLETO_PROVIDER_MODES, MODE_LABEL, coraStageOn } from "@/modules/providers/registry";
-import { cancelIssuanceAction, processIssuanceAction, saveIssuanceSettingsAction } from "./actions";
+import { cancelIssuanceAction, processIssuanceAction, saveIssuanceSettingsAction, syncBoletoStatusAction } from "./actions";
 
 const TONE: Record<string, StatusTone> = { pendente: "info", enviando: "info", processando: "warning", emitido: "positive", desconhecido: "warning", falhou: "negative", cancelado: "neutral" };
 const br = (d: string) => d.split("-").reverse().join("/");
@@ -18,6 +18,7 @@ function okText(ok?: string, stage = false) {
   const [k, ...n] = (ok ?? "").split(":"); const v = n.map(Number);
   if (k === "solicitado") return `${v[0]} solicitação(ões) criada(s).`;
   if (k === "rodada") return `${stage ? "Rodada na Cora de testes" : "Rodada simulada"}: ${v[0]} emitido(s), ${v[1]} em processamento, ${v[2]} a reconsultar, ${v[3]} para repetir, ${v[4]} com falha, ${v[5]} dispensado(s).${n[6] ? ` Aviso: ${decodeURIComponent(n[6])}.` : ""}`;
+  if (k === "sync") return `Situação conferida na Cora de testes: ${v[0]} boleto(s) consultado(s), ${v[1]} pago(s), ${v[2]} cancelado(s) lá fora, ${v[3]} com falha.${n[4] ? ` Aviso: ${decodeURIComponent(n[4])}` : ""}`;
   if (k === "cancelado") return "Solicitação cancelada.";
   if (k === "salvo") return "Configuração salva.";
   return "";
@@ -42,7 +43,7 @@ export default async function Emissoes({ searchParams }: { searchParams: Promise
       {sp.erro && <Callout tone="negative" role="alert">{sp.erro}</Callout>}
       {msg && <Callout tone="positive" role="status">{msg}</Callout>}
 
-      <SectionCard title="Controle" action={run ? <form action={processIssuanceAction}><button className={buttonClass("primary", "sm")}>Processar agora{stage ? " (Cora de testes)" : " (simulado)"}</button></form> : undefined}>
+      <SectionCard title="Controle" action={run ? <span className="flex gap-2">{stage && <form action={syncBoletoStatusAction}><button className={buttonClass("outline", "sm")}>Atualizar situação na Cora</button></form>}<form action={processIssuanceAction}><button className={buttonClass("primary", "sm")}>Processar agora{stage ? " (Cora de testes)" : " (simulado)"}</button></form></span> : undefined}>
         <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
           {st.paused ? <StatusPill tone="negative">Emissão pausada</StatusPill> : <StatusPill tone="positive">{stage ? "Emissão liberada (Cora de testes)" : "Emissão liberada (simulada)"}</StatusPill>}
           <span className="text-muted-foreground">Limite diário: {st.dailyLimit}</span>
@@ -71,7 +72,7 @@ export default async function Emissoes({ searchParams }: { searchParams: Promise
               <li key={i.id} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
                 <div>
                   <AppLink href={`/contas-a-receber/${i.chargeId}`} className="font-medium hover:underline">{i.customerName}</AppLink>
-                  <p className="text-xs text-muted-foreground">{KIND_LABEL[i.kind]}{i.kind === "boleto" && i.mode !== "simulado" ? ` (${MODE_LABEL[i.mode] ?? i.mode})` : ""} · vence {br(i.dueDate)} · {i.attempts} tentativa(s){i.lastError ? ` · ${i.lastError}` : ""}{i.externalRef ? ` · ref. ${i.externalRef}` : ""}</p>
+                  <p className="text-xs text-muted-foreground">{KIND_LABEL[i.kind]}{i.kind === "boleto" && i.mode !== "simulado" ? ` (${MODE_LABEL[i.mode] ?? i.mode})` : ""} · vence {br(i.dueDate)} · {i.attempts} tentativa(s){i.lastError ? ` · ${i.lastError}` : ""}{i.externalRef ? ` · ref. ${i.externalRef}` : ""}{i.mode !== "simulado" && i.externalStatus === "pago" ? " · na Cora: PAGO (confira e dê a baixa)" : ""}</p>
                 </div>
                 <span className="flex items-center gap-3"><Money cents={i.amountCents} /><StatusPill tone={TONE[i.status]}>{i.status === "emitido" && i.mode !== "simulado" ? "Emitido (Cora de testes)" : STATUS_LABEL[i.status]}</StatusPill>
                   {request && i.status === "pendente" && <form action={cancelIssuanceAction}><input type="hidden" name="id" value={i.id} /><button className={buttonClass("ghost", "sm")}>Cancelar</button></form>}</span>

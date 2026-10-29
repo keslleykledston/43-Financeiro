@@ -235,12 +235,12 @@ export async function processIssuance(db: DB, actorId: string, companyId: string
 export async function listIssuance(db: DB, actorId: string, companyId: string, status?: string) {
   await requirePerm(db, actorId, companyId, "issuance.read");
   const filter = status && Object.keys(STATUS_LABEL).includes(status) ? status : null;
-  const rows = (await db.execute(sql`select r.id, r.kind, r.mode, r.status, r.attempts, r.external_ref, r.last_error, r.next_attempt_at, r.created_at, r.charge_id, cu.display_name, c.amount::text, c.due_date::text
+  const rows = (await db.execute(sql`select r.id, r.kind, r.mode, r.status, r.attempts, r.external_ref, r.external_status, r.last_error, r.next_attempt_at, r.created_at, r.charge_id, cu.display_name, c.amount::text, c.due_date::text
     from issuance_requests r join charges c on c.company_id = r.company_id and c.id = r.charge_id join customers cu on cu.company_id = c.company_id and cu.id = c.customer_id
     where r.company_id = ${companyId} ${filter ? sql`and r.status = ${filter}` : sql``} order by r.created_at desc, r.id limit 300`)) as unknown as Row[];
   const counts = (await db.execute(sql`select status, count(*)::int n from issuance_requests where company_id = ${companyId} group by status`)) as unknown as { status: string; n: number }[];
   return {
-    items: rows.map((r) => ({ id: String(r.id), kind: r.kind as Kind, mode: String(r.mode), status: String(r.status), attempts: Number(r.attempts), externalRef: (r.external_ref as string | null) ?? null, lastError: (r.last_error as string | null) ?? null, nextAttemptAt: new Date(String(r.next_attempt_at)), chargeId: String(r.charge_id), customerName: String(r.display_name), amountCents: centsFromNumeric(String(r.amount)), dueDate: String(r.due_date) })),
+    items: rows.map((r) => ({ id: String(r.id), kind: r.kind as Kind, mode: String(r.mode), status: String(r.status), attempts: Number(r.attempts), externalRef: (r.external_ref as string | null) ?? null, externalStatus: (r.external_status as string | null) ?? null, lastError: (r.last_error as string | null) ?? null, nextAttemptAt: new Date(String(r.next_attempt_at)), chargeId: String(r.charge_id), customerName: String(r.display_name), amountCents: centsFromNumeric(String(r.amount)), dueDate: String(r.due_date) })),
     counts: Object.fromEntries(counts.map((c) => [c.status, c.n])) as Record<string, number>,
   };
 }

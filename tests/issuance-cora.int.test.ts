@@ -12,6 +12,7 @@ import { createContract, decideVersion, getContract } from "@/modules/contracts/
 import { approveBatch, generateBatch, getBatch } from "@/modules/billing/batches";
 import { listIssuance, processIssuance, requestBatchIssuance, saveIssuanceSettings } from "@/modules/issuance/service";
 import { cancelBoleto } from "@/modules/issuance/cancel";
+import { syncBoletoStatus } from "@/modules/issuance/sync";
 import { LiveNotAvailable, __setCoraTransportForTests } from "@/modules/providers/registry";
 import { saveCoraCredentials } from "@/modules/providers/cora-config";
 import { CORA_HOSTS, CoraNetworkError, type Transport } from "@/modules/providers/cora-http";
@@ -252,6 +253,63 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     expect((await db.select().from(schema.boletoCancellations).where(eq(schema.boletoCancellations.chargeId, c2.id)))[0].lastError).toBe("boleto_pago");
     expect((await reqs()).find((x) => x.id === r2.id)!.externalStatus).toBe("pago");
     expect(cora.calls.every((c) => c.host === CORA_HOSTS.homologacao)).toBe(true);
+  });
+
+  it("ATUALIZAR SITUAÇÃO (só consulta): pago → marca e para a régua sem criar baixa; cancelado lá fora → sai das ativas e permite novo boleto (g1); aberto → nada muda", async () => {
+    const batchId = await approvedBatch(); await useCora();
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, NOW);
+    const c1 = await chargeOf(cli1), c2 = await chargeOf(cli2);
+    const r1 = (await reqs()).find((x) => x.chargeId === c1.id)!, r2 = (await reqs()).find((x) => x.chargeId === c2.id)!;
+    await expect(syncBoletoStatus(db, asstA, A)).rejects.toThrow(); // assistente não roda
+    const calls0 = cora.calls.length;
+    expect(await syncBoletoStatus(db, gerA, A, NOW)).toMatchObject({ checked: 2, paid: 0, cancelled: 0, failed: 0, skipped: null }); // tudo OPEN: nada muda
+    expect((await reqs()).every((x) => x.status === "emitido" && x.externalStatus === "emitido")).toBe(true);
+    expect(cora.calls.slice(calls0).every((c) => c.method === "GET" || c.path === "/token")).toBe(true); // SÓ consulta
+    cora.inv.get(r1.externalRef!)!.status = "PAID"; // pago na Cora
+    cora.inv.get(r2.externalRef!)!.status = "CANCELLED"; // cancelado por fora
+    expect(await syncBoletoStatus(db, gerA, A, new Date(NOW.getTime() + 60_000))).toMatchObject({ checked: 2, paid: 1, cancelled: 1, failed: 0 });
+    const a = (await reqs()).find((x) => x.id === r1.id)!, b = (await reqs()).find((x) => x.id === r2.id)!;
+    expect(a).toMatchObject({ status: "emitido", externalStatus: "pago" });
+    expect(b).toMatchObject({ status: "cancelado", externalStatus: "cancelado" });
+    expect(await n("payments")).toBe(0); // NÃO cria baixa: isso é conferência humana
+    expect(await n("audit_log where action = 'boleto.paid_at_provider'")).toBe(1);
+    expect(await n("audit_log where action = 'boleto.cancelled_at_provider'")).toBe(1);
+    // repetir não reprocessa o pago nem o cancelado
+    expect(await syncBoletoStatus(db, gerA, A, new Date(NOW.getTime() + 120_000))).toMatchObject({ checked: 0, paid: 0, cancelled: 0 });
+    // cobrança sem boleto ativo pode ganhar outro (chave de nova geração)
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, new Date(NOW.getTime() + 3 * 60_000));
+    const again = (await reqs()).find((x) => x.chargeId === c2.id && x.status === "emitido")!;
+    expect(again.idempotencyKey).toBe(`boleto:${c2.id}:g1`);
+    expect(cora.calls.every((c) => c.host === CORA_HOSTS.homologacao)).toBe(true);
+  });
+
+  it("ATUALIZAR SITUAÇÃO não grava por cima de um cancelamento em andamento do mesmo boleto (corrida sync × cancelar)", async () => {
+    const batchId = await approvedBatch(); await useCora();
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, NOW);
+    const c1 = await chargeOf(cli1);
+    const r1 = (await reqs()).find((x) => x.chargeId === c1.id)!;
+    cora.inv.get(r1.externalRef!)!.status = "CANCELLED"; // a Cora já mostra cancelado...
+    await db.insert(schema.boletoCancellations).values({ companyId: A, chargeId: c1.id, requestId: r1.id, externalRef: r1.externalRef!, mode: "cora_homologacao", reason: "em andamento", requestedBy: dirA, status: "enviando" }); // ...mas o cancelamento da plataforma ainda está em curso
+    const o = await syncBoletoStatus(db, gerA, A, NOW);
+    expect(o.cancelled).toBe(0);
+    expect((await reqs()).find((x) => x.id === r1.id)!).toMatchObject({ status: "emitido" }); // não mexeu: quem decide é o cancelamento
+    await db.execute(sql`update boleto_cancellations set status = 'cancelado', resolved_at = now()`); // terminou
+    await db.update(schema.issuanceRequests).set({ status: "cancelado", externalStatus: "cancelado" }).where(eq(schema.issuanceRequests.id, r1.id));
+    expect(await syncBoletoStatus(db, gerA, A, new Date(NOW.getTime() + 60_000))).toMatchObject({ cancelled: 0 }); // nada a fazer
+  });
+
+  it("ATUALIZAR SITUAÇÃO com a chave do servidor desligada: não consulta nem altera nada (falha fechada, com aviso)", async () => {
+    const batchId = await approvedBatch(); await useCora();
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, NOW);
+    delete process.env.CORA_STAGE_ENABLED;
+    const calls0 = cora.calls.length;
+    const o = await syncBoletoStatus(db, gerA, A, NOW);
+    expect(o.checked).toBe(0); expect(o.skipped).toMatch(/desligada/);
+    expect(cora.calls.length).toBe(calls0);
   });
 
   it("boleto simulado antigo NÃO vai para a Cora: troca de provedor depois não muda o modo das linhas já emitidas", async () => {

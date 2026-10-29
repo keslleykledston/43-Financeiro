@@ -5,6 +5,7 @@ import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
 import { cancelIssuance, processIssuance, requestBatchIssuance, saveIssuanceSettings } from "@/modules/issuance/service";
+import { syncBoletoStatus } from "@/modules/issuance/sync";
 import { LiveNotAvailable } from "@/modules/providers/registry";
 
 // A empresa vem SEMPRE do contexto validado no servidor, nunca do formulário.
@@ -20,6 +21,11 @@ export async function requestBatchIssuanceAction(fd: FormData) {
 export async function processIssuanceAction() {
   let err = "", ok = "";
   try { const c = await ctx(); const r = await processIssuance(db, c.userId, c.companyId); ok = `rodada:${r.issued}:${r.processing}:${r.unknown}:${r.retry}:${r.failed}:${r.skipped}${r.waiting ? ":" + encodeURIComponent(r.waiting) : ""}`; } catch (e) { err = known(e); }
+  revalidatePath("/faturamento/emissoes"); go(err, ok);
+}
+export async function syncBoletoStatusAction() {
+  let err = "", ok = "";
+  try { const c = await ctx(); const r = await syncBoletoStatus(db, c.userId, c.companyId); ok = `sync:${r.checked}:${r.paid}:${r.cancelled}:${r.failed}${r.skipped ? ":" + encodeURIComponent(r.skipped) : ""}`; } catch (e) { err = known(e); }
   revalidatePath("/faturamento/emissoes"); go(err, ok);
 }
 export async function cancelIssuanceAction(fd: FormData) {
