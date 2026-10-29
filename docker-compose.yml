@@ -15,8 +15,8 @@ x-app-env: &app-env
   CORA_LIVE_ENABLED: "false"
   # Cora de TESTES (stage): permite que uma empresa escolha "Cora — testes (homologação)" como provedor de boleto (diretoria, auditado). Não existe produção.
   CORA_STAGE_ENABLED: "true"
-  # E10b-6 — EMISSÃO REAL na Cora de PRODUÇÃO. Vem DESLIGADA. Ligar exige decisão do dono (ver docs/E10_GOLIVE.md): ligada, uma empresa ainda precisa ser "armada" pela diretoria na tela de Emissões.
-  CORA_PROD_EMISSION_ENABLED: "false"
+  # E10b-6 — EMISSÃO REAL na Cora de PRODUÇÃO. LIGADA em 2026-10-28 por ordem do dono ("Ligue a chave"). Ligada, nenhuma empresa emite: cada uma precisa ser "armada" pela diretoria (frase digitada) na tela de Emissões, em modo canário (3/dia), com confirmação a cada rodada. Kill switch: voltar para "false" + restart de web e scheduler (ou CORA_LIVE_ENABLED="true" = emergência geral).
+  CORA_PROD_EMISSION_ENABLED: "true"
   FISCAL_LIVE_ENABLED: "false"
   WHATSAPP_LIVE_ENABLED: "false"
 

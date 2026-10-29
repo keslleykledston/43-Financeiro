@@ -24,8 +24,8 @@ describe("escrita em PRODUÇÃO da Cora (E10b-6)", () => {
     const allowed = ["src/modules/providers/registry.ts", "src/modules/issuance/webhooks.ts", "src/modules/providers/cora-http.ts"];
     expect(users.map((f) => f.replace(/\\/g, "/")).filter((f) => !allowed.includes(f))).toEqual([]);
   });
-  it("a chave do servidor vem desligada no compose e nenhum arquivo de src/ a liga", () => {
-    expect(readFileSync("docker-compose.yml", "utf8")).toMatch(/CORA_PROD_EMISSION_ENABLED:\s*"false"/);
+  it("a chave do servidor só é definida no compose (decisão do dono, com commit) e nenhum arquivo de src/ a liga", () => {
+    expect(readFileSync("docker-compose.yml", "utf8")).toMatch(/^\s*CORA_PROD_EMISSION_ENABLED:\s*"(true|false)"\s*$/m);
     expect(walk("src").filter((f) => /env\.CORA_PROD_EMISSION_ENABLED\s*=[^=]/.test(readFileSync(f, "utf8")))).toEqual([]);
   });
 });
