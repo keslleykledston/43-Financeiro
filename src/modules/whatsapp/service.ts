@@ -79,7 +79,7 @@ export async function createSession(db: DB, actorId: string, companyId: string, 
 }
 
 /** Aplica o resultado da WAHA à linha (status, telefone mascarado, última leitura). Falha da WAHA vira "com problema" com código curto, nunca o corpo. */
-async function syncFromWaha(db: DB, sessionId: string, name: string, op: (w: WahaClient) => Promise<{ status: string; meId: string | null; engine: string | null } | null>, deps?: Deps): Promise<{ status: SessionStatus; wahaDown: boolean }> {
+export async function syncFromWaha(db: DB, sessionId: string, name: string, op: (w: WahaClient) => Promise<{ status: string; meId: string | null; engine: string | null } | null>, deps?: Deps): Promise<{ status: SessionStatus; wahaDown: boolean }> {
   try {
     const r = await op(clientOf(deps));
     const status: SessionStatus = r ? mapWahaStatus(r.status) : "DISCONNECTED";

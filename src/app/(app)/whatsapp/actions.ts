@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
+import { assignTriage, discardTriage, markDispute, optOutFromInbox, setHandling } from "@/modules/whatsapp/inbound";
 import { cancelOutbox, dispatchOutbox, queueCustomerMessage, resolveUnknown, saveCompanySettings } from "@/modules/whatsapp/outbound";
 import { ensureWhatsappDefaults } from "@/modules/messaging/service";
 import { bindCompany, createSession, disconnectSession, recordConsent, revokeAuthorization, saveAuthorization, sendTest, setPaused, settleStaleSends, startSession, unbindCompany } from "@/modules/whatsapp/service";
@@ -136,4 +137,30 @@ export async function settleStaleOutboxAction() {
   let err = "";
   try { const c = await ctx(); await settleStaleSends(db, c.userId, c.companyId); } catch (e) { err = known(e); }
   revalidatePath("/whatsapp/historico"); histBack(err, "reservas");
+}
+
+// ---------- W3b: caixa de entrada e triagem ----------
+const inboxBack = (err: string, ok = "") => redirect(`/whatsapp/entrada${err ? `?erro=${encodeURIComponent(err)}` : ok ? `?ok=${ok}` : ""}`);
+export async function handleInboxAction(fd: FormData) {
+  let err = "";
+  try {
+    const c = await ctx(); const id = text(fd, "id", 40), op = text(fd, "op", 20);
+    if (op === "atender") await setHandling(db, c.userId, c.companyId, id, { handling: "em_atendimento" });
+    else if (op === "resolver") await setHandling(db, c.userId, c.companyId, id, { handling: "resolvido" });
+    else if (op === "contestacao") await markDispute(db, c.userId, c.companyId, id, true);
+    else if (op === "limpar_contestacao") await markDispute(db, c.userId, c.companyId, id, false);
+    else if (op === "parar_empresa") await optOutFromInbox(db, c.userId, c.companyId, id, "company");
+    else if (op === "parar_todas") await optOutFromInbox(db, c.userId, c.companyId, id, "global");
+    else throw new Invalid("Ação inválida");
+  } catch (e) { err = known(e); }
+  revalidatePath("/whatsapp/entrada"); inboxBack(err, "ok");
+}
+export async function triageAction(fd: FormData) {
+  let err = "";
+  try {
+    const c = await ctx(); const id = text(fd, "id", 40);
+    if (text(fd, "op", 10) === "descartar") await discardTriage(db, c.userId, id);
+    else await assignTriage(db, c.userId, id, text(fd, "companyId", 40));
+  } catch (e) { err = known(e); }
+  revalidatePath("/whatsapp/entrada"); inboxBack(err, "ok");
 }

@@ -11,6 +11,7 @@ async function main() {
   const { applyDueAmendments } = await import("../src/modules/contracts/service");
   const { syncAllAuto } = await import("../src/modules/issuance/sync");
   const { processWebhookEvents } = await import("../src/modules/issuance/webhooks");
+  const { processPendingInbound } = await import("../src/modules/whatsapp/inbound");
   const syncEvery = Math.max(300, Number(process.env.CORA_SYNC_INTERVAL_SECONDS ?? 600)) * 1000; // baixa automática: consulta a Cora a cada 10 min (mínimo 5)
   let lastSync = 0;
   const every = Math.max(15, Number(process.env.SCHEDULER_INTERVAL_SECONDS ?? 60)) * 1000;
@@ -21,6 +22,7 @@ async function main() {
   while (!stop) {
     try { const n = await applyDueAmendments(db, null); if (n > 0) log({ event: "scheduler.amendments_applied", count: n }); } catch (e) { log({ event: "scheduler.amendments_error", kind: (e as Error).name }); }
     try { const w = await processWebhookEvents(db); if (w.processed + w.ignored + w.errors > 0) log({ event: "scheduler.cora_webhooks", ...w }); } catch (e) { log({ event: "scheduler.cora_webhooks_error", kind: (e as Error).name }); }
+    try { const n = await processPendingInbound(db); if (n > 0) log({ event: "scheduler.whatsapp_inbound", pending: n }); } catch (e) { log({ event: "scheduler.whatsapp_inbound_error", kind: (e as Error).name }); } // respostas do WhatsApp que ficaram pendentes (ex.: WAHA fora do ar na hora)
     if (Date.now() - lastSync >= syncEvery) {
       lastSync = Date.now();
       try { const s = await syncAllAuto(db); if (s.companies > 0) log({ event: "scheduler.cora_sync", ...s }); } catch (e) { log({ event: "scheduler.cora_sync_error", kind: (e as Error).name }); }

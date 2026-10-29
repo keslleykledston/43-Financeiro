@@ -31,6 +31,7 @@ x-env: &env
   WHATSAPP_MODULE_ENABLED: "true"
   WHATSAPP_SEND_ENABLED: "true"   # só no sandbox (WAHA falsa); em produção fica "false" até ordem do dono
   WHATSAPP_AUTOMATION_ENABLED: "false"
+  WHATSAPP_HOOK_HMAC_KEY: sandbox-hmac-key-0123456789abcdef   # só no sandbox (o e2e assina avisos com ela)
 
 services:
   sandbox-db:
@@ -74,6 +75,7 @@ services:
       FAKE_CRM_URL: http://sandbox-crm:4000
       FAKE_WAHA_URL: http://waha:3000
       FAKE_WAHA_KEY: sandbox-waha-key
+      WAHA_HOOK_HMAC_KEY: sandbox-hmac-key-0123456789abcdef
       CI: "1"
     depends_on: { sandbox-web: { condition: service_healthy } }
     command: ["sh", "-c", "npx playwright test; rc=$$?; chown -R 1000:1000 e2e-results 2>/dev/null; exit $$rc"]

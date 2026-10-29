@@ -11,6 +11,7 @@ import { render, validateTemplate, type Vars } from "@/modules/messaging/templat
 import { holidays } from "@/lib/db/schema";
 import { wahaConfigured } from "@/modules/providers/waha";
 import { CAPS, maskPhone, parseBrPhone, refHash, type Check, type ConsentState } from "./domain";
+import { hasOpenReply } from "./inbound";
 import { audit, bound, clean, clientOf, consentState, deliverViaWaha, envOf, manausDay, moduleOn, refreshSession, sendOn, usedToday, type Deps } from "./service";
 import { createHash } from "node:crypto";
 
@@ -142,6 +143,10 @@ export async function evaluateCustomerSend(db: DB, actorId: string, companyId: s
   const consent: ConsentState = digits ? (await consentState(db, companyId, digits)).state : "none";
   add("consent", consent === "opt_in", "Consentimento do contato", consent === "opt_in" ? undefined : consent === "none" ? "Sem consentimento registrado (WhatsApp → Consentimentos)" : "Este contato pediu para não receber mensagens", consent === "none" ? "sem_consentimento" : "optout");
 
+  // resposta do cliente ainda não resolvida (ou contestação): suspende a cobrança até alguém resolver na Caixa de entrada (bloqueio TEMPORÁRIO: a mensagem espera na fila)
+  const openReply = digits ? await hasOpenReply(db, companyId, digits) : false;
+  add("reply_pending", !openReply, "Sem resposta do cliente pendente", openReply ? "O cliente respondeu (ou há contestação) e a conversa não foi resolvida: veja WhatsApp → Caixa de entrada" : undefined);
+
   // modelo + texto
   let text = "", milestone: string | null = null, tplOk = false;
   const tpls = (await listTemplates(db, actorId, companyId)).filter((t) => t.channel === "whatsapp");
@@ -264,6 +269,7 @@ export async function dispatchOutbox(db: DB, actorId: string, companyId: string,
     const ch = await loadCharge(db, companyId, row.chargeId);
     const consent = await consentState(db, companyId, row.phone);
     const stt = await getSettings(db, actorId, companyId);
+    if (await hasOpenReply(db, companyId, row.phone)) return "bloqueado_antes_de_enviar";
     return !sendOn(env) || s?.p !== false || s?.st !== "CONNECTED" || !b || !cs.sendEnabled || stt.paused || !ch || ch.cs !== "aprovada" || ch.bs !== "aprovado" || openCents(ch) <= 0 || consent.state !== "opt_in" ? "bloqueado_antes_de_enviar" : null;
   };
   const out = await deliverViaWaha(db, { session: ev.ctx.session, digits: row.phone, text, deps, recheckBefore: recheck, recheckAfterCheck: recheck });

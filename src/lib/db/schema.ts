@@ -1267,6 +1267,48 @@ export const whatsappOutbox = pgTable("whatsapp_outbox", {
   check("whatsapp_outbox_finished_chk", sql`(${t.status} in ('enviado', 'desconhecido', 'falhou', 'suprimido', 'cancelado')) = (${t.finishedAt} is not null)`),
 ]);
 
+// W3b — eventos que a WAHA envia (webhook assinado com HMAC): respostas de clientes, confirmações de entrega/leitura e mudança de estado da conexão. Guarda só o que o produto usa
+// (telefone, texto da resposta CIFRADO, classificação); nunca o corpo bruto. `event_key` (id do evento da WAHA) é único: o mesmo aviso duas vezes vira um registro só.
+// `company_id` só é preenchido quando o roteamento é DETERMINÍSTICO (conversa recente ou contato único); senão o item fica na TRIAGEM (sem empresa) e nenhuma empresa o vê.
+export const whatsappInboundEvents = pgTable("whatsapp_inbound_events", {
+  ...base,
+  eventKey: text("event_key").notNull(),
+  eventType: text("event_type").notNull(), // message | message.ack | session.status
+  providerSession: text("provider_session").notNull(),
+  sessionId: uuid("session_id").references(() => whatsappSessions.id),
+  companyId: uuid("company_id").references(() => companies.id),
+  customerId: uuid("customer_id"),
+  peer: text("peer"), // id de conversa como a WAHA mandou (…@c.us, …@s.whatsapp.net ou …@lid): serve para tentar de novo a resolução do telefone
+  phone: text("phone"), // dígitos com DDI, quando deu para resolver
+  phoneMasked: text("phone_masked"),
+  refHash: text("ref_hash"), // SHA-256 (32 hex) do id da mensagem (confirmações de entrega/leitura casam com whatsapp_outbox.provider_ref)
+  ack: text("ack"), // entregue | lido (só em confirmações)
+  kind: text("kind").notNull().default("texto"), // texto | midia | outro
+  bodyEnc: text("body_enc"), // texto da resposta, cifrado (secretbox)
+  classification: text("classification"), // resposta | opt_out | opt_out_ambiguo | ack | sessao | ignorada | sem_numero
+  routing: text("routing").notNull().default("pendente"), // pendente | atribuida | triagem | ignorada | descartada | atribuida_manual
+  handling: text("handling").notNull().default("novo"), // novo | em_atendimento | resolvido (só respostas humanas atribuídas)
+  dispute: boolean("dispute").notNull().default(false), // contestação: suspende cobrança até resolver
+  needsReview: boolean("needs_review").notNull().default(false),
+  optoutApplied: text("optout_applied"), // company | global (pedido de parar registrado automaticamente)
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+  attempts: integer("attempts").notNull().default(0),
+  error: text("error"),
+  eventAt: timestamp("event_at", { withTimezone: true }), // horário do evento informado pela WAHA
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
+  uniqueIndex("whatsapp_inbound_event_key_uq").on(t.eventKey),
+  index("whatsapp_inbound_company_idx").on(t.companyId, t.routing, t.handling, t.createdAt),
+  index("whatsapp_inbound_phone_idx").on(t.phone, t.createdAt),
+  index("whatsapp_inbound_pending_idx").on(t.routing, t.createdAt),
+  check("whatsapp_inbound_type_chk", sql`${t.eventType} in ('message', 'message.ack', 'session.status')`),
+  check("whatsapp_inbound_kind_chk", sql`${t.kind} in ('texto', 'midia', 'outro')`),
+  check("whatsapp_inbound_routing_chk", sql`${t.routing} in ('pendente', 'atribuida', 'triagem', 'ignorada', 'descartada', 'atribuida_manual')`),
+  check("whatsapp_inbound_handling_chk", sql`${t.handling} in ('novo', 'em_atendimento', 'resolvido')`),
+  check("whatsapp_inbound_optout_chk", sql`${t.optoutApplied} is null or ${t.optoutApplied} in ('company', 'global')`),
+  check("whatsapp_inbound_key_chk", sql`char_length(${t.eventKey}) between 3 and 120`),
+]);
+
 // H1 — histórico a partir da planilha de boletos (docs/HISTORICO_E_CAIXA.md). STAGING imutável: cada linha da planilha como veio, por empresa. NÃO é cobrança nem
 // contrato: nada aqui alimenta lotes, régua, emissão, contas a receber ou painel. Serve ao relatório de divergências e (H2/H3, com autorização própria) à carga histórica.
 // D3 — staging do histórico de DESPESAS (planilha Despesas__2026). Imutável como o H1; NÃO cria conta a pagar, sócio, lançamento nem fornecedor.

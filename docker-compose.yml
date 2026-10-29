@@ -99,6 +99,9 @@ services:
       WAHA_DASHBOARD_ENABLED: "false"
       WHATSAPP_SWAGGER_ENABLED: "false"
       WAHA_PRINT_QR: "false"
+      # W3b — a WAHA avisa o NOSSO receptor (rede interna k3g_finance; assinatura HMAC-SHA512 com WHATSAPP_HOOK_HMAC_KEY, que fica em .env.waha junto da chave da API).
+      WHATSAPP_HOOK_URL: "http://web:3150/api/v1/webhooks/waha"
+      WHATSAPP_HOOK_EVENTS: "message,message.ack,session.status"
       TZ: America/Manaus
     expose: ["3000"]
     volumes:

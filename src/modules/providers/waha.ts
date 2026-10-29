@@ -54,6 +54,8 @@ export interface WahaClient {
    * falha com "no LID found". Devolve o id canônico individual (`55…@c.us`) que a WAHA conhece para o número (resolve a diferença do 9º dígito), ou null se não existe.
    */
   checkNumber(session: string, digits: string): Promise<{ exists: boolean; chatId: string | null }>;
+  /** Telefone (dígitos com DDI) de um id interno `…@lid` (respostas chegam com ele). null se a WAHA não souber. Só consulta; nunca lista os contatos. */
+  resolveLid(session: string, lid: string): Promise<string | null>;
   sendText(m: { session: string; chatId: string; text: string }): Promise<SendResult>;
 }
 
@@ -132,6 +134,14 @@ export function createWahaClient(env: WahaEnv = process.env, fetchImpl: Fetch = 
       const j = asJson(r) as { numberExists?: unknown; pn?: unknown };
       if (j.numberExists !== true) return { exists: false, chatId: null };
       return { exists: true, chatId: typeof j.pn === "string" && CHAT_ID.test(j.pn) ? j.pn : null }; // pn fora do formato individual = não usar
+    },
+    async resolveLid(session, lid) {
+      if (!/^\d{5,20}@lid$/.test(lid)) throw new WahaError("blocked", 0, "lid_invalido");
+      const r = await call("GET", `/api/${must(session)}/lids/${lid}`);
+      if (r.status === 404) return null;
+      const j = asJson(ok(r)) as { pn?: unknown };
+      const m = typeof j.pn === "string" ? /^(55\d{10,11})@c\.us$/.exec(j.pn) : null;
+      return m ? m[1] : null;
     },
     async sendText(m) {
       if (!SESSION_NAME.test(m.session)) return { ok: false, retryable: false, error: "nome_de_sessao_invalido" };
