@@ -23,6 +23,13 @@ O QR e a chave da WAHA ficam só no servidor: a tela recebe o QR por uma rota au
 | Desconectada | O número saiu ou a conexão foi parada. Use **Iniciar / conectar**. |
 | Com problema | A WAHA não respondeu ou deu erro. Tente de novo; se persistir, avise a equipe técnica. |
 
+## Usar a mesma conexão em mais de uma empresa
+Um número, **um QR só**: a diretoria pode **vincular outra empresa** do grupo à conexão (cartão da conexão → *Vincular outra empresa*). Não precisa conectar de novo.
+- Exige **diretoria nas duas empresas** (a da conexão e a que entra) e a confirmação de que as duas autorizam o uso compartilhado.
+- Cada empresa tem o **seu nome de remetente** (o cliente vê quem cobra, por exemplo «Financeiro K3G Call»), a **sua autorização de envio**, os **seus consentimentos** e o **seu histórico**. Uma empresa nunca vê os dados da outra.
+- O que é **compartilhado**: o número, o aparelho, o **limite diário da conexão** (20 por dia somando todas as empresas) e o **risco de restrição** do WhatsApp: se o número for restringido, todas param.
+- A empresa pode **sair** da conexão (*Tirar esta empresa desta conexão*): os envios dela são bloqueados na hora e o histórico fica. A última empresa não pode sair: use *Desconectar número*.
+
 ## Pausar, liberar e desconectar
 - **Pausar envios** bloqueia qualquer envio por aquela conexão, na hora.
 - **Liberar envios** só funciona com a conexão **Conectada**; as outras travas continuam valendo.
@@ -41,6 +48,7 @@ O teste existe para provar que a conexão funciona, **com texto fixo e sem dado 
 - envios da empresa pausados (Mensagens → Configuração);
 - autorização ausente ou número fora da lista; número inválido;
 - fora da janela de envio (horário, dia da semana, feriado, em Manaus);
+- contato que **pediu para parar** (prevalece sobre a autorização; veja *Consentimentos*);
 - número que não existe no WhatsApp, ou que a consulta devolve diferente do autorizado;
 - limite diário atingido: o da autorização, **10 por empresa** e **20 por conexão** (a conexão pode ser compartilhada entre empresas).
 

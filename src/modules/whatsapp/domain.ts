@@ -71,3 +71,27 @@ export function sameBrNumber(a: string, b: string): boolean {
   if (!long || !short) return false;
   return long.slice(2, 4) === short.slice(2, 4) && long[4] === "9" && long.slice(5) === short.slice(4) && /^[6-9]/.test(short.slice(4));
 }
+
+export const EVIDENCE_SOURCES = ["verbal", "escrito", "formulario", "cliente_iniciou"] as const;
+export type EvidenceSource = (typeof EVIDENCE_SOURCES)[number];
+export const EVIDENCE_LABEL: Record<EvidenceSource, string> = { verbal: "Autorização verbal (anotada)", escrito: "Autorização por escrito (e-mail, contrato)", formulario: "Formulário assinado/online", cliente_iniciou: "Cliente iniciou a conversa" };
+/** Estado do contato para esta empresa: o evento mais recente vale; opt-out GLOBAL do número prevalece sobre tudo. */
+export type ConsentState = "opt_in" | "opt_out_company" | "opt_out_global" | "none";
+export const CONSENT_LABEL: Record<ConsentState, string> = { opt_in: "Consentiu", opt_out_company: "Pediu para parar (esta empresa)", opt_out_global: "Pediu para parar (todas as empresas)", none: "Sem consentimento" };
+export const BLOCK_REASON_LABEL: Record<string, string> = {
+  server_flag: "Chave de envio do servidor desligada", module: "Módulo/WAHA não configurados", bound: "Conexão sem vínculo com a empresa", session_active: "Conexão pausada", session_connected: "Conexão não conectada",
+  company_active: "Envios da empresa pausados", authorization: "Sem autorização de envio", phone: "Número inválido", allowed: "Número fora da lista autorizada", optout: "Contato pediu para não receber",
+  window: "Fora da janela de envio", cap_auth: "Limite da autorização", cap_company: "Limite diário da empresa", cap_session: "Limite diário da conexão",
+};
+
+/** A prova do consentimento é uma REFERÊNCIA («e-mail de 28/10», «contrato 123»), nunca dado pessoal: recusa e-mail, telefone, CPF/CNPJ e sequências longas de dígitos. Datas e números curtos passam. */
+export function looksLikePii(ref: string): boolean {
+  if (/[^\s@]+@[^\s@]+/.test(ref)) return true;                                   // e-mail
+  if (/\d{3}\.?\d{3}\.?\d{3}-?\d{2}(?!\d)/.test(ref)) return true;                 // CPF
+  if (/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/.test(ref)) return true;              // CNPJ
+  if (/(?:\+?55\s?)?\(?\d{2}\)?\s?9?\d{4}[-\s]?\d{4}(?!\d)/.test(ref)) return true; // telefone
+  if (/\d{9,}/.test(ref.replace(/[\s.\-()/]/g, ""))) return true;                  // qualquer sequência longa
+  return false;
+}
+/** Para DESFAZER um pedido de parar global: só prova escrita ou iniciada pelo próprio cliente (nunca «verbal»). */
+export const GLOBAL_OPT_IN_SOURCES: readonly EvidenceSource[] = ["escrito", "formulario", "cliente_iniciou"];

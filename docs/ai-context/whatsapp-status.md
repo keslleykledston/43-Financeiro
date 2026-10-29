@@ -6,7 +6,10 @@ Sem segredos, QR ou telefones. Atualizado: 2026-10-29.
 - **Chaves:** `WHATSAPP_MODULE_ENABLED=true` (só gerencia), `WHATSAPP_SEND_ENABLED=true` (ligada por ordem do dono em 2026-10-29; só envio manual de teste autorizado), `WHATSAPP_AUTOMATION_ENABLED=false`, antiga `WHATSAPP_LIVE_ENABLED=false` (NÃO ligar: recusa toda emissão real).
 - **WAHA:** `devlikeapro/waha:gows-2026.8.2` por digest, serviço `waha` no compose, sem porta publicada, chave em `.env.waha` (não ler).
 - **Regras que não mudam:** sem evasão de bloqueio, sem massa/grupos/mídia; opt-out prevalece; resultado ambíguo = `desconhecido` sem retry; empresa nunca vê dados de outra; texto/telefone completo fora de log.
-- **Próximo:** entrega 2 (vínculo de 2ª empresa com diretoria das duas, consentimento/opt-out por contato, UI de bloqueios). Antes: validar com o dono o pareamento real do número e o envio de teste.
+- **Entrega 2 (vínculo entre empresas + consentimento/opt-out + bloqueios): implementada** — `bindCompany`/`unbindCompany`, `whatsapp_consents` (0047), `/whatsapp/consentimentos`. Opt-out global prevalece; envio a cliente (entregas 3/4) exigirá opt-in da empresa.
+- **Próximo (antigo):** entrega 2 (vínculo de 2ª empresa com diretoria das duas, consentimento/opt-out por contato, UI de bloqueios). Antes: validar com o dono o pareamento real do número e o envio de teste.
 - **Gate por entrega:** `pnpm sandbox` PASS → Codex read-only → backup → migração → deploy → smoke → docs (NOW, BACKLOG, OPERACAO, DECISIONS, review) → commit + push (sem tag/force).
 
 - **Lição do 1º envio real:** o motor GOWS só envia após resolver o número (`/api/contacts/check-exists`); contas antigas existem sem o 9º dígito — aceitar só a equivalência oficial e só para o número autorizado (`sameBrNumber`). Erro 500 da WAHA continua tratado como «desconhecido» (nunca reenviar sozinho).
+
+- **Próximo real:** entrega 3 (modelos/aprovação, fila/outbox, receptor de webhook HMAC sha512 — hash do id: `refHash`, caixa de entrada/triagem; opt-out por resposta «PARAR»).

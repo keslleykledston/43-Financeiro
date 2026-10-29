@@ -199,7 +199,7 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [ ] **E-mail real**: enviar boleto (link/PDF da Cora), lembretes de vencimento e cobranças pela régua. Reusa o adaptador SMTP (E23, canário) + "Ver dados do boleto" (E10b-3). Exige autorização escrita, SPF/DKIM/DMARC e lista de destinatários; boleto no corpo/anexo só depois do canário de e-mail.
 - [ ] **WhatsApp (WAHA)** — pacote em 4 entregas (docs/architecture/ADR-whatsapp-001.md):
   - [x] **W1 (2026-10-29)**: conexão por QR, estado ao vivo, pausar/desconectar, autorização de envio, lista de verificação e envio MANUAL de teste; migração 0046. **Validado com aparelho real**: pareamento aceito e mensagem de teste entregue às 15:28 (Manaus) após a consulta prévia do número. `WHATSAPP_SEND_ENABLED` ligada por ordem do dono (canário).
-  - [ ] W2: vínculo de 2ª empresa (diretoria das duas), consentimento/opt-out por contato, UI de bloqueios.
+  - [x] **W2 (2026-10-29)**: vínculo de 2ª empresa à mesma conexão (diretoria das duas), consentimento/opt-out por contato (empresa ou global), opt-out prevalece no envio, quadro de bloqueios; migração 0047.
   - [ ] W3: modelos/aprovação, fila/outbox, webhook com HMAC (sha512 do corpo bruto), caixa de entrada e triagem.
   - [ ] W4: régua D-3/D0/D+3 DESATIVADA por padrão, releitura da dívida no envio, cancelamento por baixa da Cora, painel.
 - [ ] Canário de emissão com **clientes reais** (lote 01/11, venc. 13–16/11): roteiro em docs/E10_GOLIVE.md; sem emissão manual da empresa durante a rodada.

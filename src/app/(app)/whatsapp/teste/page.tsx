@@ -3,7 +3,7 @@ import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
-import { evaluateTestSend, getAuthorization, listSendLog, listSessions } from "@/modules/whatsapp/service";
+import { evaluateTestSend, getAuthorization, listSendLog, listSessions, recentBlocks } from "@/modules/whatsapp/service";
 import { Callout, PageHeader, SectionCard, StatusPill, type StatusTone } from "@/components/k3g/primitives";
 import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass, inputClass, selectClass } from "@/components/k3g/button";
@@ -16,7 +16,7 @@ export default async function TesteWhatsApp({ searchParams }: { searchParams: Pr
   const [sp, ctx] = await Promise.all([searchParams, requireContext()]);
   const role = ctx.current ? await activeRole(db, ctx.user.id, ctx.current.id) : null;
   if (!ctx.current || !role || !can(role, "whatsapp.read")) return <Callout tone="warning">Seu papel não tem acesso ao WhatsApp.</Callout>;
-  const [auth, sessions, log] = await Promise.all([getAuthorization(db, ctx.user.id, ctx.current.id), listSessions(db, ctx.user.id, ctx.current.id), listSendLog(db, ctx.user.id, ctx.current.id, 10)]);
+  const [auth, sessions, log, blocks] = await Promise.all([getAuthorization(db, ctx.user.id, ctx.current.id), listSessions(db, ctx.user.id, ctx.current.id), listSendLog(db, ctx.user.id, ctx.current.id, 10), recentBlocks(db, ctx.user.id, ctx.current.id, 8)]);
   const send = can(role, "whatsapp.send"), authorize = can(role, "whatsapp.authorize");
   const sessionId = String(sp.sessionId ?? "").slice(0, 40), phone = String(sp.phone ?? "").slice(0, 40);
   const ev = send && sessionId ? await evaluateTestSend(db, ctx.user.id, ctx.current.id, { sessionId, phone }) : null;
@@ -61,6 +61,15 @@ export default async function TesteWhatsApp({ searchParams }: { searchParams: Pr
           <SendForm sessions={sessions.map((s) => ({ id: s.id, name: s.displayName }))} sessionId={sessionId} phone={phone} canSend={!!ev?.canSend} />
         </SectionCard>
       )}
+
+      <SectionCard title="Envios bloqueados (motivo)">
+        {blocks.length === 0 ? <p className="text-sm text-muted-foreground">Nenhum envio bloqueado ainda.</p> : (
+          <ul className="space-y-2 text-sm" aria-label="Envios bloqueados">{blocks.map((b, i) => (
+            <li key={i} className="flex flex-wrap items-baseline gap-x-3"><span className="text-muted-foreground">{b.at.toLocaleString("pt-BR", { timeZone: "America/Manaus" })}</span><span>{b.reasons.length ? b.reasons.join(" · ") : "—"}</span></li>
+          ))}</ul>
+        )}
+        <p className="mt-3 text-xs text-muted-foreground">Cada tentativa bloqueada fica registrada com o motivo (sem número e sem texto). Nada foi enviado nestes casos.</p>
+      </SectionCard>
 
       <SectionCard title="Últimos envios de teste">
         {log.length === 0 ? <p className="text-sm text-muted-foreground">Nenhum envio ainda.</p> : (

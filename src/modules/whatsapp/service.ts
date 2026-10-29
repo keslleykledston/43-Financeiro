@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
-import { auditLog, holidays, whatsappSendAuthorizations, whatsappSendLog, whatsappSessionCompanies, whatsappSessions } from "@/lib/db/schema";
+import { auditLog, customers, holidays, whatsappConsents, whatsappSendAuthorizations, whatsappSendLog, whatsappSessionCompanies, whatsappSessions } from "@/lib/db/schema";
 import { Invalid, requirePerm } from "@/modules/identity/service";
 import { getSettings } from "@/modules/messaging/service";
 import { WINDOW_REASON, windowState } from "@/modules/messaging/window";
 import { createWahaClient, sessionNameFor, wahaConfigured, WahaError, type WahaClient, type WahaEnv, type WahaSession } from "@/modules/providers/waha";
-import { CAPS, chatIdFor, mapWahaStatus, maskMe, maskPhone, parseBrPhone, refHash, sameBrNumber, testText, type Check, type SessionStatus } from "./domain";
+import { BLOCK_REASON_LABEL, CAPS, EVIDENCE_SOURCES, GLOBAL_OPT_IN_SOURCES, chatIdFor, looksLikePii, mapWahaStatus, maskMe, maskPhone, parseBrPhone, refHash, sameBrNumber, testText, type Check, type ConsentState, type EvidenceSource, type SessionStatus } from "./domain";
 
 /**
  * W1 — conexões de WhatsApp (WAHA, NÃO oficial) e envio MANUAL de teste. Nada aqui é automático: sem régua, sem fila, sem webhook (entregas 2 a 4).
@@ -211,6 +211,10 @@ export async function evaluateTestSend(db: DB, actorId: string, companyId: strin
   const digits = parseBrPhone(input.phone);
   add("phone", !!digits, "Número válido (individual)", digits ? undefined : "Informe DDD + número de celular");
   add("allowed", !!digits && !!auth && auth.allowed.includes(digits), "Número está na lista autorizada", digits && auth && auth.allowed.includes(digits) ? undefined : "Só números da autorização podem receber o teste");
+  const cs = digits ? await consentState(db, companyId, digits) : null;
+  const optedOut = cs?.state === "opt_out_company" || cs?.state === "opt_out_global";
+  add("optout", !optedOut, "Contato não pediu para parar", optedOut ? (cs!.state === "opt_out_global" ? "Este número pediu para não receber mensagens de nenhuma empresa. O pedido prevalece sobre a autorização" : "Este número pediu para não receber mensagens desta empresa. O pedido prevalece sobre a autorização") : undefined);
+  add("consent_info", true, "Consentimento do contato", cs?.state === "opt_in" ? "Consentiu (registrado)" : "Sem registro: o TESTE vale pela autorização acima. Envio a cliente exige consentimento registrado");
   const hol = await db.select().from(holidays).where(eq(holidays.companyId, companyId));
   const w = windowState(deps?.now ?? new Date(), st, new Map(hol.map((h) => [h.day, h.name])));
   add("window", w.open, "Dentro da janela de envio", w.open ? undefined : `${WINDOW_REASON[w.reason]} (horário de Manaus; ajuste em Mensagens → Configuração)`);
@@ -295,7 +299,8 @@ export async function sendTest(db: DB, actorId: string, companyId: string, input
     // revalida pausa e autorização no último instante (a consulta levou tempo de rede)
     const [p2] = await db.select({ p: whatsappSessions.paused }).from(whatsappSessions).where(eq(whatsappSessions.id, session.id));
     const [a2] = await db.select({ id: whatsappSendAuthorizations.id }).from(whatsappSendAuthorizations).where(and(eq(whatsappSendAuthorizations.companyId, companyId), eq(whatsappSendAuthorizations.active, true)));
-    if (!sendOn(env) || p2?.p !== false || a2?.id !== authId) return await abort("bloqueado_antes_de_enviar");
+    const cs2 = await consentState(db, companyId, digits);
+    if (!sendOn(env) || p2?.p !== false || a2?.id !== authId || cs2.state === "opt_out_company" || cs2.state === "opt_out_global") return await abort("bloqueado_antes_de_enviar"); // opt-out de última hora também barra
     calling = true;
     const res = await w.sendText({ session: session.providerSession, chatId, text: testText(ev.senderIdentity) });
     await finish(res.ok ? { status: "enviado", providerRef: refHash(res.providerRef) } : { status: res.unknown ? "desconhecido" : "falhou", error: res.error });
@@ -324,4 +329,121 @@ export async function listSendLog(db: DB, actorId: string, companyId: string, li
   await requirePerm(db, actorId, companyId, "whatsapp.read");
   return db.select({ id: whatsappSendLog.id, at: whatsappSendLog.createdAt, phone: whatsappSendLog.phoneMasked, status: whatsappSendLog.status, error: whatsappSendLog.error, kind: whatsappSendLog.kind })
     .from(whatsappSendLog).where(eq(whatsappSendLog.companyId, companyId)).orderBy(desc(whatsappSendLog.createdAt)).limit(limit);
+}
+
+// ---------- W2: vínculo de empresas à conexão ----------
+const MAX_COMPANIES_PER_SESSION = 5;
+
+/** Empresas com vínculo ativo. Nome de empresa só aparece para quem também é membro dela (outras viram «outra empresa do grupo»): nada vaza entre empresas. */
+export async function listBindings(db: DB, actorId: string, companyId: string, sessionId: string) {
+  await requirePerm(db, actorId, companyId, "whatsapp.read");
+  await bound(db, companyId, sessionId);
+  const rows = (await db.execute(sql`
+    select b.company_id::text id, b.sender_identity identity, b.created_at at, c.name, (m.user_id is not null) member
+    from whatsapp_session_companies b join companies c on c.id = b.company_id
+    left join memberships m on m.company_id = b.company_id and m.user_id = ${actorId} and m.status = 'active'
+    where b.session_id = ${sessionId} and b.revoked_at is null order by b.created_at`)) as unknown as { id: string; identity: string; at: Date; name: string; member: boolean }[];
+  return rows.map((r) => ({ companyId: r.member ? r.id : null, name: r.member ? r.name : "Outra empresa do grupo", identity: r.member ? r.identity : null, since: new Date(r.at), current: r.id === companyId })); // nome E remetente de empresa alheia ficam ocultos
+}
+
+/**
+ * Vincula OUTRA empresa à conexão (sem novo QR). Exige diretoria (`whatsapp.authorize`) nas DUAS empresas: a da conexão e a que entra. A empresa nova nasce sem autorização de envio
+ * e sem consentimentos: cada uma cuida dos seus. O nome do remetente é próprio de cada empresa (transparência: quem cobra é identificado no texto).
+ */
+export async function bindCompany(db: DB, actorId: string, companyId: string, sessionId: string, input: { targetCompanyId: string; senderIdentity: string; confirm: boolean }) {
+  await requirePerm(db, actorId, companyId, "whatsapp.authorize");
+  if (!/^[0-9a-f-]{36}$/i.test(input.targetCompanyId ?? "")) throw new Invalid("Empresa não encontrada");
+  await requirePerm(db, actorId, input.targetCompanyId, "whatsapp.authorize"); // diretoria também na empresa que entra (senão: 403, sem revelar se existe)
+  if (input.targetCompanyId === companyId) throw new Invalid("Esta empresa já usa a conexão");
+  const identity = clean(input.senderIdentity, 80);
+  if (identity.length < 3) throw new Invalid("Informe o nome que aparece para o cliente (ex.: Financeiro K3G Call)");
+  if (!input.confirm) throw new Invalid("Confirme que as duas empresas autorizam o uso compartilhado deste número");
+  const { s } = await bound(db, companyId, sessionId);
+  await db.transaction(async (tx) => {
+    const x = tx as unknown as DB;
+    await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-bind:" + s.id}))`);
+    const [{ n, has }] = (await x.execute(sql`select count(*)::int n, bool_or(company_id = ${input.targetCompanyId}::uuid) has from whatsapp_session_companies where session_id = ${s.id} and revoked_at is null`)) as unknown as { n: number; has: boolean | null }[];
+    if (has) throw new Invalid("Esta empresa já usa a conexão");
+    if (n >= MAX_COMPANIES_PER_SESSION) throw new Invalid(`A conexão já é usada por ${MAX_COMPANIES_PER_SESSION} empresas`);
+    await x.insert(whatsappSessionCompanies).values({ sessionId: s.id, companyId: input.targetCompanyId, senderIdentity: identity, authorizedBy: actorId });
+    await audit(x, companyId, actorId, "whatsapp.session.company_bound", { sessionId: s.id, targetCompanyId: input.targetCompanyId });
+    await audit(x, input.targetCompanyId, actorId, "whatsapp.session.company_bound", { sessionId: s.id, fromCompanyId: companyId });
+  });
+}
+
+/** A empresa SAI da conexão (revoga o próprio vínculo; histórico fica). Não dá para tirar a última empresa: para isso, desconectar. Diretoria da própria empresa. */
+export async function unbindCompany(db: DB, actorId: string, companyId: string, sessionId: string, confirm: boolean) {
+  await requirePerm(db, actorId, companyId, "whatsapp.authorize");
+  if (!confirm) throw new Invalid("Confirme que esta empresa deve deixar de usar a conexão");
+  const { s } = await bound(db, companyId, sessionId);
+  await db.transaction(async (tx) => {
+    const x = tx as unknown as DB;
+    await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-bind:" + s.id}))`);
+    const [{ n }] = (await x.execute(sql`select count(*)::int n from whatsapp_session_companies where session_id = ${s.id} and revoked_at is null`)) as unknown as { n: number }[];
+    if (n <= 1) throw new Invalid("Esta é a última empresa da conexão. Para encerrar, use «Desconectar número»");
+    await x.update(whatsappSessionCompanies).set({ revokedAt: new Date(), revokedBy: actorId, updatedAt: new Date() }).where(and(eq(whatsappSessionCompanies.sessionId, s.id), eq(whatsappSessionCompanies.companyId, companyId), isNull(whatsappSessionCompanies.revokedAt)));
+    await audit(x, companyId, actorId, "whatsapp.session.company_unbound", { sessionId: s.id });
+  });
+}
+
+// ---------- W2: consentimento e opt-out por contato ----------
+/** Estado do contato para a empresa. Opt-out GLOBAL do número (de qualquer empresa) prevalece; senão vale o evento mais recente da empresa. Só estado: não revela quem pediu. */
+export async function consentState(x: DB, companyId: string, digits: string): Promise<{ state: ConsentState }> {
+  const r = (await x.execute(sql`select
+      (select decision from whatsapp_consents where phone = ${digits} and scope = 'global' order by created_at desc, id desc limit 1) g,
+      (select decision from whatsapp_consents where company_id = ${companyId} and phone = ${digits} and scope = 'company' order by created_at desc, id desc limit 1) c`)) as unknown as { g: string | null; c: string | null }[];
+  if (r[0].g === "opt_out") return { state: "opt_out_global" };
+  if (r[0].c === "opt_out") return { state: "opt_out_company" };
+  if (r[0].c === "opt_in") return { state: "opt_in" };
+  return { state: "none" };
+}
+
+export async function recordConsent(db: DB, actorId: string, companyId: string, input: { phone: string; decision: string; scope: string; evidenceSource: string; evidenceRef: string; customerId?: string }) {
+  await requirePerm(db, actorId, companyId, "whatsapp.consent");
+  const digits = parseBrPhone(input.phone);
+  if (!digits) throw new Invalid("Número inválido. Use DDD + número (ex.: 92 99999-0000)");
+  if (input.decision !== "opt_in" && input.decision !== "opt_out") throw new Invalid("Escolha se o contato consentiu ou pediu para parar");
+  const scope = input.scope === "global" ? "global" : "company";
+  if (scope === "global") await requirePerm(db, actorId, companyId, "whatsapp.authorize"); // pedido de parar em TODAS as empresas: só a diretoria registra (e só outro global desfaz)
+  if (!(EVIDENCE_SOURCES as readonly string[]).includes(input.evidenceSource)) throw new Invalid("Escolha de onde vem a prova do consentimento");
+  const ref = clean(input.evidenceRef, 200);
+  if (ref.length < 3) throw new Invalid("Informe onde está a prova (ex.: e-mail de 28/10, contrato, anotação do atendimento)");
+  if (looksLikePii(ref)) throw new Invalid("O campo da prova parece ter dado pessoal (e-mail, telefone, CPF/CNPJ). Escreva só uma referência de onde achar a prova");
+  if (scope === "global" && input.decision === "opt_in" && !GLOBAL_OPT_IN_SOURCES.includes(input.evidenceSource as EvidenceSource)) throw new Invalid("Para desfazer um pedido de parar de todas as empresas é preciso prova por escrito, formulário ou iniciada pelo próprio cliente (não vale a verbal)");
+  let customerId: string | null = null;
+  if (input.customerId) {
+    if (!/^[0-9a-f-]{36}$/i.test(input.customerId)) throw new Invalid("Cliente não encontrado");
+    const [c] = await db.select({ id: customers.id }).from(customers).where(and(eq(customers.id, input.customerId), eq(customers.companyId, companyId)));
+    if (!c) throw new Invalid("Cliente não encontrado"); // cliente de outra empresa = mesma resposta
+    customerId = c.id;
+  }
+  await db.transaction(async (tx) => {
+    const x = tx as unknown as DB;
+    await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-consent:" + (scope === "global" ? "all" : companyId) + ":" + digits}))`);
+    const [last] = (await x.execute(sql`select decision from whatsapp_consents where phone = ${digits} and scope = ${scope} ${scope === "company" ? sql`and company_id = ${companyId}` : sql``} order by created_at desc, id desc limit 1`)) as unknown as { decision: string }[];
+    if (last?.decision === input.decision) throw new Invalid(`Este contato já está registrado assim (${input.decision === "opt_in" ? "consentiu" : "pediu para parar"}). Nada foi alterado`);
+    await x.insert(whatsappConsents).values({ companyId, customerId, phone: digits, decision: input.decision, scope, evidenceSource: input.evidenceSource, evidenceRef: ref, actorId });
+    await audit(x, companyId, actorId, input.decision === "opt_in" ? "whatsapp.consent.opt_in" : "whatsapp.consent.opt_out", { scope, source: input.evidenceSource }); // sem telefone
+  });
+}
+
+/** Estado atual de cada contato desta empresa (mascarado). Só diretoria/gerência: é dado de cliente. Opt-out global aparece como estado, sem dizer qual empresa pediu. */
+export async function listConsents(db: DB, actorId: string, companyId: string, limit = 200) {
+  await requirePerm(db, actorId, companyId, "whatsapp.consent");
+  const rows = (await db.execute(sql`
+    select distinct on (c.phone) c.phone, c.decision, c.scope, c.evidence_source src, c.created_at at, cu.display_name customer, u.name actor,
+      (select g.decision from whatsapp_consents g where g.phone = c.phone and g.scope = 'global' order by g.created_at desc, g.id desc limit 1) global_d
+    from whatsapp_consents c left join customers cu on cu.company_id = c.company_id and cu.id = c.customer_id left join users u on u.id = c.actor_id
+    where c.company_id = ${companyId} and c.scope = 'company' order by c.phone, c.created_at desc, c.id desc`)) as unknown as { phone: string; decision: string; src: EvidenceSource; at: Date; customer: string | null; actor: string | null; global_d: string | null }[];
+  return rows.map((r) => ({ ...r, at: new Date(r.at) })).sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, limit).map((r) => ({
+    phone: maskPhone(r.phone), state: (r.global_d === "opt_out" ? "opt_out_global" : r.decision === "opt_out" ? "opt_out_company" : "opt_in") as ConsentState,
+    source: r.src, at: r.at, customer: r.customer, actor: r.actor,
+  }));
+}
+
+/** Últimos envios BLOQUEADOS e o motivo (a auditoria já guarda só as chaves dos motivos, nunca número). */
+export async function recentBlocks(db: DB, actorId: string, companyId: string, limit = 10) {
+  await requirePerm(db, actorId, companyId, "whatsapp.read");
+  const rows = await db.select({ at: auditLog.createdAt, detail: auditLog.detail }).from(auditLog).where(and(eq(auditLog.companyId, companyId), eq(auditLog.action, "whatsapp.test_blocked"))).orderBy(desc(auditLog.createdAt)).limit(limit);
+  return rows.map((r) => ({ at: r.at, reasons: (((r.detail as { reasons?: unknown })?.reasons as string[] | undefined) ?? []).map((k) => BLOCK_REASON_LABEL[k] ?? k) }));
 }

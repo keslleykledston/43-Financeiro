@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
-import { createSession, disconnectSession, revokeAuthorization, saveAuthorization, sendTest, setPaused, settleStaleSends, startSession } from "@/modules/whatsapp/service";
+import { bindCompany, createSession, disconnectSession, recordConsent, revokeAuthorization, saveAuthorization, sendTest, setPaused, settleStaleSends, startSession, unbindCompany } from "@/modules/whatsapp/service";
 
 export type FormState = { error?: string; saved?: string; sessionId?: string } | undefined;
 
@@ -66,4 +66,23 @@ export async function sendTestAction(_: FormState, fd: FormData): Promise<FormSt
     revalidatePath("/whatsapp/teste");
     return { saved: "Teste enviado. Confira no aparelho de destino." };
   } catch (e) { revalidatePath("/whatsapp/teste"); return { error: known(e) }; }
+}
+
+export async function bindCompanyAction(fd: FormData) {
+  let err = "";
+  try { const c = await ctx(); await bindCompany(db, c.userId, c.companyId, text(fd, "id", 40), { targetCompanyId: text(fd, "targetCompanyId", 40), senderIdentity: text(fd, "senderIdentity", 120), confirm: fd.get("confirm") === "on" }); } catch (e) { err = known(e); }
+  revalidatePath("/whatsapp"); back(err, "vinculada");
+}
+export async function unbindCompanyAction(fd: FormData) {
+  let err = "";
+  try { const c = await ctx(); await unbindCompany(db, c.userId, c.companyId, text(fd, "id", 40), fd.get("confirm") === "on"); } catch (e) { err = known(e); }
+  revalidatePath("/whatsapp"); back(err, "desvinculada");
+}
+export async function recordConsentAction(_: FormState, fd: FormData): Promise<FormState> {
+  try {
+    const c = await ctx();
+    await recordConsent(db, c.userId, c.companyId, { phone: text(fd, "phone", 40), decision: text(fd, "decision", 10), scope: text(fd, "scope", 10), evidenceSource: text(fd, "evidenceSource", 20), evidenceRef: text(fd, "evidenceRef", 300), customerId: text(fd, "customerId", 40) || undefined });
+  } catch (e) { return { error: known(e) }; }
+  revalidatePath("/whatsapp/consentimentos");
+  redirect("/whatsapp/consentimentos?ok=registrado");
 }

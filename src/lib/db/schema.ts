@@ -1186,6 +1186,29 @@ export const whatsappSendLog = pgTable("whatsapp_send_log", {
   check("whatsapp_send_log_finished_chk", sql`(${t.status} = 'enviando') = (${t.finishedAt} is null)`),
 ]);
 
+// W2 — consentimento e opt-out de WhatsApp POR CONTATO. Só-de-acréscimo: o estado atual é o evento mais recente. `scope = company`: vale para a empresa que registrou;
+// `scope = global`: o contato pediu para não receber nada neste número, de nenhuma empresa (só a diretoria registra, e só outro global desfaz). Sem consentimento = sem envio a cliente.
+export const whatsappConsents = pgTable("whatsapp_consents", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  customerId: uuid("customer_id"), // opcional: cliente da MESMA empresa (FK composta)
+  phone: text("phone").notNull(), // dígitos com DDI (5592…); mascarado em toda tela
+  decision: text("decision").notNull(), // opt_in | opt_out
+  scope: text("scope").notNull().default("company"), // company | global
+  evidenceSource: text("evidence_source").notNull(), // verbal | escrito | formulario | cliente_iniciou
+  evidenceRef: text("evidence_ref").notNull(), // onde está a prova (sem dado pessoal)
+  actorId: uuid("actor_id").notNull().references(() => users.id),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
+  index("whatsapp_consents_company_phone_idx").on(t.companyId, t.phone, t.createdAt),
+  index("whatsapp_consents_phone_idx").on(t.phone, t.scope, t.createdAt),
+  check("whatsapp_consents_phone_chk", sql`${t.phone} ~ '^55[0-9]{10,11}$'`),
+  check("whatsapp_consents_decision_chk", sql`${t.decision} in ('opt_in', 'opt_out')`),
+  check("whatsapp_consents_scope_chk", sql`${t.scope} in ('company', 'global')`),
+  check("whatsapp_consents_source_chk", sql`${t.evidenceSource} in ('verbal', 'escrito', 'formulario', 'cliente_iniciou')`),
+  check("whatsapp_consents_ref_chk", sql`char_length(${t.evidenceRef}) between 3 and 200`),
+]);
+
 // H1 — histórico a partir da planilha de boletos (docs/HISTORICO_E_CAIXA.md). STAGING imutável: cada linha da planilha como veio, por empresa. NÃO é cobrança nem
 // contrato: nada aqui alimenta lotes, régua, emissão, contas a receber ou painel. Serve ao relatório de divergências e (H2/H3, com autorização própria) à carga histórica.
 // D3 — staging do histórico de DESPESAS (planilha Despesas__2026). Imutável como o H1; NÃO cria conta a pagar, sócio, lançamento nem fornecedor.
