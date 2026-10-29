@@ -64,6 +64,8 @@ describe.skipIf(!enabled)("E23 — envio REAL de e-mail (canário) com transport
     const { batchId } = await generateBatch(db, asstA, A, D);
     await approveBatch(db, dirA, A, batchId, (await getBatch(db, asstA, A, batchId))!.hash);
     await ensureDefaultTemplates(db, dirA, A);
+    // E33: estes testes cobrem o e-mail SEM boleto (empresa com boleto simulado): tira do modelo padrão o bloco do boleto, que o e-mail REAL bloqueia nesse caso (teste próprio abaixo)
+    await db.execute(sql`update message_template_versions set body = replace(body, E'\n\nLinha digitável do boleto:\n{{linha_digitavel}}\nO PDF do boleto segue em anexo.', '')`);
     await scheduleQueue(db, asstA, A, D);
   };
   const setup = async (limit = 10) => { await saveEmailAccount(db, dirA, A, mail()); await authorizeEmailLive(db, dirA, A, { reference: "e-mail da diretoria 25/10/2026", allowed: "@k3gsolutions.com.br", dailyLimit: limit }); await approved(); };

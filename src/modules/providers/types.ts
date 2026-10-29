@@ -8,8 +8,10 @@ export type SendResult = { ok: true; providerRef: string } | { ok: false; retrya
 
 export interface EmailProvider {
   readonly mode: "mock" | "live";
-  send(m: { to: string[]; subject: string; text: string; html: string; idempotencyKey: string }): Promise<SendResult>;
+  /** `attachments`: só PDF de boleto, já validado por quem chama (origem permitida, tamanho, assinatura %PDF); o adaptador real confere de novo. */
+  send(m: { to: string[]; subject: string; text: string; html: string; idempotencyKey: string; attachments?: EmailAttachment[] }): Promise<SendResult>;
 }
+export type EmailAttachment = { filename: string; contentType: "application/pdf"; content: Buffer };
 export interface WhatsappProvider {
   readonly mode: "mock" | "live";
   send(m: { to: string; text: string; idempotencyKey: string }): Promise<SendResult>;

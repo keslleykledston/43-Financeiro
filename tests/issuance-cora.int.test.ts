@@ -17,6 +17,10 @@ import { boletoView } from "@/modules/issuance/boleto-details";
 import { registerPayment, reversePayment } from "@/modules/receivables/service";
 import { MAX_EVENT_ATTEMPTS, disableCoraWebhook, enableCoraWebhook, processWebhookEvents, receiveCoraWebhook, webhookStatus } from "@/modules/issuance/webhooks";
 import { createHash } from "node:crypto";
+import { ensureDefaultTemplates, listQueue, processQueue, scheduleQueue } from "@/modules/messaging/service";
+import { __setPdfFetcherForTests } from "@/modules/messaging/boleto-mail";
+import { saveEmailAccount } from "@/modules/providers/email-config";
+import { authorizeEmailLive } from "@/modules/providers/email-auth";
 import { LiveNotAvailable, __setCoraTransportForTests } from "@/modules/providers/registry";
 import { saveCoraCredentials } from "@/modules/providers/cora-config";
 import { CORA_HOSTS, CoraNetworkError, type Transport } from "@/modules/providers/cora-http";
@@ -103,11 +107,11 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     db = drizzle(conn, { schema });
     await migrate(db, { migrationsFolder: "./drizzle" });
   });
-  afterAll(async () => { __setCoraTransportForTests(undefined); await conn?.end(); await admin?.end(); });
+  afterAll(async () => { __setCoraTransportForTests(undefined); __setPdfFetcherForTests(undefined); await conn?.end(); await admin?.end(); });
   afterEach(() => { vi.useRealTimers(); delete process.env.CORA_STAGE_ENABLED; delete process.env.CORA_LIVE_ENABLED; delete process.env.CORA_PROD_EMISSION_ENABLED; });
 
   beforeEach(async () => {
-    await db.execute(sql`truncate boleto_cancel_requests, boleto_cancellations, provider_credentials, issuance_requests, issuance_settings, bank_transaction_marks, bank_allocations, bank_transactions, bank_import_rows, bank_import_batches, bank_accounts, payments, messaging_settings, message_queue, message_template_versions, message_templates, charges, billing_batches, holidays, contract_versions, contracts, integration_conflicts, integration_sync_runs, integration_connections, rate_limits, customer_contacts, vendor_contacts, customers, vendors, audit_log, invitations, memberships, companies, users restart identity cascade`);
+    await db.execute(sql`truncate email_send_log, email_live_authorizations, email_accounts, boleto_cancel_requests, boleto_cancellations, provider_credentials, issuance_requests, issuance_settings, bank_transaction_marks, bank_allocations, bank_transactions, bank_import_rows, bank_import_batches, bank_accounts, payments, messaging_settings, message_queue, message_template_versions, message_templates, charges, billing_batches, holidays, contract_versions, contracts, integration_conflicts, integration_sync_runs, integration_connections, rate_limits, customer_contacts, vendor_contacts, customers, vendors, audit_log, invitations, memberships, companies, users restart identity cascade`);
     const [a, b] = await db.insert(schema.companies).values([{ name: "Empresa A" }, { name: "Empresa B" }]).returning();
     A = a.id; B = b.id;
     const mk = async (e: string) => (await db.insert(schema.users).values({ email: e, name: e, passwordHash: "x" }).returning())[0].id;
@@ -704,6 +708,121 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     expect(o).toMatchObject({ paid: 1, settled: 1 });
     expect(cora.calls.slice(before).every((c) => c.method === "GET" || c.path === "/token")).toBe(true);
     expect((await db.select().from(schema.payments).where(eq(schema.payments.chargeId, c1.id)))[0]).toMatchObject({ amount: "2500.00", method: "boleto" });
+  });
+
+  // ───────── E33 — boleto no e-mail ─────────
+  const PDF_URL = (id: string) => `https://storage.googleapis.com/download/storage/v1/b/cora_stage_exporter_bankslip_storage/o/${id}.pdf?generation=1&alt=media`;
+  const pdfBytes = () => Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(300, 0x20), Buffer.from("\n%%EOF")]);
+  const msgSetup = async () => {
+    await db.insert(schema.customerContacts).values([{ companyId: A, partyId: cli1, name: "Fin Um", email: "fin1@k3gsolutions.com.br", isFinancial: true }, { companyId: A, partyId: cli2, name: "Fin Dois", email: "fin2@k3gsolutions.com.br", isFinancial: true }]);
+    await ensureDefaultTemplates(db, dirA, A);
+    await scheduleQueue(db, asstA, A, D);
+  };
+  const mailItems = async (kind = "emissao") => (await listQueue(db, dirA, A)).items.filter((i) => i.channel === "email" && i.kind === kind);
+  const LINE = "00190000090321583700012584580174791420000002000"; // linha digitável da Cora falsa
+  const smtpSent: { m: Record<string, any> }[] = [];
+  const smtpDeps = () => ({ env: { EMAIL_EXTERNAL_ENABLED: "true" }, smtp: { lookup: async () => [{ address: "93.184.216.34", family: 4 }], createTransport: () => ({ sendMail: async (m: Record<string, unknown>) => { smtpSent.push({ m }); return { messageId: `<id${smtpSent.length}@k3g>`, accepted: m.to as string[], rejected: [] }; }, close() {} }) } });
+
+  it("E33 — e-mail SIMULADO com boleto real/de teste: espera o boleto existir; depois o texto leva a linha digitável; boleto cancelado não gera mensagem", async () => {
+    await useCora(); cora.hooks.pdfUrl = PDF_URL;
+    const batchId = await approvedBatch(); await msgSetup();
+    const r0 = await processQueue(db, asstA, A, D);
+    expect(r0.processed).toBe(0); expect(r0.waiting).toMatch(/Aguardando o boleto/); // ainda sem boleto: nada é "enviado"
+    expect((await mailItems()).map((i) => i.status)).toEqual(["pendente", "pendente"]);
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, NOW);
+    const r1 = await processQueue(db, asstA, A, D);
+    expect(r1.processed).toBe(2);
+    const it = await mailItems();
+    expect(it.every((i) => i.status === "simulado")).toBe(true);
+    expect(it.every((i) => (i.renderedBody ?? "").includes(LINE))).toBe(true);
+    // outro dia da régua só para boleto cancelado: o item some da fila (a régua para)
+    const c1 = await chargeOf(cli1);
+    await cancelBoleto(db, dirA, A, { chargeId: c1.id, reason: "cliente pediu", confirm: true });
+    const c2 = await chargeOf(cli2);
+    expect(await n(`message_queue where charge_id = '${c1.id}' and status = 'pendente'`)).toBe(0); // a régua do boleto cancelado parou
+    expect(await n(`message_queue where charge_id = '${c2.id}' and status = 'pendente'`)).toBeGreaterThan(0); // a do outro cliente segue
+  });
+
+  it("E33 — e-mail REAL: leva o PDF do boleto em anexo (conferido) e a linha digitável; PDF que não vem/é inválido não manda e-mail sem o boleto; boleto simulado + modelo com boleto = bloqueado", async () => {
+    smtpSent.length = 0;
+    await useCora(); cora.hooks.pdfUrl = PDF_URL;
+    const batchId = await approvedBatch(); await msgSetup();
+    await saveEmailAccount(db, dirA, A, { host: "smtp.k3gsolutions.com.br", port: "587", security: "starttls", fromEmail: "financeiro@k3gsolutions.com.br", fromName: "K3G", replyTo: "", user: "u@k3gsolutions.com.br", password: "Senha-Do-Smtp-123" });
+    await authorizeEmailLive(db, dirA, A, { reference: "autorização de teste 28/10/2026", allowed: "@k3gsolutions.com.br", dailyLimit: 10 });
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, NOW);
+    // 1) o PDF não vem: nada é enviado, o item volta à fila
+    __setPdfFetcherForTests((async () => new Response("nao é pdf", { status: 200 })) as typeof fetch);
+    await processQueue(db, asstA, A, D, undefined, smtpDeps());
+    expect(smtpSent).toHaveLength(0);
+    expect((await mailItems()).every((i) => i.status === "pendente" && i.lastError === "pdf_indisponivel")).toBe(true);
+    __setPdfFetcherForTests((async () => { throw new Error("rede"); }) as typeof fetch);
+    await processQueue(db, asstA, A, D, undefined, smtpDeps());
+    expect(smtpSent).toHaveLength(0);
+    // 2) o PDF vem: e-mail real com anexo
+    __setPdfFetcherForTests((async () => new Response(pdfBytes(), { status: 200, headers: { "content-type": "application/pdf" } })) as typeof fetch);
+    await db.execute(sql`update message_queue set status = 'pendente', attempts = 0, last_error = null where channel = 'email' and status = 'bloqueado'`);
+    const r = await processQueue(db, asstA, A, D, undefined, smtpDeps());
+    expect(r.processed).toBe(2); expect(smtpSent).toHaveLength(2);
+    for (const s of smtpSent) {
+      expect(s.m.attachments).toHaveLength(1);
+      expect(s.m.attachments[0]).toMatchObject({ contentType: "application/pdf", filename: "boleto-2026-10-14.pdf" });
+      expect(Buffer.from(s.m.attachments[0].content).subarray(0, 5).toString()).toBe("%PDF-");
+      expect(String(s.m.text)).toContain(LINE);
+    }
+  });
+
+  it("E33 — boleto sem PDF/sem linha, de origem não permitida ou que NÃO é o da cobrança (valor/vencimento) não gera e-mail; boleto que muda entre a consulta e o envio volta à fila", async () => {
+    smtpSent.length = 0;
+    await useCora(); cora.hooks.pdfUrl = PDF_URL;
+    const batchId = await approvedBatch(); await msgSetup();
+    await saveEmailAccount(db, dirA, A, { host: "smtp.k3gsolutions.com.br", port: "587", security: "starttls", fromEmail: "financeiro@k3gsolutions.com.br", fromName: "K3G", replyTo: "", user: "u@k3gsolutions.com.br", password: "Senha-Do-Smtp-123" });
+    await authorizeEmailLive(db, dirA, A, { reference: "autorização de teste 28/10/2026", allowed: "@k3gsolutions.com.br", dailyLimit: 10 });
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, NOW);
+    __setPdfFetcherForTests((async () => new Response(pdfBytes(), { status: 200 })) as typeof fetch);
+    // PDF de origem NÃO permitida (resposta da Cora com outro domínio): ninguém recebe, e-mail algum sai
+    cora.hooks.pdfUrl = () => "https://evil.example.com/x.pdf";
+    await processQueue(db, asstA, A, D, undefined, smtpDeps());
+    expect(smtpSent).toHaveLength(0); expect((await mailItems()).every((i) => i.status === "pendente")).toBe(true);
+    // sem PDF algum
+    cora.hooks.pdfUrl = () => "";
+    await processQueue(db, asstA, A, D, undefined, smtpDeps());
+    expect(smtpSent).toHaveLength(0);
+    // boleto com valor diferente do da cobrança (alguém mexeu na Cora): não é o boleto desta cobrança
+    cora.hooks.pdfUrl = PDF_URL; cora.hooks.amountOverride = 199900;
+    await processQueue(db, asstA, A, D, undefined, smtpDeps());
+    expect(smtpSent).toHaveLength(0);
+    cora.hooks.amountOverride = null;
+    // muda ENTRE a consulta da rodada e o envio (cancelado na Cora depois de reservar): nada sai, o item volta à fila
+    const c1 = await chargeOf(cli1); const r1 = (await reqs()).find((x) => x.chargeId === c1.id)!;
+    await processQueue(db, asstA, A, D, undefined, { ...smtpDeps(), afterReserve: async () => { cora.inv.get(r1.externalRef!)!.status = "CANCELLED"; } });
+    const um = (await mailItems()).find((i) => i.customerName === "Cliente Um")!;
+    expect(um).toMatchObject({ status: "pendente", lastError: "boleto_mudou" });
+    expect(smtpSent.every((s) => !/Cliente Um|fin1@/.test(JSON.stringify(s.m.to)))).toBe(true); // o do cliente 1 não saiu
+  });
+
+  it("E33 — PDF fora das origens da Cora, redirecionado ou grande demais nunca vira anexo", async () => {
+    const { fetchBoletoPdf } = await import("@/modules/messaging/boleto-mail");
+    const okFetch = (async () => new Response(pdfBytes(), { status: 200 })) as typeof fetch;
+    await expect(fetchBoletoPdf("https://evil.example.com/x.pdf", okFetch)).rejects.toThrow(/origem/);
+    await expect(fetchBoletoPdf("http://storage.googleapis.com/download/storage/v1/b/cora_production_exporter_bankslip_storage/o/x.pdf", okFetch)).rejects.toThrow(/origem/);
+    await expect(fetchBoletoPdf(PDF_URL("x"), (async () => new Response(Buffer.alloc(3_100_000, 0x41), { status: 200 })) as typeof fetch)).rejects.toThrow(/grande|invalido/);
+    await expect(fetchBoletoPdf(PDF_URL("x"), (async () => new Response("%PDF-1.4 curto", { status: 200 })) as typeof fetch)).rejects.toThrow(/invalido/);
+    await expect(fetchBoletoPdf(PDF_URL("x"), (async () => new Response("x", { status: 404 })) as typeof fetch)).rejects.toThrow(/http_404/);
+    expect((await fetchBoletoPdf(PDF_URL("x"), okFetch)).subarray(0, 5).toString()).toBe("%PDF-");
+  });
+
+  it("E33 — e-mail REAL com boleto SIMULADO e modelo que usa o boleto: bloqueado (nunca boleto de mentira para cliente de verdade)", async () => {
+    smtpSent.length = 0;
+    await approvedBatch(); await msgSetup(); // provedor simulado (padrão)
+    await saveEmailAccount(db, dirA, A, { host: "smtp.k3gsolutions.com.br", port: "587", security: "starttls", fromEmail: "financeiro@k3gsolutions.com.br", fromName: "K3G", replyTo: "", user: "u@k3gsolutions.com.br", password: "Senha-Do-Smtp-123" });
+    await authorizeEmailLive(db, dirA, A, { reference: "autorização de teste 28/10/2026", allowed: "@k3gsolutions.com.br", dailyLimit: 10 });
+    await processQueue(db, asstA, A, D, undefined, smtpDeps());
+    expect(smtpSent).toHaveLength(0);
+    const it = await mailItems();
+    expect(it.every((i) => i.status === "bloqueado" && /boleto desta empresa é simulado/.test(i.blockedReason ?? ""))).toBe(true);
   });
 
   it("ATUALIZAR SITUAÇÃO com a chave do servidor desligada: não consulta nem altera nada (falha fechada, com aviso)", async () => {

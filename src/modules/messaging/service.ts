@@ -11,6 +11,7 @@ import { resolveProviders } from "@/modules/providers/registry";
 import type { Providers, SendResult } from "@/modules/providers/types";
 import { activeAuthorization, domainsOf, finishLog, flagOn, liveEmailFor, sentToday, type LiveState } from "@/modules/providers/email-live";
 import { isAllowed } from "@/modules/providers/smtp";
+import { SIMULATED_LINE, companyBoletoMode, fetchBoletoPdf, prefetchBoletoMail, type BoletoMail, type BoletoMode } from "./boleto-mail";
 
 /**
  * E06 — SIMULAÇÃO. Nenhuma função daqui envia e-mail ou WhatsApp: a fila registra o que SERIA enviado e "processar" só grava o
@@ -196,14 +197,14 @@ export async function saveSettings(db: DB, actorId: string, companyId: string, r
 const MAX_ATTEMPTS = 3;
 type DueRow = { q: typeof messageQueue.$inferSelect; c: typeof charges.$inferSelect; customer: string; subject: string | null; body: string | null };
 /** Texto da mensagem (assunto/corpo) a partir do modelo ativo. Único lugar que monta o texto, para o simulado e o real nunca divergirem. */
-function buildMessage(r: DueRow, companyName: string, internal: boolean) {
-  const vars: Vars = { cliente: r.customer, empresa: companyName, valor: formatBRL(centsFromNumeric(r.c.amount)), vencimento: br(r.c.dueDate), competencia: `${r.c.competenceMonth.slice(5, 7)}/${r.c.competenceMonth.slice(0, 4)}`, descricao: r.c.description, emissao: br(r.c.issueDate) };
+function buildMessage(r: DueRow, companyName: string, internal: boolean, bm?: BoletoMail) {
+  const vars: Vars = { linha_digitavel: bm?.state === "ok" ? (bm.digitable ?? "") : SIMULATED_LINE, link_boleto: bm?.state === "ok" ? (bm.pdfUrl ?? "") : "", cliente: r.customer, empresa: companyName, valor: formatBRL(centsFromNumeric(r.c.amount)), vencimento: br(r.c.dueDate), competencia: `${r.c.competenceMonth.slice(5, 7)}/${r.c.competenceMonth.slice(0, 4)}`, descricao: r.c.description, emissao: br(r.c.issueDate) };
   const subject = internal ? "Revisão humana D+15" : render(r.subject ?? "", vars);
   const body = internal ? `Cobrança de ${vars.cliente} (${vars.valor}, vencida em ${vars.vencimento}) está há 15 dias em atraso. Decidir o próximo passo manualmente.` : render(r.body ?? "", vars);
   return { subject, body };
 }
 const RECIPIENT_EMAIL = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/;
-type RunOpts = { respectWindow: boolean; onlyAuto?: boolean; providers?: Providers; /** E23: o e-mail desta empresa é tratado pelo caminho REAL (ou está bloqueado): o simulado não o toca */ skipEmail?: boolean };
+type RunOpts = { respectWindow: boolean; onlyAuto?: boolean; providers?: Providers; /** E33: boletos consultados ANTES da transação (rede fora do banco) e provedor de boleto da empresa */ boletos?: Map<string, BoletoMail>; boletoMode?: BoletoMode; /** E23: o e-mail desta empresa é tratado pelo caminho REAL (ou está bloqueado): o simulado não o toca */ skipEmail?: boolean };
 export type RunResult = { processed: number; cancelled: number; failed: number; blocked: number; skipped: number; waiting?: string };
 
 /**
@@ -248,7 +249,10 @@ async function runQueue(x: DB, companyId: string, actorId: string | null, now: D
     if (o.skipEmail && q.channel === "email") continue; // E23: não consome (nem simula) e-mail que pertence ao caminho real
     if (!internal && ((q.channel === "email" && !st.emailEnabled) || (q.channel === "whatsapp" && !st.whatsappEnabled))) { out.skipped++; continue; }
     if (q.scheduledFor < lateLimit) { await block(q.id, `Perdeu a data (mais de ${st.maxLateDays} dia(s) de atraso): revisar manualmente`); continue; }
-    const { subject, body } = buildMessage(r, co.name, internal);
+    // E33: empresa com provedor de boleto REAL só envia cobrança/lembrete quando o boleto existe (emitido e em aberto); senão a mensagem espera (nada é enviado sem o boleto)
+    const bm = o.boletos?.get(q.chargeId);
+    if (!internal && o.boletoMode && o.boletoMode !== "simulado" && bm?.state !== "ok") { out.skipped++; out.waiting ??= "Aguardando o boleto emitido (provedor real)"; continue; }
+    const { subject, body } = buildMessage(r, co.name, internal, bm);
     let providerRef: string | null = null;
     if (!internal) {
       const mine = contacts.filter((c) => c.partyId === q.customerId);
@@ -295,7 +299,15 @@ const resolveLive = (db: DB, companyId: string, d?: LiveDeps) => (process.env.VI
  * registrada + conta legível; ver providers/email-live.ts), os itens de e-mail vão pelo caminho real (`runEmailLive`); WhatsApp e revisão interna continuam
  * simulados. Se o real está liberado mas bloqueado agora (ex.: cofre indisponível neste processo), os e-mails ficam NA FILA: nem enviados nem "simulados".
  */
-async function dispatch(db: DB, companyId: string, actorId: string | null, now: Date, o: RunOpts, live: LiveState, auditAction: string | null, hooks: { afterReserve?: () => Promise<void> } = {}): Promise<RunResult> {
+async function dispatch(db: DB, companyId: string, actorId: string | null, now: Date, o0: RunOpts, live: LiveState, auditAction: string | null, hooks: { afterReserve?: () => Promise<void> } = {}): Promise<RunResult> {
+  // E33: boletos dos itens que vencem a fila agora, consultados FORA de transação (só empresas com provedor de boleto real)
+  const boletoMode = await companyBoletoMode(db, companyId);
+  let boletos: Map<string, BoletoMail> | undefined;
+  if (boletoMode !== "simulado") {
+    const ids = (await db.execute(sql`select distinct charge_id::text as id from message_queue where company_id = ${companyId} and status = 'pendente' and channel in ('email', 'whatsapp') and scheduled_for <= ${localParts(now).date} limit 200`)) as unknown as { id: string }[];
+    boletos = await prefetchBoletoMail(db, companyId, ids.map((r) => r.id));
+  }
+  const o: RunOpts = { ...o0, boletos, boletoMode };
   const sim = await db.transaction(async (tx) => {
     const x = tx as unknown as DB;
     await lockQueue(x, companyId);
@@ -313,9 +325,9 @@ async function dispatch(db: DB, companyId: string, actorId: string | null, now: 
  * bloqueado). Nunca reenvia sozinho um resultado desconhecido (queda depois de entregar o conteúdo): vai para revisão humana. Respeita pausa, canal, janela,
  * limites por execução/hora, limite diário da autorização e a lista de destinatários autorizados (também reconferida no adaptador).
  */
-export async function runEmailLive(db: DB, companyId: string, actorId: string | null, now: Date, o: { respectWindow: boolean; onlyAuto?: boolean }, live: Extract<LiveState, { state: "ready" }>, hooks: { afterReserve?: () => Promise<void> } = {}): Promise<RunResult> {
+export async function runEmailLive(db: DB, companyId: string, actorId: string | null, now: Date, o: { respectWindow: boolean; onlyAuto?: boolean; boletos?: Map<string, BoletoMail>; boletoMode?: BoletoMode }, live: Extract<LiveState, { state: "ready" }>, hooks: { afterReserve?: () => Promise<void> } = {}): Promise<RunResult> {
   const out: RunResult = { ...EMPTY };
-  type Job = { id: string; logId: string; to: string[]; subject: string; body: string; attempts: number };
+  type Job = { id: string; logId: string; to: string[]; subject: string; body: string; attempts: number; boleto?: BoletoMail; dueDate: string; chargeId: string };
   const jobs: Job[] = [];
   await db.transaction(async (tx) => {
     const x = tx as unknown as DB;
@@ -359,12 +371,16 @@ export async function runEmailLive(db: DB, companyId: string, actorId: string | 
       if (valid.length === 0) { await block(q.id, REASON_EMAIL); continue; }
       const to = valid.filter((a) => isAllowed(a, live.allowed));
       if (to.length === 0) { await block(q.id, "Destinatário fora da lista autorizada do envio real (canário): fica sem enviar até a lista ser ampliada"); continue; }
-      const { subject, body } = buildMessage(r, co.name, false);
+      // E33: e-mail REAL com boleto: precisa do boleto emitido e em aberto (espera, sem bloquear); modelo que usa o boleto com provedor SIMULADO é bloqueado (nunca mandar boleto de mentira a cliente de verdade)
+      const bm = o.boletos?.get(q.chargeId);
+      if (o.boletoMode && o.boletoMode !== "simulado" && bm?.state !== "ok") { out.waiting ??= "Aguardando o boleto emitido (provedor real)"; continue; }
+      if ((!o.boletoMode || o.boletoMode === "simulado") && /\{\{\s*(linha_digitavel|link_boleto)\s*\}\}/.test(`${r.subject ?? ""}\n${r.body ?? ""}`)) { await block(q.id, "O modelo usa o boleto, mas o boleto desta empresa é simulado: e-mail real não vai com boleto de mentira"); continue; }
+      const { subject, body } = buildMessage(r, co.name, false, bm);
       const won = await x.update(messageQueue).set({ status: "enviando", renderedSubject: subject, renderedBody: body, attempts: q.attempts + 1, lastError: null, processedAt: now, processedBy: actorId, updatedAt: now })
         .where(and(eq(messageQueue.id, q.id), eq(messageQueue.status, "pendente"))).returning({ id: messageQueue.id });
       if (won.length === 0) continue;
       const [log] = await x.insert(emailSendLog).values({ companyId, kind: "fila", queueId: q.id, recipientDomains: domainsOf(to), recipients: to.length, actorId }).returning({ id: emailSendLog.id });
-      jobs.push({ id: q.id, logId: log.id, to, subject, body, attempts: q.attempts + 1 });
+      jobs.push({ id: q.id, logId: log.id, to, subject, body, attempts: q.attempts + 1, boleto: bm?.state === "ok" ? bm : undefined, dueDate: r.c.dueDate, chargeId: q.chargeId });
     }
   });
   if (process.env.VITEST === "true") await hooks.afterReserve?.(); // só testes: simula a revogação entre reservar e enviar
@@ -380,7 +396,23 @@ export async function runEmailLive(db: DB, companyId: string, actorId: string | 
       out.waiting = "Autorização de envio real revogada: nada foi enviado";
       continue;
     }
-    const res: SendResult = await live.provider.send({ to: j.to, subject: j.subject, text: j.body, html: toEmailHtml(j.body), idempotencyKey: `msg-${j.id}` }).catch(() => ({ ok: false as const, retryable: false, unknown: true, error: "resultado_desconhecido" }));
+    // E33: o PDF do boleto segue em anexo (baixado aqui, FORA de transação; se não vier, tenta de novo na próxima rodada em vez de mandar e-mail sem o boleto)
+    let attachments: import("@/modules/providers/types").EmailAttachment[] | undefined; let pdfFail = false;
+    // E33: reconsulta o boleto IMEDIATAMENTE antes de entregar ao SMTP (pode ter sido pago/cancelado/alterado depois da consulta da rodada): mudou = volta à fila sem enviar
+    if (j.boleto) {
+      const fresh = (await prefetchBoletoMail(db, companyId, [j.chargeId]).catch(() => new Map<string, BoletoMail>())).get(j.chargeId);
+      if (fresh?.state !== "ok" || fresh.digitable !== j.boleto.digitable) {
+        await db.transaction(async (tx) => {
+          const x = tx as unknown as DB;
+          await finishLog(x, j.logId, { status: "falhou", error: "boleto_mudou" });
+          await x.update(messageQueue).set({ status: "pendente", attempts: j.attempts - 1, lastError: "boleto_mudou", updatedAt: new Date() }).where(and(eq(messageQueue.id, j.id), eq(messageQueue.status, "enviando")));
+        });
+        out.waiting = "O boleto mudou antes do envio: nada foi enviado";
+        continue;
+      }
+    }
+    if (j.boleto?.pdfUrl) { try { attachments = [{ filename: `boleto-${j.dueDate}.pdf`, contentType: "application/pdf", content: await fetchBoletoPdf(j.boleto.pdfUrl) }]; } catch { pdfFail = true; } }
+    const res: SendResult = pdfFail ? { ok: false, retryable: true, error: "pdf_indisponivel" } : await live.provider.send({ to: j.to, subject: j.subject, text: j.body, html: toEmailHtml(j.body), idempotencyKey: `msg-${j.id}`, ...(attachments ? { attachments } : {}) }).catch(() => ({ ok: false as const, retryable: false, unknown: true, error: "resultado_desconhecido" }));
     await db.transaction(async (tx) => {
       const x = tx as unknown as DB;
       await finishLog(x, j.logId, res.ok ? { status: "enviado", providerRef: res.providerRef } : { status: res.unknown ? "desconhecido" : "falhou", error: res.error });

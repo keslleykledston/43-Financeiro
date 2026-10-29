@@ -9,7 +9,7 @@ export type TextInput = { nfText: string | null; boletoText: string | null; cont
 const br = (d: string) => d.slice(0, 10).split("-").reverse().join("/");
 
 export function issuanceTexts(i: TextInput): { nfDescription: string; boletoInstructions: string | undefined } {
-  const vars: Vars = { cliente: i.customerName, empresa: i.companyName, valor: formatBRL(i.amountCents), vencimento: br(i.dueDate), competencia: `${i.competenceMonth.slice(5, 7)}/${i.competenceMonth.slice(0, 4)}`, descricao: i.contractDescription, emissao: br(i.issueDate) };
+  const vars: Vars = { linha_digitavel: "", link_boleto: "", /* ainda não existem no momento de emitir */ cliente: i.customerName, empresa: i.companyName, valor: formatBRL(i.amountCents), vencimento: br(i.dueDate), competencia: `${i.competenceMonth.slice(5, 7)}/${i.competenceMonth.slice(0, 4)}`, descricao: i.contractDescription, emissao: br(i.issueDate) };
   const nf = i.nfText?.trim() ? render(i.nfText, vars).slice(0, 1000) : i.contractDescription;
   return { nfDescription: nf || i.contractDescription, boletoInstructions: i.boletoText?.trim() ? render(i.boletoText, vars).slice(0, 400) : undefined };
 }

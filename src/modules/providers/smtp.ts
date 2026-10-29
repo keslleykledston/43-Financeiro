@@ -7,7 +7,7 @@ import type { Security } from "./email";
 /**
  * E23 — adaptador REAL de e-mail (SMTP). Só é criado por `email-live.ts`, depois de TODAS as travas (chave do servidor, autorização registrada,
  * conta cadastrada). Defesas próprias, mesmo que um chamador falhe: lista de destinatários permitidos, servidor só em endereço público
- * (o IP validado é o usado na conexão), TLS obrigatório com certificado válido, sem anexos/arquivos/URLs, tempos limite, sem reenvio automático.
+ * (o IP validado é o usado na conexão), TLS obrigatório com certificado válido, sem arquivos/URLs do disco ou da rede (o único anexo aceito é UM PDF de boleto, já em memória, conferido aqui: tamanho e assinatura %PDF), tempos limite, sem reenvio automático.
  * A chamada acontece FORA de transação do banco (reservar → enviar → registrar).
  */
 export type SmtpConfig = { host: string; port: number; security: Security; fromEmail: string; fromName: string | null; replyTo: string | null; user: string; password: string };
@@ -17,6 +17,7 @@ export type SmtpDeps = { lookup?: Lookup; createTransport?: (o: Record<string, u
 const TOTAL_TIMEOUT_MS = 45_000;
 const DNS_TIMEOUT_MS = 10_000;
 const MAX_RECIPIENTS = 3;
+export const MAX_ATTACHMENT_BYTES = 3_000_000;
 
 /** Endereço exato ("a@x.com") ou domínio exato ("@x.com"; subdomínios NÃO valem). */
 export function isAllowed(address: string, allowed: readonly string[]): boolean {
@@ -51,6 +52,8 @@ export function createSmtpEmailProvider(cfg: SmtpConfig, allowed: readonly strin
       if (!m.idempotencyKey) return { ok: false, retryable: false, error: "idempotency_key_ausente" };
       if (m.to.length === 0 || m.to.length > MAX_RECIPIENTS) return { ok: false, retryable: false, error: "destinatarios_invalidos" };
       if (!m.to.every((a) => isAllowed(a, allowed))) return { ok: false, retryable: false, error: "destinatario_nao_autorizado" };
+      const att = m.attachments ?? [];
+      if (att.length > 1 || att.some((a) => a.contentType !== "application/pdf" || !Buffer.isBuffer(a.content) || a.content.length < 100 || a.content.length > MAX_ATTACHMENT_BYTES || a.content.subarray(0, 5).toString("latin1") !== "%PDF-" || !/^[A-Za-z0-9._-]{1,80}\.pdf$/.test(a.filename))) return { ok: false, retryable: false, error: "anexo_invalido" };
       let ip: { address: string; family: number };
       try {
         let dnsTimer: ReturnType<typeof setTimeout> | undefined;
@@ -70,6 +73,7 @@ export function createSmtpEmailProvider(cfg: SmtpConfig, allowed: readonly strin
           transport.sendMail({
             from: { name: cfg.fromName ?? "", address: cfg.fromEmail }, to: m.to, replyTo: cfg.replyTo ?? undefined, subject: m.subject, text: m.text, html: m.html,
             messageId: `<${m.idempotencyKey.replace(/[^A-Za-z0-9._-]/g, "")}@${fromDomain}>`,
+            ...(att.length ? { attachments: att.map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType })) } : {}),
           }),
           new Promise<never>((_, rej) => { timer = setTimeout(() => rej(Object.assign(new Error("timeout"), { code: "ETIMEDOUT" })), TOTAL_TIMEOUT_MS); }),
         ]);

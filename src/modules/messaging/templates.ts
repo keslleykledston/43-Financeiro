@@ -17,11 +17,12 @@ export const CHANNEL_LABEL: Record<Channel | "interno", string> = { email: "E-ma
 /** Dias em relação ao vencimento; `emissao` usa a data de emissão da cobrança. */
 export const OFFSET: Record<Exclude<QueueKind, "emissao">, number> = { d_menos_3: -3, d0: 0, d_mais_3: 3, d_mais_7: 7, revisao_d15: 15 };
 
-export const PLACEHOLDERS = ["cliente", "empresa", "valor", "vencimento", "competencia", "descricao", "emissao"] as const;
+export const PLACEHOLDERS = ["cliente", "empresa", "valor", "vencimento", "competencia", "descricao", "emissao", "linha_digitavel", "link_boleto"] as const;
 export type Placeholder = (typeof PLACEHOLDERS)[number];
 export const PLACEHOLDER_HELP: Record<Placeholder, string> = {
   cliente: "Nome do cliente", empresa: "Nome da empresa emissora", valor: "Valor da cobrança (R$)", vencimento: "Data de vencimento",
   competencia: "Mês de competência (MM/AAAA)", descricao: "Descrição do serviço", emissao: "Data de emissão",
+  linha_digitavel: "Linha digitável do boleto (consultada na Cora; o PDF segue em anexo no e-mail)", link_boleto: "Link do PDF do boleto na Cora",
 };
 
 const TOKEN = /\{\{\s*([^{}]*?)\s*\}\}/g;
@@ -62,7 +63,7 @@ export const toEmailHtml = (renderedText: string) => escapeHtml(renderedText).re
 
 /** Dados fictícios para a prévia do editor (nunca dados reais). */
 export const SAMPLE_VARS: Vars = {
-  cliente: "Cliente Exemplo Ltda", empresa: "Empresa Exemplo", valor: "R$ 2.500,00", vencimento: "14/11/2026", competencia: "10/2026", descricao: "Monitoramento de redes", emissao: "01/11/2026",
+  cliente: "Cliente Exemplo Ltda", empresa: "Empresa Exemplo", valor: "R$ 2.500,00", vencimento: "14/11/2026", competencia: "10/2026", descricao: "Monitoramento de redes", emissao: "01/11/2026", linha_digitavel: "00190.00009 03215.837001 25845.801747 9 14200000250000", link_boleto: "https://exemplo.cora.com.br/boleto.pdf",
 };
 
 /** Agenda da régua para uma cobrança aprovada. Fim de semana/feriado e janela de envio entram na E09. */
@@ -74,9 +75,9 @@ export function ladder(c: { issueDate: string; dueDate: string }): { kind: Queue
 }
 
 export const DEFAULTS: Record<Kind, { subject: string; body: string }> = {
-  emissao: { subject: "Cobrança {{empresa}} — vencimento {{vencimento}}", body: "Olá, {{cliente}}.\n\nSua cobrança de {{valor}} referente a {{descricao}} (competência {{competencia}}) foi emitida e vence em {{vencimento}}.\n\nQualquer dúvida, responda esta mensagem.\n\n{{empresa}}" },
-  d_menos_3: { subject: "Lembrete: cobrança vence em {{vencimento}}", body: "Olá, {{cliente}}.\n\nLembramos que a cobrança de {{valor}} ({{descricao}}) vence em {{vencimento}}.\n\nSe já pagou, desconsidere esta mensagem.\n\n{{empresa}}" },
-  d0: { subject: "Sua cobrança vence hoje ({{vencimento}})", body: "Olá, {{cliente}}.\n\nSua cobrança de {{valor}} ({{descricao}}) vence hoje, {{vencimento}}.\n\nSe já pagou, desconsidere esta mensagem.\n\n{{empresa}}" },
-  d_mais_3: { subject: "Cobrança em aberto desde {{vencimento}}", body: "Olá, {{cliente}}.\n\nNão identificamos o pagamento de {{valor}} ({{descricao}}), vencido em {{vencimento}}.\n\nSe já pagou, desconsidere. Caso precise de ajuda, responda esta mensagem.\n\n{{empresa}}" },
-  d_mais_7: { subject: "Cobrança em aberto — {{empresa}}", body: "Olá, {{cliente}}.\n\nA cobrança de {{valor}} ({{descricao}}), vencida em {{vencimento}}, segue em aberto.\n\nSe houver algum problema, fale conosco para combinarmos a melhor solução.\n\n{{empresa}}" },
+  emissao: { subject: "Cobrança {{empresa}} — vencimento {{vencimento}}", body: "Olá, {{cliente}}.\n\nSua cobrança de {{valor}} referente a {{descricao}} (competência {{competencia}}) foi emitida e vence em {{vencimento}}.\n\nLinha digitável do boleto:\n{{linha_digitavel}}\nO PDF do boleto segue em anexo.\n\nQualquer dúvida, responda esta mensagem.\n\n{{empresa}}" },
+  d_menos_3: { subject: "Lembrete: cobrança vence em {{vencimento}}", body: "Olá, {{cliente}}.\n\nLembramos que a cobrança de {{valor}} ({{descricao}}) vence em {{vencimento}}.\n\nLinha digitável do boleto:\n{{linha_digitavel}}\nO PDF do boleto segue em anexo.\n\nSe já pagou, desconsidere esta mensagem.\n\n{{empresa}}" },
+  d0: { subject: "Sua cobrança vence hoje ({{vencimento}})", body: "Olá, {{cliente}}.\n\nSua cobrança de {{valor}} ({{descricao}}) vence hoje, {{vencimento}}.\n\nLinha digitável do boleto:\n{{linha_digitavel}}\nO PDF do boleto segue em anexo.\n\nSe já pagou, desconsidere esta mensagem.\n\n{{empresa}}" },
+  d_mais_3: { subject: "Cobrança em aberto desde {{vencimento}}", body: "Olá, {{cliente}}.\n\nNão identificamos o pagamento de {{valor}} ({{descricao}}), vencido em {{vencimento}}.\n\nLinha digitável do boleto:\n{{linha_digitavel}}\nO PDF do boleto segue em anexo.\n\nSe já pagou, desconsidere. Caso precise de ajuda, responda esta mensagem.\n\n{{empresa}}" },
+  d_mais_7: { subject: "Cobrança em aberto — {{empresa}}", body: "Olá, {{cliente}}.\n\nA cobrança de {{valor}} ({{descricao}}), vencida em {{vencimento}}, segue em aberto.\n\nLinha digitável do boleto:\n{{linha_digitavel}}\nO PDF do boleto segue em anexo.\n\nSe houver algum problema, fale conosco para combinarmos a melhor solução.\n\n{{empresa}}" },
 };

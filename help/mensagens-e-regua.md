@@ -54,3 +54,9 @@ Em *Integrações → Provedores* aparecem Cora (somente boletos), NFS-e da Cora
 ## E-mail real (canário)
 Em geral tudo aqui é **simulado**. Se a diretoria registrou a autorização de envio real e a chave do servidor está ligada (o topo mostra **E-MAIL REAL ATIVO**), *Processar fila* envia e-mails de verdade, **só** para contatos da lista autorizada. Itens ganham os status **Enviando** e **Enviado (real)**; os fora da lista ficam *Bloqueados*. Mensagem enviada não pode ser apagada nem alterada. Detalhes em *Conta de e-mail (SMTP)*.
 
+## Boleto no e-mail (E33)
+Os modelos aceitam dois campos novos: **`{{linha_digitavel}}`** (linha digitável do boleto, consultada na Cora na hora do envio) e **`{{link_boleto}}`** (link do PDF). Os modelos **padrão** novos já trazem a linha digitável e avisam que o **PDF segue em anexo**. Modelos já existentes não mudam sozinhos: edite-os para incluir o campo.
+- **Empresa com boleto na Cora (testes ou produção):** a mensagem só sai quando o boleto **existe e está em aberto**. Sem boleto (ainda não emitido, pago ou cancelado) ela **espera**; boleto pago ou cancelado para a régua. No e-mail real, o **PDF do boleto vai em anexo** (se o PDF não puder ser baixado, o e-mail **não sai sem o boleto**: volta à fila e tenta de novo).
+- **Empresa com boleto simulado:** o texto mostra "(boleto simulado)" e o **e-mail real é bloqueado** se o modelo usa o boleto (nunca vai boleto de mentira a cliente de verdade).
+- Continua valendo o canário do e-mail: só com autorização escrita, lista de destinatários e pelo botão **Processar fila** (o agendador não envia e-mail real).
+
