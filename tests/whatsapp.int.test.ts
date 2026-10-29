@@ -30,6 +30,9 @@ class FakeWaha implements WahaClient {
   getCount = 0;
   dropOnGet = 0; // a partir da N-ésima leitura de estado a conexão aparece parada (cai entre avaliar e enviar)
   refOverride = "";
+  exists: "yes" | "no" | "error" = "yes";
+  pnOverride = ""; // devolve outro id canônico (9º dígito ou número diferente)
+  checked: string[] = [];
   sendMode: "ok" | "unknown" | "fail" = "ok";
   private guard() { if (this.down) throw new WahaError("network", 0, "nao_enviado"); }
   async health() { return !this.down; }
@@ -39,6 +42,13 @@ class FakeWaha implements WahaClient {
   async stopSession(name: string) { this.calls.push("stop"); this.guard(); const s = this.sessions.get(name); if (s) { s.status = "STOPPED"; s.meId = null; } }
   async logoutSession(name: string) { this.calls.push("logout"); this.guard(); const s = this.sessions.get(name); if (!s || s.status !== "WORKING") throw new WahaError("http", 422, "http_422"); s.meId = null; }
   async qr(name: string) { this.calls.push("qr"); this.guard(); if (this.sessions.get(name)?.status !== "SCAN_QR_CODE") throw new WahaError("http", 422, "http_422"); return Buffer.from("PNGfake"); }
+  async checkNumber(_s: string, digits: string) {
+    this.calls.push("check"); this.checked.push(digits);
+    if (this.exists === "error") throw new WahaError("timeout");
+    if (this.exists === "no") return { exists: false, chatId: null };
+    if (this.pnOverride === "SEM_PN") return { exists: true, chatId: null };
+    return { exists: true, chatId: this.pnOverride || `${digits}@c.us` };
+  }
   async sendText(m: { session: string; chatId: string; text: string }): Promise<SendResult> {
     this.calls.push("send");
     if (this.sendMode === "unknown") return { ok: false, retryable: false, unknown: true, error: "sem_confirmacao" };
@@ -387,6 +397,36 @@ describe.skipIf(!enabled)("W1 WhatsApp: conexões, QR, isolamento por empresa, a
     expect(l).toMatchObject({ status: "desconhecido", error: "reserva_abandonada" }); // a verdade do registro não muda
     expect((await audits())).toContain("whatsapp.test_late_result");
     expect((await audits())).not.toContain("whatsapp.test_sent");
+  });
+
+  it("antes de enviar, o número é CONSULTADO na WAHA (sem isso o motor falha com 'no LID found'); usa o id canônico; número fora do WhatsApp ou divergente não envia", async () => {
+    const id = await ready({ limit: 5 });
+    // 1) caminho feliz: consulta ocorre ANTES do envio
+    await sendTest(db, dirA, A, { sessionId: id, phone: PHONE, confirm: true, key: k() }, deps);
+    expect(waha.calls.indexOf("check")).toBeLessThan(waha.calls.indexOf("send"));
+    expect(waha.checked).toEqual([DIGITS]);
+    // 2) a WAHA conhece o MESMO contato sem o 9º dígito (conta antiga do WhatsApp): equivalência oficial, envia ao id canônico
+    waha.pnOverride = "559299990000@c.us"; // 12 dígitos; o autorizado tem 13 (5592 9 9999 0000)
+    await sendTest(db, dirA, A, { sessionId: id, phone: PHONE, confirm: true, key: k() }, deps);
+    expect(waha.sent[1].chatId).toBe("559299990000@c.us");
+    // 3) a WAHA devolve OUTRO número (finais diferentes, DDD diferente, forma de telefone fixo, id interno): bloqueado, nada enviado
+    for (const pn of ["559299991111@c.us", "551199990000@c.us", "559222220000@c.us", "5592999990000999@c.us", "160123456789@lid", "5592999990000@g.us"]) {
+      waha.pnOverride = pn;
+      await expect(sendTest(db, dirA, A, { sessionId: id, phone: PHONE, confirm: true, key: k() }, deps)).rejects.toThrow(/outro número|identificador/);
+    }
+    // 3b) existe, mas a WAHA não devolve id individual: nada sai
+    waha.pnOverride = "SEM_PN";
+    // 4) número não está no WhatsApp: falhou, nada enviado
+    await expect(sendTest(db, dirA, A, { sessionId: id, phone: PHONE, confirm: true, key: k() }, deps)).rejects.toThrow(/identificador/);
+    waha.pnOverride = ""; waha.exists = "no";
+    await expect(sendTest(db, dirA, A, { sessionId: id, phone: PHONE, confirm: true, key: k() }, deps)).rejects.toThrow(/não foi encontrado no WhatsApp/);
+    // 5) consulta falhou (WAHA lenta): nada saiu, registro fecha como falhou (não 'desconhecido': a consulta não envia)
+    waha.exists = "error";
+    await expect(sendTest(db, dirA, A, { sessionId: id, phone: PHONE, confirm: true, key: k() }, deps)).rejects.toThrow(/último momento/);
+    expect(waha.sent).toHaveLength(2);
+    const st = (await db.select().from(schema.whatsappSendLog)).map((r) => `${r.status}:${r.error ?? "-"}`).sort();
+    expect(st.filter((x) => x.startsWith("falhou:numero_divergente"))).toHaveLength(6);
+    expect(st.filter((x) => !x.startsWith("falhou:numero_divergente"))).toEqual(["enviado:-", "enviado:-", "falhou:conexao_sem_resposta", "falhou:numero_fora_do_whatsapp", "falhou:numero_sem_id_canonico"]);
   });
 
   it("registro de envios é permanente e só sai de 'enviando' uma vez; conexão e vínculo não são editados nem apagados", async () => {

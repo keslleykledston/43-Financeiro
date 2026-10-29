@@ -49,6 +49,11 @@ export interface WahaClient {
   logoutSession(name: string): Promise<void>;
   /** PNG do QR (só com a sessão em SCAN_QR_CODE). Nunca em log. */
   qr(name: string): Promise<Buffer>;
+  /**
+   * Consulta (SEM enviar) se o número existe no WhatsApp. O motor GOWS só consegue enviar a um número depois de resolvê-lo (id interno "LID"): sem esta consulta o envio
+   * falha com "no LID found". Devolve o id canônico individual (`55…@c.us`) que a WAHA conhece para o número (resolve a diferença do 9º dígito), ou null se não existe.
+   */
+  checkNumber(session: string, digits: string): Promise<{ exists: boolean; chatId: string | null }>;
   sendText(m: { session: string; chatId: string; text: string }): Promise<SendResult>;
 }
 
@@ -120,6 +125,13 @@ export function createWahaClient(env: WahaEnv = process.env, fetchImpl: Fetch = 
       if (!r.type.startsWith("image/png")) throw new WahaError("http", 502, "qr_formato_inesperado");
       if (r.buf.length < 100 || r.buf.subarray(1, 4).toString() !== "PNG") throw new WahaError("http", 502, "qr_invalido");
       return r.buf;
+    },
+    async checkNumber(session, digits) {
+      if (!/^55\d{10,11}$/.test(digits)) throw new WahaError("blocked", 0, "numero_invalido");
+      const r = ok(await call("GET", `/api/contacts/check-exists?phone=${digits}&session=${must(session)}`));
+      const j = asJson(r) as { numberExists?: unknown; pn?: unknown };
+      if (j.numberExists !== true) return { exists: false, chatId: null };
+      return { exists: true, chatId: typeof j.pn === "string" && CHAT_ID.test(j.pn) ? j.pn : null }; // pn fora do formato individual = não usar
     },
     async sendText(m) {
       if (!SESSION_NAME.test(m.session)) return { ok: false, retryable: false, error: "nome_de_sessao_invalido" };

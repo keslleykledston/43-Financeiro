@@ -7,6 +7,8 @@ const KEY = process.env.FAKE_WAHA_KEY || "sandbox-waha-key";
 const sessions = new Map(); // name -> { status, me }
 const sent = [];
 let sendMode = "ok"; // ok | timeout | error500 | error422
+let existsMode = "yes"; // yes | no
+const known = new Set(); // números já consultados (o motor real só envia depois de resolver o número: senão 500 "no LID found")
 
 function png() { // PNG 64x64 em tons de cinza com ruído (não comprime demais; só precisa ser um PNG válido)
   const w = 64, raw = Buffer.alloc((w + 1) * w);
@@ -31,9 +33,15 @@ createServer((req, res) => {
     const p = url.pathname, m = req.method;
     let r;
     if (p === "/__test/connect" && m === "POST") { const s = sessions.get(body.name); if (s) { s.status = "WORKING"; s.me = { id: `${body.phone || "5592999990000"}@c.us`, pushName: "Teste" }; } return json(res, 200, { ok: !!s }); }
-    if (p === "/__test/mode" && m === "POST") { sendMode = body.mode || "ok"; return json(res, 200, { sendMode }); }
+    if (p === "/__test/mode" && m === "POST") { sendMode = body.mode || sendMode; existsMode = body.exists || existsMode; return json(res, 200, { sendMode, existsMode }); }
     if (p === "/__test/sent" && m === "GET") return json(res, 200, sent);
-    if (p === "/__test/reset" && m === "POST") { sessions.clear(); sent.length = 0; sendMode = "ok"; return json(res, 200, { ok: true }); }
+    if (p === "/__test/reset" && m === "POST") { sessions.clear(); sent.length = 0; known.clear(); sendMode = "ok"; existsMode = "yes"; return json(res, 200, { ok: true }); }
+    if (p === "/api/contacts/check-exists" && m === "GET") {
+      const ph = url.searchParams.get("phone") || "";
+      if (existsMode === "no") return json(res, 200, { numberExists: false });
+      known.add(ph.slice(2, 4) + ph.slice(-8));
+      return json(res, 200, { numberExists: true, chatId: `1601${ph.slice(-8)}@lid`, pn: `${ph}@c.us` });
+    }
     if (p === "/api/sessions" && m === "GET") return json(res, 200, [...sessions].map(([n, s]) => view(n, s)));
     if (p === "/api/sessions" && m === "POST") {
       const s = { status: body.start === false ? "STOPPED" : "STARTING", me: null }; sessions.set(body.name, s);
@@ -56,6 +64,7 @@ createServer((req, res) => {
     if (p === "/api/sendText" && m === "POST") {
       const s = sessions.get(body.session);
       if (!s || s.status !== "WORKING") return json(res, 422, { error: "Session status is not as expected. Try again later or restart the session", session: body.session, status: s?.status ?? "STOPPED", expected: ["WORKING"] });
+      if (!known.has(String(body.chatId).slice(2, 4) + String(body.chatId).split("@")[0].slice(-8))) return json(res, 500, { statusCode: 500, message: "2 UNKNOWN: no LID found" });
       if (sendMode === "timeout") return; // nunca responde: o cliente estoura o tempo
       if (sendMode === "error500") return json(res, 500, { statusCode: 500 });
       if (sendMode === "error422") return json(res, 422, { statusCode: 422 });

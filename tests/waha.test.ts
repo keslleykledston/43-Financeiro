@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createWahaClient, sessionNameFor, wahaConfigured, WahaError, CHAT_ID, SESSION_NAME } from "@/modules/providers/waha";
-import { chatIdFor, mapWahaStatus, maskMe, maskPhone, parseBrPhone, testText } from "@/modules/whatsapp/domain";
+import { chatIdFor, mapWahaStatus, maskMe, maskPhone, parseBrPhone, sameBrNumber, testText } from "@/modules/whatsapp/domain";
 
 const fx = (n: string) => readFileSync(join(__dirname, "fixtures/waha", n), "utf8");
 const KEY = "chave-secreta-de-teste-0123456789";
@@ -125,7 +125,36 @@ describe("W1 WAHA — corpo da resposta lido dentro do prazo e do limite", () =>
   });
 });
 
+describe("W1 WAHA — consulta do número antes do envio", () => {
+  const chk = (body: unknown, status = 200) => mk(() => json(body, status));
+  it("existe: devolve o id canônico individual (pn); o id interno (@lid) nunca é usado", async () => {
+    const { client, calls } = chk({ numberExists: true, chatId: "160123456789@lid", pn: "5592999990000@c.us" });
+    expect(await client.checkNumber(NAME, "5592999990000")).toEqual({ exists: true, chatId: "5592999990000@c.us" });
+    expect(calls[0].url).toBe(`http://waha:3000/api/contacts/check-exists?phone=5592999990000&session=${NAME}`);
+    expect(calls[0].init.method).toBe("GET");
+  });
+  it("não existe, ou pn fora do formato individual: sem id para enviar", async () => {
+    expect(await chk({ numberExists: false }).client.checkNumber(NAME, "5592999990000")).toEqual({ exists: false, chatId: null });
+    expect(await chk({ numberExists: true, pn: "120363025246125486@g.us" }).client.checkNumber(NAME, "5592999990000")).toEqual({ exists: true, chatId: null });
+    expect(await chk({ numberExists: true }).client.checkNumber(NAME, "5592999990000")).toEqual({ exists: true, chatId: null });
+  });
+  it("entrada inválida não chega à rede; erro da WAHA vira WahaError sem corpo", async () => {
+    const { client, calls } = chk({ numberExists: true });
+    for (const bad of ["92999990000", "5592999990000&x=1", "../5592", "", "55929999900001234"]) await expect(client.checkNumber(NAME, bad)).rejects.toMatchObject({ kind: "blocked" });
+    for (const badSession of ["default", `${NAME}&x=1`, `${NAME}/../x`, `${NAME}?a=b`, "k3g-0a1b2c3d%26x"]) await expect(client.checkNumber(badSession, "5592999990000")).rejects.toMatchObject({ kind: "blocked" });
+    expect(calls).toHaveLength(0);
+    await expect(chk("corpo secreto", 500).client.checkNumber(NAME, "5592999990000")).rejects.toMatchObject({ kind: "http", status: 500 });
+  });
+});
+
 describe("W1 WhatsApp — domínio puro", () => {
+  it("mesmo assinante: igual, ou só a equivalência oficial do 9º dígito de celular (nunca fixo, nunca outro DDD/final)", () => {
+    expect(sameBrNumber("5592999990000", "5592999990000")).toBe(true);
+    expect(sameBrNumber("5592999990000", "559299990000")).toBe(true);  // com 9 × sem 9
+    expect(sameBrNumber("559299990000", "5592999990000")).toBe(true);  // vale nos dois sentidos
+    for (const [a, b] of [["5592999990000", "559299991111"], ["5592999990000", "551199990000"], ["5592999990000", "559222220000"], ["5592999990000", "5592899990000"],
+      ["559232345678", "5592932345678"], ["5592999990000", "5592999990001"], ["5592999990000", "55929999900000"], ["5592999990000", "5592"], ["x", "y"], ["5592999990000", ""]]) expect(sameBrNumber(a, b), `${a} × ${b}`).toBe(false);
+  });
   it("estados da WAHA → estados nossos; o desconhecido nunca vira 'conectada'", () => {
     expect(mapWahaStatus("WORKING")).toBe("CONNECTED");
     expect(mapWahaStatus("SCAN_QR_CODE")).toBe("QR_REQUIRED");

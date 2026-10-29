@@ -58,3 +58,16 @@ export type Check = { key: string; ok: boolean; label: string; detail?: string }
 
 /** O id devolvido pela WAHA traz o telefone: o banco guarda só este hash (32 hex). A entrega 3 correlaciona ACK/eventos aplicando o MESMO hash ao id que chegar. */
 export const refHash = (id: string) => createHash("sha256").update(id).digest("hex").slice(0, 32);
+
+/**
+ * Mesmo assinante? Igualdade exata, OU a equivalência oficial do 9º dígito dos celulares brasileiros: `55 DDD 9 XXXXXXXX` (13 dígitos) e `55 DDD XXXXXXXX` (12) são a MESMA linha
+ * quando o DDD e os 8 dígitos finais coincidem e o 8-dígito é de celular (começa em 6 a 9; fixos começam em 2 a 5 e nunca casam). Só isto: qualquer outra diferença = outro número.
+ * Usada para aceitar o id canônico que a WAHA devolve para o número JÁ AUTORIZADO (contas antigas do WhatsApp existem sem o 9).
+ */
+export function sameBrNumber(a: string, b: string): boolean {
+  if (!/^55\d{10,11}$/.test(a) || !/^55\d{10,11}$/.test(b)) return false;
+  if (a === b) return true;
+  const [long, short] = a.length === 13 && b.length === 12 ? [a, b] : a.length === 12 && b.length === 13 ? [b, a] : [null, null];
+  if (!long || !short) return false;
+  return long.slice(2, 4) === short.slice(2, 4) && long[4] === "9" && long.slice(5) === short.slice(4) && /^[6-9]/.test(short.slice(4));
+}

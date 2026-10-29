@@ -6,7 +6,7 @@ import { Invalid, requirePerm } from "@/modules/identity/service";
 import { getSettings } from "@/modules/messaging/service";
 import { WINDOW_REASON, windowState } from "@/modules/messaging/window";
 import { createWahaClient, sessionNameFor, wahaConfigured, WahaError, type WahaClient, type WahaEnv, type WahaSession } from "@/modules/providers/waha";
-import { CAPS, chatIdFor, mapWahaStatus, maskMe, maskPhone, parseBrPhone, refHash, testText, type Check, type SessionStatus } from "./domain";
+import { CAPS, chatIdFor, mapWahaStatus, maskMe, maskPhone, parseBrPhone, refHash, sameBrNumber, testText, type Check, type SessionStatus } from "./domain";
 
 /**
  * W1 — conexões de WhatsApp (WAHA, NÃO oficial) e envio MANUAL de teste. Nada aqui é automático: sem régua, sem fila, sem webhook (entregas 2 a 4).
@@ -281,8 +281,23 @@ export async function sendTest(db: DB, actorId: string, companyId: string, input
     let live: WahaSession | null = null;
     try { live = await w.getSession(session.providerSession); } catch { return await abort("conexao_sem_resposta"); }
     if (live?.status !== "WORKING") { await syncFromWaha(db, session.id, session.providerSession, async () => live, deps); return await abort("conexao_nao_conectada"); }
+    // o motor precisa resolver o número antes de enviar (sem isso: "no LID found"); a consulta NÃO envia nada. O destino é o id canônico que a WAHA conhece, mas SÓ se for o número autorizado
+    // (igual, ou a equivalência oficial do 9º dígito). Sem id canônico válido ou com outro número: nada sai.
+    let chatId = chatIdFor(digits);
+    try {
+      const chk = await w.checkNumber(session.providerSession, digits);
+      if (!chk.exists) { await finish({ status: "falhou", error: "numero_fora_do_whatsapp" }); throw new Invalid("Este número não foi encontrado no WhatsApp. Confira o número. Nada foi enviado"); }
+      if (!chk.chatId) { await finish({ status: "falhou", error: "numero_sem_id_canonico" }); throw new Invalid("O WhatsApp não devolveu o identificador deste número. Nada foi enviado"); }
+      // só conversa INDIVIDUAL (c.us) e o mesmo número autorizado
+      if (!/^55\d{10,11}@c\.us$/.test(chk.chatId) || !sameBrNumber(digits, chk.chatId.slice(0, chk.chatId.indexOf("@")))) { await finish({ status: "falhou", error: "numero_divergente" }); throw new Invalid("O WhatsApp devolveu outro número para este contato. Nada foi enviado"); }
+      chatId = chk.chatId;
+    } catch (e) { if (e instanceof Invalid) throw e; return await abort("conexao_sem_resposta"); } // a consulta não envia: falhar aqui = nada saiu
+    // revalida pausa e autorização no último instante (a consulta levou tempo de rede)
+    const [p2] = await db.select({ p: whatsappSessions.paused }).from(whatsappSessions).where(eq(whatsappSessions.id, session.id));
+    const [a2] = await db.select({ id: whatsappSendAuthorizations.id }).from(whatsappSendAuthorizations).where(and(eq(whatsappSendAuthorizations.companyId, companyId), eq(whatsappSendAuthorizations.active, true)));
+    if (!sendOn(env) || p2?.p !== false || a2?.id !== authId) return await abort("bloqueado_antes_de_enviar");
     calling = true;
-    const res = await w.sendText({ session: session.providerSession, chatId: chatIdFor(digits), text: testText(ev.senderIdentity) });
+    const res = await w.sendText({ session: session.providerSession, chatId, text: testText(ev.senderIdentity) });
     await finish(res.ok ? { status: "enviado", providerRef: refHash(res.providerRef) } : { status: res.unknown ? "desconhecido" : "falhou", error: res.error });
     if (!res.ok) throw new Invalid(res.unknown ? "A WAHA não confirmou o envio (a mensagem PODE ter chegado). Confira o aparelho; ela não será reenviada sozinha" : `A WAHA recusou o envio (${res.error}). Nada foi enviado`);
     return { logId };

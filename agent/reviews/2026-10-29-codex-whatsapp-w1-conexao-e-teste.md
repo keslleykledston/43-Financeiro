@@ -29,3 +29,14 @@ Data: 2026-10-29 · Duas revisões read-only (Codex 1.0.4) do diff antes do depl
 
 ## Limite honesto da validação
 Nenhum envio real foi feito: a WAHA só foi exercitada em spike (sem login de aparelho) e por WAHA falsa que reproduz os formatos medidos. O formato real da resposta de `sendText` e o pareamento do número só serão provados no canário com aparelho (WhatsApp pode recusar parear em IP de datacenter).
+
+## 3ª revisão — consulta do número antes do envio (achado do 1º envio real)
+Causa do 1º teste: WAHA/GOWS respondeu 500 `no LID found` (o motor só envia depois de resolver o número). Correção: `GET /api/contacts/check-exists` antes do `sendText`; destino = id canônico devolvido.
+| Sev. | Achado | Tratamento |
+|---|---|---|
+| HIGH | `pn` devolvido comparado só por DDD + 8 finais (heurística) podia enviar a forma não autorizada | `sameBrNumber`: igual, ou equivalência oficial do 9º dígito de celular (13×12 dígitos, mesmo DDD, 8 finais iguais, 8-dígito começa em 6–9); resto = divergente. Para o número do dono a WAHA devolve a forma SEM o 9 (conta antiga) → a regra era necessária |
+| MEDIUM | Consulta positiva sem `pn` válido caía no destino original | `numero_sem_id_canonico`: falha antes de enviar |
+| MEDIUM | Limite diário cobre consultas sem envio | Documentado no ADR (conta tentativas reservadas; conservador de propósito) |
+| MEDIUM | Sem revalidar autorização/pausa depois da consulta | Revalida pausa e autorização imediatamente antes do `sendText` |
+| MEDIUM/LOW | Testes não provavam a segurança; sem teste de injeção em `session` | Casos de colisão (DDD, final, fixo, grupo, @lid, comprimento) e injeção em `session`; WAHA falsa reproduz o 500 `no LID found` sem consulta |
+Achado extra do teste: o serviço também exige `@c.us` (um id `@g.us` com os mesmos dígitos passava pela comparação numérica).

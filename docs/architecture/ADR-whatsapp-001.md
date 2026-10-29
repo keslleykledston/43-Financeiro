@@ -39,6 +39,9 @@ Imagem **`devlikeapro/waha:gows-2026.8.2`** (digest `sha256:23f2d002d262b54c711a
 7. Texto do teste é **fixo**, sem dado de cliente, sem link e **sem «responda PARAR»** (não existe recebimento de respostas antes da entrega 3: prometer opt-out seria enganoso).
 8. Lovable (MCP): **não usado** nesta entrega — o design system do repositório e o protótipo do pacote bastaram, e a política do servidor é não gastar créditos quando o trabalho local é eficiente.
 
+## Achado do 1º envio real (2026-10-29) e correção
+O 1º teste (conexão pareada, número do dono) falhou com 500 da WAHA: `no LID found for <número>@s.whatsapp.net`. O motor **GOWS só envia depois de resolver o número**. Correção: antes do `sendText`, `GET /api/contacts/check-exists` (não envia nada). Para o número do dono a WAHA devolveu o id canônico **sem o 9º dígito** (conta antiga do WhatsApp). Regra de segurança: o destino só vale se for o número **autorizado** — igual, ou a equivalência oficial do 9º dígito de celular (`sameBrNumber`: mesmo DDD, mesmos 8 finais, 8-dígito de celular 6–9). Sem id individual, com outro número ou fora do WhatsApp: nada sai (`falhou`). O limite diário conta tentativas reservadas (inclui consultas sem envio): conservador de propósito.
+
 ## Fora desta entrega (próximas)
 2: vínculo de 2ª empresa, consentimento/opt-out por contato, caixa de bloqueios. 3: modelos/aprovação, fila/outbox, receptor de webhook com HMAC sha512, caixa de entrada e triagem. 4: régua D-3/D0/D+3 **desativada**, releitura da dívida no envio, cancelamento por baixa da Cora, painel. Nenhuma automação habilitada em produção sem aprovação do dono.
 
