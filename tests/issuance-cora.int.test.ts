@@ -617,6 +617,23 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     expect(cora.posts().every((c) => c.body.customer.document.identity !== "11222333000181")).toBe(true);
   });
 
+  it("LIMITE DIÁRIO conta só o provedor em uso: boletos da Cora de TESTES emitidos hoje não gastam o limite da emissão REAL", async () => {
+    await useCora(); // Cora de testes
+    const batchId = await approvedBatch();
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, NOW); // 2 emitidos hoje no stage
+    expect((await reqs()).filter((r) => r.status === "emitido")).toHaveLength(2);
+    for (const c of [cli1, cli2]) await cancelBoleto(db, dirA, A, { chargeId: (await chargeOf(c)).id, reason: "preparo", confirm: true });
+    await credsProd(); prodOn();
+    await arm({ dailyLimit: 1 }); // limite 1 por dia, e já houve 2 emissões de TESTE hoje
+    clock("2026-10-05T12:00:00-04:00");
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    const out = await processIssuance(db, gerA, A, PN(), undefined, { confirmLive: true });
+    expect(out.claimed).toBe(1); // antes: 0 ("limite diário atingido") por contar os de teste
+    expect(out.issued + out.failed).toBe(1);
+    expect((await reqs()).filter((r) => r.mode === "cora_producao" && r.status !== "pendente")).toHaveLength(1);
+  });
+
   it("PRODUÇÃO — boleto NOSSO já existente na Cora (resposta perdida) é devolvido sem criar outro; vencimento passado e valor acima do teto não emitem", async () => {
     await credsProd(); clock("2026-10-05T12:00:00-04:00");
     const batchId = await approvedBatch();

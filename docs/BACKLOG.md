@@ -194,3 +194,8 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [x] E30: pedido de cancelamento de boleto por gerente/assistente com decisão da diretoria.
 - [x] E31: regra de reajuste por contrato (índice/percentual), "Propor reajuste" pré-preenche o aditivo, adiar/ignorar alertas por ciclo.
 - [x] H2 (leitura): linha do tempo dos clientes inferida das abas mensais + ponte de receita. Fora (exige autorização): gerar aditivos "inferidos" e corrigir início de vigência.
+
+## Fases futuras pedidas pelo dono (2026-10-28)
+- [ ] **E-mail real**: enviar boleto (link/PDF da Cora), lembretes de vencimento e cobranças pela régua. Reusa o adaptador SMTP (E23, canário) + "Ver dados do boleto" (E10b-3). Exige autorização escrita, SPF/DKIM/DMARC e lista de destinatários; boleto no corpo/anexo só depois do canário de e-mail.
+- [ ] **WhatsApp (WAHA)** depois do e-mail: mesmos lembretes/cobranças; exige opt-in, número dedicado e limites.
+- [ ] Canário de emissão com **clientes reais** (lote 01/11, venc. 13–16/11): roteiro em docs/E10_GOLIVE.md; sem emissão manual da empresa durante a rodada.

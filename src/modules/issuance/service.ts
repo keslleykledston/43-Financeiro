@@ -181,7 +181,7 @@ export async function processIssuance(db: DB, actorId: string, companyId: string
       .where(and(eq(issuanceRequests.companyId, companyId), eq(issuanceRequests.status, "enviando"), sql`${issuanceRequests.claimedAt} < ${new Date(now.getTime() - STUCK_MS).toISOString()}::timestamptz`)).returning({ id: issuanceRequests.id });
     out.recovered = stuck.length;
     const today = localParts(now).date;
-    const [{ n }] = (await x.execute(sql`select count(*)::int n from issuance_requests where company_id = ${companyId} and claimed_at is not null and (claimed_at at time zone 'America/Manaus')::date = ${today}::date and attempts > 0`)) as unknown as { n: number }[];
+    const [{ n }] = (await x.execute(sql`select count(*)::int n from issuance_requests where company_id = ${companyId} and claimed_at is not null and (claimed_at at time zone 'America/Manaus')::date = ${today}::date and attempts > 0 and (kind = 'nfse' or mode = ${st.boletoProvider})`)) as unknown as { n: number }[]; // o limite do dia conta só o provedor EM USO (boletos da Cora de testes não gastam o limite da emissão real)
     const budget = Math.max(0, st.dailyLimit - Number(n));
     // consultas de status (NFS-e "processando") não gastam o limite de emissão
     const poll = await x.select().from(issuanceRequests).where(and(eq(issuanceRequests.companyId, companyId), eq(issuanceRequests.status, "processando"), eq(issuanceRequests.kind, "nfse"))).limit(50);
