@@ -27,6 +27,9 @@
 - Imagem fixada por digest (`gows-2026.8.2`). Trocar de versão = novo spike (rotas, estados, HMAC) antes; nunca `latest`.
 - Incidentes: desconectou/“com problema” → pausar em /whatsapp e reconectar manualmente; «sem confirmação» → conferir o aparelho, nunca reenviar sozinho; suspeita de restrição → desligar `WHATSAPP_SEND_ENABLED` e investigar (sem contornos técnicos).
 
+## Preencher contatos financeiros pela planilha (operação de dados)
+`scripts/ops-fill-contacts.ts` (simulação por padrão; `OPS_CONFIRM=1` grava). Só clientes ATIVOS; só origem `csv` (contato do CRM e manual nunca é tocado); todos os e-mails válidos viram contato financeiro; o telefone vai no contato principal; idempotente. Sempre backup antes. Reverter: apagar `customer_contacts` com `source = 'csv'` criados na data da auditoria `ops.contacts_filled_from_planilha` (o log só tem contagens). Pendências vão para arquivo privado fora do Git.
+
 ## Rollback de migrações (Drizzle não gera "down")
 Regra: antes de `pnpm db:migrate` em produção, `scripts/backup.sh`. A reversão é **restaurar o backup** (`docs/DEPLOY.md`, `scripts/restore-test.sh` valida o formato) ou aplicar o SQL inverso abaixo se nada foi gravado nas estruturas novas. Primeiro subir de volta a imagem anterior do `web` (compatível com o esquema antigo), depois reverter o banco.
 
