@@ -17,12 +17,12 @@ export const CHANNEL_LABEL: Record<Channel | "interno", string> = { email: "E-ma
 /** Dias em relação ao vencimento; `emissao` usa a data de emissão da cobrança. */
 export const OFFSET: Record<Exclude<QueueKind, "emissao">, number> = { d_menos_3: -3, d0: 0, d_mais_3: 3, d_mais_7: 7, revisao_d15: 15 };
 
-export const PLACEHOLDERS = ["cliente", "empresa", "valor", "vencimento", "competencia", "descricao", "emissao", "linha_digitavel", "link_boleto"] as const;
+export const PLACEHOLDERS = ["cliente", "empresa", "valor", "vencimento", "competencia", "descricao", "emissao", "linha_digitavel", "link_boleto", "pix_copia_cola"] as const;
 export type Placeholder = (typeof PLACEHOLDERS)[number];
 export const PLACEHOLDER_HELP: Record<Placeholder, string> = {
   cliente: "Nome do cliente", empresa: "Nome da empresa emissora", valor: "Valor da cobrança (R$)", vencimento: "Data de vencimento",
   competencia: "Mês de competência (MM/AAAA)", descricao: "Descrição do serviço", emissao: "Data de emissão",
-  linha_digitavel: "Linha digitável do boleto (consultada na Cora; o PDF segue em anexo no e-mail)", link_boleto: "Link do PDF do boleto na Cora",
+  linha_digitavel: "Linha digitável do boleto (consultada na Cora; o PDF segue em anexo no e-mail)", link_boleto: "Link do PDF do boleto na Cora", pix_copia_cola: "Pix copia e cola do boleto (vazio se o boleto não tem QR Code Pix)",
 };
 
 const TOKEN = /\{\{\s*([^{}]*?)\s*\}\}/g;
@@ -63,7 +63,7 @@ export const toEmailHtml = (renderedText: string) => escapeHtml(renderedText).re
 
 /** Dados fictícios para a prévia do editor (nunca dados reais). */
 export const SAMPLE_VARS: Vars = {
-  cliente: "Cliente Exemplo Ltda", empresa: "Empresa Exemplo", valor: "R$ 2.500,00", vencimento: "14/11/2026", competencia: "10/2026", descricao: "Monitoramento de redes", emissao: "01/11/2026", linha_digitavel: "00190.00009 03215.837001 25845.801747 9 14200000250000", link_boleto: "https://exemplo.cora.com.br/boleto.pdf",
+  cliente: "Cliente Exemplo Ltda", empresa: "Empresa Exemplo", valor: "R$ 2.500,00", vencimento: "14/11/2026", competencia: "10/2026", descricao: "Monitoramento de redes", emissao: "01/11/2026", linha_digitavel: "00190.00009 03215.837001 25845.801747 9 14200000250000", link_boleto: "https://exemplo.cora.com.br/boleto.pdf", pix_copia_cola: "00020126580014br.gov.bcb.pix0136exemplo",
 };
 
 /** Agenda da régua para uma cobrança aprovada. Fim de semana/feriado e janela de envio entram na E09. */

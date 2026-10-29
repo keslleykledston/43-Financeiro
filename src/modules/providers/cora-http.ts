@@ -89,8 +89,12 @@ export type Invoice = {
   customerName: string | null; digitable: string | null; barcode: string | null; pdfUrl: string | null;
   /** Data em que o cliente pagou no banco (AAAA-MM-DD), quando a Cora informa. */
   occurrenceDate: string | null;
+  /** Pix "copia e cola" (EMV) do QR Code, quando o boleto foi emitido com a opção PIX e a conta tem chave Pix. */
+  pixEmv: string | null;
+  /** `bank_slip.registered` da Cora: o boleto de código de barras já está registrado na rede bancária? (null = a Cora não informou) */
+  slipRegistered: boolean | null;
   /** Pagamentos do boleto (vazio se não houve). Valores em centavos; `interest`/`fine` = encargos cobrados neste pagamento. */
-  payments: { id: string; status: string; totalPaidCents: number; interestCents: number; fineCents: number; finalizedAt: string | null }[];
+  payments: { id: string; status: string; method: string; totalPaidCents: number; interestCents: number; fineCents: number; finalizedAt: string | null }[];
 };
 
 /** CPF (11 dígitos) ou CNPJ (14; desde 2026 pode ter letras nas 12 primeiras posições): sem pontuação, em maiúsculas. */
@@ -107,8 +111,10 @@ export function normalizeInvoice(raw: unknown): Invoice {
     totalAmountCents: int(o.total_amount ?? o.amount), totalPaidCents: int(o.total_paid),
     dueDate: str(terms.due_date) ?? str(o.due_date), customerName: str(cust.name),
     digitable: str(slip.digitable), barcode: str(slip.barcode), pdfUrl: str(slip.url),
+    slipRegistered: typeof slip.registered === "boolean" ? slip.registered : null,
+    pixEmv: (() => { const e = str(asObj(o.pix).emv); return e && /^[\x20-\x7e]{20,600}$/.test(e) ? e : null; })(), // só texto imprimível de tamanho razoável
     occurrenceDate: /^\d{4}-\d{2}-\d{2}/.test(str(o.occurrence_date) ?? "") ? str(o.occurrence_date)!.slice(0, 10) : null,
-    payments: (Array.isArray(o.payments) ? o.payments : []).map((p) => { const q = asObj(p); return { id: String(q.id ?? ""), status: String(q.status ?? ""), totalPaidCents: int(q.total_paid), interestCents: int(q.interest), fineCents: int(q.fine), finalizedAt: str(q.finalized_at) }; }),
+    payments: (Array.isArray(o.payments) ? o.payments : []).map((p) => { const q = asObj(p); return { id: String(q.id ?? ""), status: String(q.status ?? ""), method: String(q.method ?? ""), totalPaidCents: int(q.total_paid), interestCents: int(q.interest), fineCents: int(q.fine), finalizedAt: str(q.finalized_at) }; }),
   };
 }
 
@@ -194,7 +200,7 @@ export class CoraClient {
   async deleteEndpoint(id: string): Promise<void> { await this.authed("DELETE", `/endpoints/${id}`); }
 
   /** Emite UM boleto. `idempotencyKey` deve ser UUID (a Cora usa para não duplicar se a resposta se perder). */
-  async createInvoice(i: { idempotencyKey: string; code: string; amountCents: number; dueDate: string; customerName: string; customerDocument: string; description: string }): Promise<Invoice> {
+  async createInvoice(i: { idempotencyKey: string; code: string; amountCents: number; dueDate: string; customerName: string; customerDocument: string; description: string; pix?: boolean }): Promise<Invoice> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(i.idempotencyKey)) throw new RangeError("Idempotency-Key deve ser UUID");
     if (!Number.isSafeInteger(i.amountCents) || i.amountCents < 500) throw new RangeError("Boleto mínimo: R$ 5,00");
     const digits = docOf(i.customerDocument);
@@ -204,7 +210,7 @@ export class CoraClient {
       customer: { name: i.customerName, document: { identity: digits, type: digits.length === 11 ? "CPF" : "CNPJ" } },
       services: [{ name: i.description.slice(0, 100), description: i.description.slice(0, 250), amount: i.amountCents }],
       payment_terms: { due_date: i.dueDate },
-      payment_forms: ["BANK_SLIP"],
+      payment_forms: i.pix === false ? ["BANK_SLIP"] : ["BANK_SLIP", "PIX"], // boleto + QR Code Pix (exige chave Pix na conta; sem ela a Cora emite só o boleto)
     };
     return normalizeInvoice(await this.authed("POST", "/v2/invoices", { headers: { "Idempotency-Key": i.idempotencyKey }, json: body }));
   }

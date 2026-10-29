@@ -41,8 +41,8 @@ export function mapCoraError(e: unknown, op: "issue" | "find" | "status" | "canc
 /** Pagamentos CONCLUÍDOS (a Cora marca `SUCCESS`); os demais (iniciados/falhos) não contam como dinheiro recebido. */
 export const detailsOf = (inv: Invoice): BoletoDetails => ({
   status: statusOf(inv.status), rawStatus: inv.status, totalAmountCents: inv.totalAmountCents, totalPaidCents: inv.totalPaidCents, dueDate: inv.dueDate, paidOn: inv.occurrenceDate,
-  payments: inv.payments.filter((p) => p.status === "SUCCESS").map(({ id, totalPaidCents, interestCents, fineCents, finalizedAt }) => ({ id, totalPaidCents, interestCents, fineCents, finalizedAt })),
-  digitable: inv.digitable, barcode: inv.barcode, pdfUrl: inv.pdfUrl,
+  payments: inv.payments.filter((p) => p.status === "SUCCESS").map(({ id, method, totalPaidCents, interestCents, fineCents, finalizedAt }) => ({ id, method, totalPaidCents, interestCents, fineCents, finalizedAt })),
+  digitable: inv.digitable, barcode: inv.barcode, pdfUrl: inv.pdfUrl, pixEmv: inv.pixEmv, slipRegistered: inv.slipRegistered,
 });
 
 /** Teto de um boleto REAL (produção): acima disso, só com decisão humana fora do motor. */

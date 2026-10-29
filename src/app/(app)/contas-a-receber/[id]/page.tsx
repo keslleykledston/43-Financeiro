@@ -77,6 +77,8 @@ export default async function Cobranca({ params, searchParams }: { params: Promi
           {view?.kind === "ok" && (
             <div className="mt-3 space-y-1 rounded-md border bg-muted/30 p-3 text-sm" role="status">
               <p><strong>Dados na Cora{view.mode === "cora_homologacao" ? " de testes (boleto de teste, não é real)" : ""}</strong> · situação: {view.details.rawStatus} · valor <Money cents={view.details.totalAmountCents} />{view.details.totalPaidCents > 0 && <> · pago <Money cents={view.details.totalPaidCents} />{view.details.paidOn ? ` em ${br(view.details.paidOn)}` : ""}</>}</p>
+              {view.details.slipRegistered === false && <p className="text-warning-foreground">Atenção: a Cora informa que o boleto de código de barras ainda <strong>não está registrado</strong> na rede bancária (o QR Code Pix vale; o código de barras pode não ser aceito por alguns bancos).</p>}
+              {view.details.pixEmv && <p>Pix copia e cola: <span className="num select-all break-all font-mono text-xs">{view.details.pixEmv}</span></p>}
               {view.details.digitable && <p>Linha digitável: <span className="num select-all font-mono">{view.details.digitable}</span></p>}
               {view.details.pdfUrl ? <p><a href={view.details.pdfUrl} target="_blank" rel="noopener noreferrer" className="font-medium underline">Abrir o PDF do boleto</a></p> : <p className="text-muted-foreground">PDF indisponível.</p>}
               <p className="text-xs text-muted-foreground">Consultado agora na Cora; nada disto fica guardado aqui.</p>

@@ -198,7 +198,7 @@ const MAX_ATTEMPTS = 3;
 type DueRow = { q: typeof messageQueue.$inferSelect; c: typeof charges.$inferSelect; customer: string; subject: string | null; body: string | null };
 /** Texto da mensagem (assunto/corpo) a partir do modelo ativo. Único lugar que monta o texto, para o simulado e o real nunca divergirem. */
 function buildMessage(r: DueRow, companyName: string, internal: boolean, bm?: BoletoMail) {
-  const vars: Vars = { linha_digitavel: bm?.state === "ok" ? (bm.digitable ?? "") : SIMULATED_LINE, link_boleto: bm?.state === "ok" ? (bm.pdfUrl ?? "") : "", cliente: r.customer, empresa: companyName, valor: formatBRL(centsFromNumeric(r.c.amount)), vencimento: br(r.c.dueDate), competencia: `${r.c.competenceMonth.slice(5, 7)}/${r.c.competenceMonth.slice(0, 4)}`, descricao: r.c.description, emissao: br(r.c.issueDate) };
+  const vars: Vars = { linha_digitavel: bm?.state === "ok" ? (bm.digitable ?? "") : SIMULATED_LINE, link_boleto: bm?.state === "ok" ? (bm.pdfUrl ?? "") : "", pix_copia_cola: bm?.state === "ok" ? (bm.pixEmv ?? "") : "", cliente: r.customer, empresa: companyName, valor: formatBRL(centsFromNumeric(r.c.amount)), vencimento: br(r.c.dueDate), competencia: `${r.c.competenceMonth.slice(5, 7)}/${r.c.competenceMonth.slice(0, 4)}`, descricao: r.c.description, emissao: br(r.c.issueDate) };
   const subject = internal ? "Revisão humana D+15" : render(r.subject ?? "", vars);
   const body = internal ? `Cobrança de ${vars.cliente} (${vars.valor}, vencida em ${vars.vencimento}) está há 15 dias em atraso. Decidir o próximo passo manualmente.` : render(r.body ?? "", vars);
   return { subject, body };

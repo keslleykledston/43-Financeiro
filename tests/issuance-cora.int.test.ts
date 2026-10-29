@@ -32,16 +32,16 @@ const CNPJ1 = "11.222.333/0001-81", CNPJ2 = "12.ABC.345/01DE-35";
 const D = "2026-10-01"; // competência 2026-09, vencimento 2026-10-14
 const terms = (o: Record<string, unknown> = {}) => ({ description: "Monitoramento de redes", monthlyAmount: "2.500,00", startAt: "2026-01-01", endAt: "", dueDay: "14", invoiceJointRequired: false, issueDayOverride: "", ...o });
 
-type Inv = { id: string; status: string; code: string; amount: number; due: string; doc: string; name: string; description: string; idem: string };
+type Inv = { id: string; status: string; code: string; amount: number; due: string; doc: string; name: string; description: string; idem: string; forms?: string[] };
 /** "Cora" falsa com estado: token, emissão idempotente por Idempotency-Key, listagem por CPF/CNPJ + vencimento, detalhe e cancelamento. Só imita o formato real da API. */
 function fakeCora() {
   const inv = new Map<string, Inv>(); const byIdem = new Map<string, string>();
   const calls: { host: string; method: string; path: string; headers: Record<string, string>; body?: any }[] = [];
-  const hooks = { tokenFail: false, failEndpointAt: 0, getFails: 0, pdfUrl: null as null | ((id: string) => string), paidOn: null as null | string, paidTotal: null as null | number, paidInterest: null as null | number, paidFine: null as null | number, dropAfterCreate: 0, failCreate: null as null | { status: number; body: unknown }, failBeforeCreate: 0, amountOverride: null as null | number, paid: new Set<string>() };
+  const hooks = { paidMethod: null as null | string, tokenFail: false, failEndpointAt: 0, getFails: 0, pdfUrl: null as null | ((id: string) => string), paidOn: null as null | string, paidTotal: null as null | number, paidInterest: null as null | number, paidFine: null as null | number, dropAfterCreate: 0, failCreate: null as null | { status: number; body: unknown }, failBeforeCreate: 0, amountOverride: null as null | number, paid: new Set<string>() };
   let seq = 0, epSeq = 0;
   const endpoints = new Map<string, { id: string; url: string; resource: string; trigger: string }>();
   const j = (status: number, body: unknown) => ({ status, body: body === null ? "" : JSON.stringify(body) });
-  const full = (i: Inv) => ({ id: i.id, status: i.status, code: i.code, total_amount: hooks.amountOverride ?? i.amount, total_paid: i.status === "PAID" ? (hooks.paidTotal ?? i.amount) : 0, customer: { name: i.name, document: { identity: i.doc, type: i.doc.length === 11 ? "CPF" : "CNPJ" } }, services: [{ name: i.description.slice(0, 100), amount: i.amount }], payment_terms: { due_date: i.due }, payment_options: { bank_slip: { digitable: "00190000090321583700012584580174791420000002000", barcode: "00197914200000020000000003215837001258458017", our_number: "1", registered: true, url: hooks.pdfUrl?.(i.id) ?? `https://pdf.cora.com.br/${i.id}.pdf` } }, occurrence_date: i.status === "PAID" ? (hooks.paidOn ?? "2026-10-20") : undefined, payments: i.status === "PAID" ? [{ id: `pay_${i.id}`, status: "SUCCESS", created_at: "2026-10-20T10:00:00Z", finalized_at: "2026-10-20T10:00:05Z", total_paid: hooks.paidTotal ?? i.amount, method: "BANK_SLIP", order: 1, interest: hooks.paidInterest ?? 0, fine: hooks.paidFine ?? 0 }] : [] });
+  const full = (i: Inv) => ({ id: i.id, status: i.status, code: i.code, total_amount: hooks.amountOverride ?? i.amount, total_paid: i.status === "PAID" ? (hooks.paidTotal ?? i.amount) : 0, customer: { name: i.name, document: { identity: i.doc, type: i.doc.length === 11 ? "CPF" : "CNPJ" } }, services: [{ name: i.description.slice(0, 100), amount: i.amount }], payment_terms: { due_date: i.due }, payment_options: { bank_slip: { digitable: "00190000090321583700012584580174791420000002000", barcode: "00197914200000020000000003215837001258458017", our_number: "1", registered: true, url: hooks.pdfUrl?.(i.id) ?? `https://pdf.cora.com.br/${i.id}.pdf` } }, pix: (i.forms ?? []).includes("PIX") ? { emv: "00020126580014br.gov.bcb.pix0136" + i.id + "5204000053039865406" + String(i.amount) + "5802BR5909K3G TESTE6004TEST" } : null, occurrence_date: i.status === "PAID" ? (hooks.paidOn ?? "2026-10-20") : undefined, payments: i.status === "PAID" ? [{ id: `pay_${i.id}`, status: "SUCCESS", created_at: "2026-10-20T10:00:00Z", finalized_at: "2026-10-20T10:00:05Z", total_paid: hooks.paidTotal ?? i.amount, method: hooks.paidMethod ?? "BANK_SLIP", order: 1, interest: hooks.paidInterest ?? 0, fine: hooks.paidFine ?? 0 }] : [] });
   const summary = (i: Inv) => ({ id: i.id, status: i.status, total_amount: i.amount, due_date: i.due, customer: { name: i.name } }); // a listagem real NÃO traz `code`
   const transport: Transport = async (o) => {
     const body = o.body && o.headers["content-type"] === "application/json" ? JSON.parse(o.body) : undefined;
@@ -69,7 +69,7 @@ function fakeCora() {
       if (!id) {
         if (body.payment_terms.due_date < "2026-01-01") return j(400, { code: "invalid_request", message: "Request has invalid parameters", errors: [{ code: "paymentTerms.dueDate", message: "cannot be a past date" }] });
         id = `inv_fake${String(++seq).padStart(6, "0")}`; byIdem.set(idem, id);
-        inv.set(id, { id, status: "OPEN", code: body.code, amount: body.services[0].amount, due: body.payment_terms.due_date, doc: body.customer.document.identity, name: body.customer.name, description: body.services[0].description, idem });
+        inv.set(id, { id, status: "OPEN", code: body.code, amount: body.services[0].amount, due: body.payment_terms.due_date, doc: body.customer.document.identity, name: body.customer.name, description: body.services[0].description, idem, forms: body.payment_forms });
       }
       if (hooks.dropAfterCreate > 0) { hooks.dropAfterCreate--; throw new CoraNetworkError("resposta perdida"); }
       return j(200, full(inv.get(id)!));
@@ -175,7 +175,7 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     const p1 = posts.find((p) => p.body.code === `k3g:boleto:${c1.id}`)!;
     expect(p1.headers["Idempotency-Key"]).toBe(uuidFromKey(`boleto:${c1.id}`));
     expect(p1.headers.authorization).toMatch(/^Bearer tok_fake_/);
-    expect(p1.body).toMatchObject({ customer: { name: "Cliente Um", document: { identity: "11222333000181", type: "CNPJ" } }, services: [{ amount: 250000 }], payment_terms: { due_date: "2026-10-14" }, payment_forms: ["BANK_SLIP"] });
+    expect(p1.body).toMatchObject({ customer: { name: "Cliente Um", document: { identity: "11222333000181", type: "CNPJ" } }, services: [{ amount: 250000 }], payment_terms: { due_date: "2026-10-14" }, payment_forms: ["BANK_SLIP", "PIX"] }); // boleto + QR Code Pix
     expect(cora.calls.every((c) => c.host === CORA_HOSTS.homologacao)).toBe(true);
     expect(await processIssuance(db, gerA, A, NOW)).toMatchObject({ claimed: 0, issued: 0 }); // nada novo
     expect(cora.posts()).toHaveLength(2);
@@ -284,6 +284,7 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     const c1 = await chargeOf(cli1);
     const v = await boletoView(db, gerA, A, c1.id);
     expect(v).toMatchObject({ kind: "ok", mode: "cora_homologacao", details: { rawStatus: "OPEN", totalAmountCents: 250000, totalPaidCents: 0, payments: [] } });
+    if (v.kind === "ok") { expect(v.details.pixEmv).toMatch(/^00020126/); }
     if (v.kind === "ok") { expect(v.details.digitable).toMatch(/^\d{40,50}$/); expect(v.details.pdfUrl).toMatch(/^https:\/\/pdf\.cora\.com\.br\//); }
     cora.hooks.pdfUrl = () => "javascript:alert(1)"; // esquema perigoso vindo da resposta externa: nunca devolvido
     const v2 = await boletoView(db, gerA, A, c1.id);
@@ -390,6 +391,22 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     expect((await reqs()).find((x) => x.id === r2.id)!.settledAt).not.toBeNull();
     // nada de rotas de pagamento na Cora
     expect(cora.calls.every((c) => c.method === "GET" || c.path === "/token" || c.path === "/v2/invoices")).toBe(true);
+  });
+
+  it("BAIXA AUTOMÁTICA: pagamento por PIX (QR Code do boleto) é lançado com a forma 'pix'; por boleto, 'boleto'", async () => {
+    const batchId = await approvedBatch(); await useCora();
+    await saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, autoSettle: true });
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, NOW);
+    const c1 = await chargeOf(cli1), c2 = await chargeOf(cli2);
+    const r1 = (await reqs()).find((x) => x.chargeId === c1.id)!, r2 = (await reqs()).find((x) => x.chargeId === c2.id)!;
+    cora.hooks.paidOn = "2026-10-20";
+    cora.inv.get(r1.externalRef!)!.status = "PAID"; cora.hooks.paidMethod = "PIX";
+    await syncBoletoStatus(db, gerA, A, new Date(NOW.getTime() + 60_000));
+    cora.inv.get(r2.externalRef!)!.status = "PAID"; cora.hooks.paidMethod = "BANK_SLIP";
+    await syncBoletoStatus(db, gerA, A, new Date(NOW.getTime() + 120_000));
+    expect((await db.select().from(schema.payments).where(eq(schema.payments.chargeId, c1.id)))[0].method).toBe("pix");
+    expect((await db.select().from(schema.payments).where(eq(schema.payments.chargeId, c2.id)))[0].method).toBe("boleto");
   });
 
   it("BAIXA AUTOMÁTICA: sem pagamento concluído, soma diferente do total ou desligada, nunca baixa; no simulado a opção é recusada", async () => {

@@ -22,8 +22,8 @@ export type BoletoResult = { providerRef: string; status: "emitido" | "pago" | "
 /** Situação completa de UM boleto no provedor (consulta). `payments` só tem pagamentos concluídos. Valores em centavos. */
 export type BoletoDetails = {
   status: BoletoResult["status"]; rawStatus: string; totalAmountCents: number; totalPaidCents: number; dueDate: string | null; paidOn: string | null;
-  payments: { id: string; totalPaidCents: number; interestCents: number; fineCents: number; finalizedAt: string | null }[];
-  digitable: string | null; barcode: string | null; pdfUrl: string | null;
+  payments: { id: string; method: string; totalPaidCents: number; interestCents: number; fineCents: number; finalizedAt: string | null }[];
+  digitable: string | null; barcode: string | null; pdfUrl: string | null; pixEmv: string | null; slipRegistered: boolean | null;
 };
 /** Cora: SOMENTE boletos (emitir, consultar situação, segunda via e cancelar — o cancelamento só pela diretoria, com motivo e registro). Sem pagamento, transferência, saldo/extrato (escopo do dono, 2026-10-24; ver CORA_SCOPE e ADR-017). */
 export interface BoletoProvider { // Cora (boletos v2)

@@ -59,7 +59,7 @@ async function settle(x: DB, companyId: string, systemUser: string, chargeId: st
   if (!/^\d{4}-\d{2}-\d{2}$/.test(stamp) || stamp > today) return { kind: "review", reason: "data_do_pagamento_ausente_ou_futura" }; // nunca inventa nem ajusta a data
   const paidAt = stamp;
   try {
-    const r = await recordPaymentTx(x, companyId, systemUser, chargeId, { cents: principal, interestCents: extras, discountCents: 0, paidAt, method: "boleto", note: "Baixa automática: boleto pago na Cora", key: settleKey(ref) }, { via: "cora_auto", ref });
+    const r = await recordPaymentTx(x, companyId, systemUser, chargeId, { cents: principal, interestCents: extras, discountCents: 0, paidAt, method: d.payments.every((p) => p.method === "PIX") ? "pix" : "boleto", note: "Baixa automática: boleto pago na Cora", key: settleKey(ref) }, { via: "cora_auto", ref });
     if (r.duplicate) return { kind: "review", reason: "baixa_anterior_estornada" }; // já houve baixa automática deste boleto e ela foi estornada: nova baixa só com decisão humana
   } catch (e) {
     if ((e as Error).name === "Invalid") return { kind: "review", reason: "recusada_pela_baixa" }; // ex.: data anterior à emissão; revisão humana

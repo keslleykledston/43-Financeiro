@@ -14,7 +14,7 @@ import type { Providers } from "@/modules/providers/types";
  *  - `indisponivel`: a Cora não respondeu agora → a mensagem espera e tenta na próxima rodada.
  *  - `simulado`: boleto de mentira (provedor simulado): o texto mostra "(boleto simulado)"; e-mail REAL com boleto simulado é bloqueado pelo caminho real.
  */
-export type BoletoMail = { state: "ok" | "none" | "simulado" | "indisponivel"; digitable: string | null; pdfUrl: string | null };
+export type BoletoMail = { state: "ok" | "none" | "simulado" | "indisponivel"; digitable: string | null; pdfUrl: string | null; pixEmv?: string | null };
 export const SIMULATED_LINE = "(boleto simulado)";
 export const NONE: BoletoMail = { state: "none", digitable: null, pdfUrl: null };
 const MAX_LOOKUPS = 60; // consultas à Cora por rodada
@@ -47,7 +47,7 @@ export async function prefetchBoletoMail(db: DB, companyId: string, chargeIds: s
       // O boleto precisa ser O DA COBRANÇA (valor e vencimento iguais), ter linha digitável e PDF de origem permitida; senão a mensagem espera e ninguém recebe boleto errado ou incompleto
       const pdf = safePdfUrl(d.pdfUrl);
       const same = d.totalAmountCents === centsFromNumeric(r.amount) && d.dueDate === r.due;
-      out.set(r.charge_id, same && d.digitable && pdf ? { state: "ok", digitable: d.digitable, pdfUrl: pdf } : { state: "indisponivel", digitable: null, pdfUrl: null });
+      out.set(r.charge_id, same && d.digitable && pdf ? { state: "ok", digitable: d.digitable, pdfUrl: pdf, pixEmv: d.pixEmv } : { state: "indisponivel", digitable: null, pdfUrl: null });
     } catch { out.set(r.charge_id, { state: "indisponivel", digitable: null, pdfUrl: null }); }
   }
   return out;
