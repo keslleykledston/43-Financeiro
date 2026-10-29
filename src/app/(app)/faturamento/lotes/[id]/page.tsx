@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
 import { getBatch } from "@/modules/billing/batches";
+import { getIssuanceSettings } from "@/modules/issuance/service";
 import { WARNING_LABEL, type Warning } from "@/modules/billing/calendar";
 import { Callout, Money, PageHeader, SectionCard, StatusPill } from "@/components/k3g/primitives";
 import { AppLink } from "@/components/k3g/app-link";
@@ -24,7 +25,8 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
   if (!r) notFound();
   const { batch: b, stale } = r;
   const approve = can(role, "billing.approve"), write = can(role, "billing.write");
-  const OK: Record<string, string> = { aprovado: "Lote aprovado. Nada foi emitido: a emissão real é uma fase futura.", reaberto: "Lote reaberto: volta a ser prévia e precisa de nova aprovação.", atualizado: "Prévia atualizada." };
+  const stage = can(role, "issuance.read") && (await getIssuanceSettings(db, ctx.user.id, ctx.current.id)).boletoProvider === "cora_homologacao"; // boletos desta empresa vão para a Cora de testes
+  const OK: Record<string, string> = { aprovado: "Lote aprovado. Nada foi emitido: aprovar não emite; a emissão é solicitada à parte, em Emissões.", reaberto: "Lote reaberto: volta a ser prévia e precisa de nova aprovação.", atualizado: "Prévia atualizada." };
 
   return (
     <div className="space-y-5">
@@ -40,7 +42,9 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
         <div className="rounded-lg border bg-card p-4"><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total</p><p className="mt-1 text-2xl font-semibold"><Money cents={r.totalCents} /></p></div>
       </div>
 
-      <Callout tone="info">Simulação: aprovar <strong>não emite</strong> boleto, nota fiscal nem mensagem.</Callout>
+      <Callout tone="info">{stage
+        ? <>Aprovar <strong>não emite</strong> nada. Ao solicitar a emissão, os boletos desta empresa nascem na <strong>Cora de testes</strong> (não são reais e não cobram ninguém); NFS-e e mensagens continuam simuladas.</>
+        : <>Simulação: aprovar <strong>não emite</strong> boleto, nota fiscal nem mensagem.</>}</Callout>
 
       {stale.any && (
         <Callout tone="warning" role="alert">
@@ -94,14 +98,16 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
         </div>
         {b.status === "aprovado" && can(role, "issuance.request") && (
           <div className="mt-4 border-t border-border pt-4">
-            <p className="mb-2 text-sm font-medium">Emissão (simulada)</p>
+            <p className="mb-2 text-sm font-medium">{stage ? "Emissão (boleto na Cora de testes; NFS-e simulada)" : "Emissão (simulada)"}</p>
             <div className="flex flex-wrap gap-2">
               {(["boleto", "nfse"] as const).map((k) => (
                 <form key={k} action={requestBatchIssuanceAction}><input type="hidden" name="batchId" value={b.id} /><input type="hidden" name="kind" value={k} /><button className={buttonClass("outline")}>{k === "boleto" ? "Solicitar boletos" : "Solicitar NFS-e"}</button></form>
               ))}
               <AppLink href="/faturamento/emissoes" className={buttonClass("ghost")}>Ver emissões</AppLink>
             </div>
-            <p className="mt-2 text-xs text-muted-foreground">Apenas enfileira a solicitação no motor <strong>simulado</strong>. Nenhum boleto ou nota real é emitido.</p>
+            <p className="mt-2 text-xs text-muted-foreground">{stage
+              ? <>Enfileira a solicitação. O boleto só nasce (na <strong>Cora de testes</strong>, sem valor real) quando a emissão estiver liberada e for processada, em Emissões. A NFS-e continua simulada.</>
+              : <>Apenas enfileira a solicitação no motor <strong>simulado</strong>. Nenhum boleto ou nota real é emitido.</>}</p>
           </div>
         )}
         {b.status === "rascunho" && !approve && <p className="mt-2 text-sm text-muted-foreground">Gerente ou diretoria aprovam o lote.</p>}

@@ -3,7 +3,7 @@
 **Quem acessa:** diretoria e gerente (geram, aprovam, reabrem); assistente (gera/atualiza prévia, cancela prévia); contabilidade (somente leitura).
 **Onde:** Faturamento → botão **Lotes**.
 
-> **Simulação.** Gerar prévia e aprovar **não emite** boleto, nota fiscal, e-mail nem WhatsApp. A emissão real é uma fase futura, com credenciais e autorização própria.
+> **Aprovar não emite nada.** Gerar prévia e aprovar **não emite** boleto, nota fiscal, e-mail nem WhatsApp; a emissão é solicitada à parte, em **Emissões**. Hoje ela é **simulada**, ou, se a diretoria escolher, os boletos nascem na **Cora de testes** (não são reais e não cobram ninguém). Emissão real só com credenciais e autorização escrita própria.
 
 ## O que é um lote
 Todas as cobranças previstas para **uma data de emissão** (25, 1, 8 ou 15, conforme o vencimento do contrato). Cada cobrança copia o valor, o vencimento e a competência do contrato **no momento da prévia**.
