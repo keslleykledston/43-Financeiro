@@ -210,3 +210,10 @@ Calendário (`src/modules/billing/calendar.ts`, funções puras testadas contra 
 - Decisão: a régua existente (emissão, D-3, D0, D+3, D+7) passa a levar o boleto. Campos `{{linha_digitavel}}` e `{{link_boleto}}`; PDF em anexo (UM PDF, ≤3 MB, assinatura %PDF, só de origem da Cora: `*.cora.com.br` ou o bucket `cora_<production|stage>_exporter_bankslip_storage` do Google Cloud Storage, https, sem redirecionamento). Empresa com provedor de boleto real só envia quando o boleto está emitido e em aberto (consulta na Cora FORA de transação, antes da fila); PDF que não vem = volta à fila (nunca e-mail sem o boleto). E-mail REAL + modelo com boleto + boleto simulado = bloqueado. Nada muda para quem usa boleto simulado e modelos antigos.
 - Fica fora (decisão do dono, em aberto): enviar e-mail real sozinho pelo agendador (hoje o canário só envia pelo botão), destinatários reais e SPF/DKIM/DMARC; WhatsApp (mesma lógica, depois).
 - Consequências: sem migração. Rede (Cora e PDF) nunca dentro de transação do banco.
+
+## ADR-038 — Reemissão de boleto reenvia o e-mail de emissão (generation na fila) — E33b
+- Contexto (canário 2026-10-29): o dono cancelou o boleto de R$ 5,00 e reemitiu (com Pix); o e-mail com o boleto novo NÃO saiu: a mensagem de emissão já constava "enviado" (imutável por trigger, 0027) e o cancelamento só para a régua pendente.
+- Decisão: ao concluir o cancelamento de um boleto com a cobrança ainda aprovada e em aberto, entra NOVA mensagem de emissão (e-mail, `generation` + 1, para hoje); espera o boleto novo como qualquer emissão (E33) e sai pelo "Processar fila". Só cria se a última emissão do e-mail já foi enviada (não duplica). Régua D-3 etc. continua cancelada; "Programar régua" recria as datas futuras.
+- Alternativa descartada: afrouxar a trava de imutabilidade da mensagem enviada (perde o histórico de quem recebeu o quê).
+- Consequências: migração 0045 (coluna + índice único + CHECK). Cancelar sem intenção de reemitir deixa a nova mensagem esperando (vira "Perdeu a data" depois do limite de atraso).
+

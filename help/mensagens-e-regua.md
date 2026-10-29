@@ -60,3 +60,6 @@ Os modelos aceitam dois campos novos: **`{{linha_digitavel}}`** (linha digitáve
 - **Empresa com boleto simulado:** o texto mostra "(boleto simulado)" e o **e-mail real é bloqueado** se o modelo usa o boleto (nunca vai boleto de mentira a cliente de verdade).
 - Continua valendo o canário do e-mail: só com autorização escrita, lista de destinatários e pelo botão **Processar fila** (o agendador não envia e-mail real).
 
+## Cancelei o boleto e emiti outro: o cliente recebe o novo?
+Sim. Ao cancelar um boleto cuja cobrança continua em aberto, entra na fila uma **nova mensagem de emissão** (a anterior fica no histórico, intocada). Ela **espera o boleto novo** ser emitido e sai quando você clicar em **Processar fila**. Os lembretes (D-3, vencimento, atrasos) foram cancelados junto com o boleto: depois da reemissão, clique em **Programar régua** para recriar os que ainda não passaram.
+

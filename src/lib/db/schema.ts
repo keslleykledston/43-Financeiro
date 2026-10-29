@@ -410,13 +410,15 @@ export const messageQueue = pgTable("message_queue", {
   attempts: integer("attempts").notNull().default(0),
   lastError: text("last_error"), // código/motivo genérico do provedor, sem dados do cliente
   providerRef: text("provider_ref"), // identificador devolvido pelo provedor (simulado enquanto não houver E10)
+  generation: integer("generation").notNull().default(0), // 0 = original; N = reenvio da EMISSÃO após o boleto ser cancelado e reemitido (a mensagem enviada é imutável)
 }, (t) => [
   foreignKey({ columns: [t.companyId, t.chargeId], foreignColumns: [charges.companyId, charges.id] }).onDelete("cascade"),
   foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
   foreignKey({ columns: [t.companyId, t.templateVersionId], foreignColumns: [messageTemplateVersions.companyId, messageTemplateVersions.id] }),
-  uniqueIndex("message_queue_one_uq").on(t.companyId, t.chargeId, t.kind, t.channel).where(sql`${t.status} <> 'cancelado'`),
+  uniqueIndex("message_queue_one_uq").on(t.companyId, t.chargeId, t.kind, t.channel, t.generation).where(sql`${t.status} <> 'cancelado'`),
   index("message_queue_due_idx").on(t.companyId, t.status, t.scheduledFor),
   check("message_queue_status_chk", sql`${t.status} in ('pendente', 'enviando', 'enviado', 'bloqueado', 'simulado', 'cancelado')`),
+  check("message_queue_generation_chk", sql`${t.generation} >= 0 and (${t.generation} = 0 or ${t.kind} = 'emissao')`),
   check("message_queue_kind_chk", sql`${t.kind} in ('emissao', 'd_menos_3', 'd0', 'd_mais_3', 'd_mais_7', 'revisao_d15')`),
   check("message_queue_channel_chk", sql`${t.channel} in ('email', 'whatsapp', 'interno')`),
   check("message_queue_internal_chk", sql`(${t.kind} = 'revisao_d15') = (${t.channel} = 'interno')`),

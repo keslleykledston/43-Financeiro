@@ -126,7 +126,7 @@ export async function scheduleQueue(db: DB, actorId: string, companyId: string, 
     const hasEmail = new Set(contacts.filter((c) => c.email?.trim()).map((c) => c.partyId));
     const hasPhone = new Set(contacts.filter((c) => c.phone?.trim()).map((c) => c.partyId));
     let created = 0, blocked = 0, semModelo = 0, passado = 0, unblocked = 0;
-    const existing = await x.select().from(messageQueue).where(and(eq(messageQueue.companyId, companyId), ne(messageQueue.status, "cancelado")));
+    const existing = (await x.select().from(messageQueue).where(and(eq(messageQueue.companyId, companyId), ne(messageQueue.status, "cancelado")))).sort((a, b) => a.generation - b.generation); // a geração mais nova vence no mapa
     const have = new Map(existing.map((q) => [`${q.chargeId}|${q.kind}|${q.channel}`, q]));
     for (const { c } of rows) {
       for (const step of ladder(c)) {
@@ -169,6 +169,25 @@ export async function cancelQueueForCharges(x: DB, companyId: string, chargeIds:
   const res = await x.update(messageQueue).set({ status: "cancelado", blockedReason: null, updatedAt: new Date() })
     .where(and(eq(messageQueue.companyId, companyId), inArray(messageQueue.chargeId, chargeIds), inArray(messageQueue.status, ["pendente", "bloqueado"]))).returning({ id: messageQueue.id });
   return res.length;
+}
+
+/**
+ * Boleto cancelado com a cobrança ainda aprovada e em aberto: o e-mail de EMISSÃO já enviado levava o boleto antigo. Mensagem enviada é imutável, então entra uma NOVA
+ * mensagem de emissão (`generation` + 1, hoje) que espera o boleto novo (a reemissão ganha chave `:gN`). Só se a última emissão do e-mail já foi enviada (ou está sendo enviada: o SMTP roda fora da transação e pode terminar depois do cancelamento): não duplica
+ * enquanto a nova não saiu. O histórico do envio anterior fica na própria fila e em `email_send_log`. A régua (D-3 etc.) foi cancelada junto: "Programar régua" recria as datas futuras.
+ * Dentro da transação do chamador.
+ */
+export async function reopenEmissionAfterCancel(x: DB, companyId: string, chargeId: string, today = todayManaus()) {
+  const res = await x.execute(sql`
+    insert into message_queue (company_id, charge_id, customer_id, kind, channel, scheduled_for, status, template_version_id, generation)
+    select q.company_id, q.charge_id, q.customer_id, 'emissao', 'email', ${today}::date, 'pendente', q.template_version_id, q.generation + 1
+    from message_queue q
+    where q.company_id = ${companyId} and q.charge_id = ${chargeId} and q.kind = 'emissao' and q.channel = 'email' and q.status in ('enviado', 'enviando') -- 'enviando': o SMTP pode concluir depois do cancelamento, com o boleto antigo
+      and q.generation = (select max(m.generation) from message_queue m where m.company_id = q.company_id and m.charge_id = q.charge_id and m.kind = 'emissao' and m.channel = 'email' and m.status <> 'cancelado')
+      and exists (select 1 from charges c join billing_batches b on b.company_id = c.company_id and b.id = c.batch_id
+        where c.company_id = q.company_id and c.id = q.charge_id and c.status = 'aprovada' and b.status = 'aprovado'
+          and coalesce((select sum(p.amount) from payments p where p.company_id = c.company_id and p.charge_id = c.id and p.status = 'ativo'), 0) < c.amount)`);
+  return res.count as number;
 }
 
 // ---------- Configuração de envio (janela, limites, canais, pausa) ----------

@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
 import { auditLog, boletoCancellations, charges, issuanceRequests, users } from "@/lib/db/schema";
 import { Invalid, requirePerm } from "@/modules/identity/service";
-import { cancelQueueForCharges } from "@/modules/messaging/service";
+import { cancelQueueForCharges, reopenEmissionAfterCancel } from "@/modules/messaging/service";
 import { resolveProvidersForMode } from "@/modules/providers/registry";
 import type { Providers } from "@/modules/providers/types";
 
@@ -46,6 +46,7 @@ async function attempt(db: DB, companyId: string, actorId: string, row: { id: st
         // o boleto deixou de existir: a solicitação sai da lista de ativas (permite emitir outro, com chave nova) e a régua da cobrança para
         await x.update(issuanceRequests).set({ status: "cancelado", externalStatus: "cancelado", updatedAt: new Date() }).where(and(eq(issuanceRequests.id, row.requestId), eq(issuanceRequests.companyId, companyId)));
         await cancelQueueForCharges(x, companyId, [row.chargeId]);
+        await reopenEmissionAfterCancel(x, companyId, row.chargeId); // o e-mail de emissão já enviado levava o boleto cancelado: reenvia com o novo
         await audit(x, companyId, actorId, "boleto.cancelled", { cancellationId: row.id, chargeId: row.chargeId, requestId: row.requestId, attempts: row.attempts });
       } else if (status === "falhou") {
         if (lastError === "boleto_pago") { // o provedor diz que foi pago: a cobrança precisa de conferência/baixa, e a régua não deve mais cobrar

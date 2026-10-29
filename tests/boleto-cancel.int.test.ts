@@ -13,6 +13,7 @@ import { approveBatch, generateBatch, getBatch, reopenBatch } from "@/modules/bi
 import { registerPayment, reversePayment } from "@/modules/receivables/service";
 import { IssuanceTimeout, processIssuance, requestIssuance, saveIssuanceSettings } from "@/modules/issuance/service";
 import { boletoPanel, cancelBoleto, recheckCancellation } from "@/modules/issuance/cancel";
+import { reopenEmissionAfterCancel } from "@/modules/messaging/service";
 import { createMockProviders } from "@/modules/providers/mock";
 import type { Providers } from "@/modules/providers/types";
 
@@ -131,6 +132,26 @@ describe.skipIf(!enabled)("E20 cancelar boleto (simulado): só diretoria, tudo r
     const panel = await boletoPanel(db, contA, A, chargeId);
     expect(panel.request).toMatchObject({ id: again, status: "emitido" });
     expect(panel.history).toHaveLength(1); expect(panel.history[0]).toMatchObject({ by: "dir-a", status: "cancelado", reason: "valor errado na cobrança" });
+  });
+
+  it("cancelar o boleto reabre o e-mail de EMISSÃO já enviado (vai o boleto novo) (nova mensagem, a enviada fica intocada) e para o resto da régua", async () => {
+    const { p } = prov(); const { chargeId } = await issued(cli1, p); const other = await issued(cli2, p);
+    const mkq = (cid: string, cust: string, kind: string, status: string) => db.insert(schema.messageQueue).values({ companyId: A, chargeId: cid, customerId: cust, kind, channel: "email", scheduledFor: D, status, processedAt: status === "enviado" ? new Date() : null, attempts: status === "enviado" ? 1 : 0, providerRef: status === "enviado" ? "smtp-x" : null });
+    await mkq(chargeId, cli1, "emissao", "enviado"); await mkq(chargeId, cli1, "d0", "pendente"); await mkq(other.chargeId, cli2, "emissao", "enviado");
+    await cancelBoleto(db, dirA, A, ok(chargeId), p);
+    const q = async (cid: string) => (await db.select().from(schema.messageQueue).where(eq(schema.messageQueue.chargeId, cid))).sort((a, b) => a.kind.localeCompare(b.kind)).map((m) => `${m.kind}${m.generation}:${m.status}:${m.processedAt ? "proc" : "-"}`);
+    expect(await q(chargeId)).toEqual(["d00:cancelado:-", "emissao0:enviado:proc", "emissao1:pendente:-"]);   // régua parou; a enviada fica; nova emissão espera o boleto novo
+    expect(await q(other.chargeId)).toEqual(["emissao0:enviado:proc"]);                                        // outra cobrança não mexe
+    expect(await reopenEmissionAfterCancel(db, A, chargeId)).toBe(0);                                          // repetir não duplica enquanto a nova não saiu
+  });
+
+  it("e-mail de emissão ainda 'enviando' no cancelamento (SMTP pode terminar depois): a nova mensagem entra do mesmo jeito, uma só", async () => {
+    const { p } = prov(); const { chargeId } = await issued(cli1, p);
+    await db.insert(schema.messageQueue).values({ companyId: A, chargeId, customerId: cli1, kind: "emissao", channel: "email", scheduledFor: D, status: "enviando" });
+    await cancelBoleto(db, dirA, A, ok(chargeId), p);
+    const gens = (await db.select().from(schema.messageQueue).where(eq(schema.messageQueue.chargeId, chargeId))).map((m) => `${m.generation}:${m.status}`).sort();
+    expect(gens).toEqual(["0:enviando", "1:pendente"]);
+    expect(await reopenEmissionAfterCancel(db, A, chargeId)).toBe(0);
   });
 
   it("provedor diz que o boleto já foi pago: não cancela, registra a falha e marca o pagamento no provedor", async () => {
