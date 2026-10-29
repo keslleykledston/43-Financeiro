@@ -1111,6 +1111,81 @@ export const emailSendLog = pgTable("email_send_log", {
   check("email_send_log_finished_chk", sql`(${t.status} = 'enviando') = (${t.finishedAt} is null)`),
 ]);
 
+// W1 — WhatsApp (WAHA, NÃO oficial; docs/architecture/ADR-whatsapp-001.md). A conexão (sessão) é um recurso COMPARTILHÁVEL: nasce vinculada à empresa que a criou e só
+// aparece para empresas com vínculo ativo. Nenhuma chave da WAHA fica no banco (ela vem do ambiente do servidor).
+export const whatsappSessions = pgTable("whatsapp_sessions", {
+  ...base,
+  provider: text("provider").notNull().default("waha"),
+  providerSession: text("provider_session").notNull(), // nome da sessão na WAHA (k3g-xxxxxxxx), gerado aqui; nunca digitado
+  displayName: text("display_name").notNull(),
+  phoneMasked: text("phone_masked"), // só mascarado (+55 92 •••••-1234)
+  status: text("status").notNull().default("CREATED"), // CREATED | STARTING | QR_REQUIRED | CONNECTED | DISCONNECTED | DEGRADED | REVOKED
+  paused: boolean("paused").notNull().default(true), // nasce PAUSADA: ninguém envia até a diretoria liberar
+  engine: text("engine"),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  lastError: text("last_error"), // código genérico, sem corpo de resposta, QR ou telefone
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+}, (t) => [
+  uniqueIndex("whatsapp_sessions_provider_session_uq").on(t.provider, t.providerSession),
+  check("whatsapp_sessions_status_chk", sql`${t.status} in ('CREATED', 'STARTING', 'QR_REQUIRED', 'CONNECTED', 'DISCONNECTED', 'DEGRADED', 'REVOKED')`),
+  check("whatsapp_sessions_name_chk", sql`char_length(${t.displayName}) between 2 and 64 and ${t.providerSession} ~ '^k3g-[a-f0-9]{8}$'`),
+]);
+// Quais empresas podem usar a conexão. Revogar não apaga (histórico fica). `senderIdentity` = nome transparente de quem escreve ("Financeiro K3G Solutions").
+export const whatsappSessionCompanies = pgTable("whatsapp_session_companies", {
+  ...base,
+  sessionId: uuid("session_id").notNull().references(() => whatsappSessions.id),
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  senderIdentity: text("sender_identity").notNull(),
+  authorizedBy: uuid("authorized_by").notNull().references(() => users.id),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  revokedBy: uuid("revoked_by").references(() => users.id),
+}, (t) => [
+  uniqueIndex("whatsapp_session_companies_active_uq").on(t.sessionId, t.companyId).where(sql`${t.revokedAt} is null`),
+  index("whatsapp_session_companies_company_idx").on(t.companyId),
+  check("whatsapp_session_companies_sender_chk", sql`char_length(${t.senderIdentity}) between 3 and 80`),
+]);
+// Autorização de envio REAL de WhatsApp por empresa (mesma ideia da do e-mail): referência da autorização escrita, números exatos permitidos e limite diário.
+// Só é criada e revogada; nunca editada. Números em dígitos com DDI (5592...).
+export const whatsappSendAuthorizations = pgTable("whatsapp_send_authorizations", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  reference: text("reference").notNull(),
+  allowed: text("allowed").array().notNull(),
+  dailyLimit: integer("daily_limit").notNull(),
+  active: boolean("active").notNull().default(true),
+  authorizedBy: uuid("authorized_by").notNull().references(() => users.id),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  revokedBy: uuid("revoked_by").references(() => users.id),
+}, (t) => [
+  uniqueIndex("whatsapp_send_auth_active_uq").on(t.companyId).where(sql`${t.active}`),
+  check("whatsapp_send_auth_ref_chk", sql`char_length(${t.reference}) between 5 and 200`),
+  check("whatsapp_send_auth_allowed_chk", sql`cardinality(${t.allowed}) between 1 and 10`),
+  check("whatsapp_send_auth_limit_chk", sql`${t.dailyLimit} between 1 and 10`),
+  check("whatsapp_send_auth_revoked_chk", sql`${t.active} = (${t.revokedAt} is null)`),
+]);
+// Registro de cada tentativa de envio real. Só telefone MASCARADO e nunca o texto. Append-only: só sai de "enviando" uma vez (gatilho).
+export const whatsappSendLog = pgTable("whatsapp_send_log", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  sessionId: uuid("session_id").notNull().references(() => whatsappSessions.id),
+  kind: text("kind").notNull().default("teste"), // teste (W1); cobranca virá nas próximas entregas
+  phoneMasked: text("phone_masked").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(), // um por tentativa da TELA (duplo clique/reenvio do formulário não duplica a mensagem)
+  status: text("status").notNull().default("enviando"), // enviando | enviado | falhou | desconhecido
+  providerRef: text("provider_ref"), // SHA-256 (32 hex) do id devolvido pela WAHA: o id cru traz o telefone; a entrega 3 compara pelo hash
+  error: text("error"),
+  actorId: uuid("actor_id").references(() => users.id),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+}, (t) => [
+  index("whatsapp_send_log_company_idx").on(t.companyId, t.createdAt),
+  index("whatsapp_send_log_session_idx").on(t.sessionId, t.createdAt),
+  uniqueIndex("whatsapp_send_log_idem_uq").on(t.companyId, t.idempotencyKey),
+  check("whatsapp_send_log_idem_chk", sql`${t.idempotencyKey} ~ '^[A-Za-z0-9_-]{8,64}$'`),
+  check("whatsapp_send_log_kind_chk", sql`${t.kind} in ('teste')`),
+  check("whatsapp_send_log_status_chk", sql`${t.status} in ('enviando', 'enviado', 'falhou', 'desconhecido')`),
+  check("whatsapp_send_log_finished_chk", sql`(${t.status} = 'enviando') = (${t.finishedAt} is null)`),
+]);
+
 // H1 — histórico a partir da planilha de boletos (docs/HISTORICO_E_CAIXA.md). STAGING imutável: cada linha da planilha como veio, por empresa. NÃO é cobrança nem
 // contrato: nada aqui alimenta lotes, régua, emissão, contas a receber ou painel. Serve ao relatório de divergências e (H2/H3, com autorização própria) à carga histórica.
 // D3 — staging do histórico de DESPESAS (planilha Despesas__2026). Imutável como o H1; NÃO cria conta a pagar, sócio, lançamento nem fornecedor.

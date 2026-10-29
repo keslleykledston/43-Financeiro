@@ -18,7 +18,13 @@ x-app-env: &app-env
   # E10b-6 — EMISSÃO REAL na Cora de PRODUÇÃO. LIGADA em 2026-10-28 por ordem do dono ("Ligue a chave"). Ligada, nenhuma empresa emite: cada uma precisa ser "armada" pela diretoria (frase digitada) na tela de Emissões, em modo canário (3/dia), com confirmação a cada rodada. Kill switch: voltar para "false" + restart de web e scheduler (ou CORA_LIVE_ENABLED="true" = emergência geral).
   CORA_PROD_EMISSION_ENABLED: "true"
   FISCAL_LIVE_ENABLED: "false"
-  WHATSAPP_LIVE_ENABLED: "false"
+  WHATSAPP_LIVE_ENABLED: "false"   # chave GERAL antiga da fila simulada: continua desligada (ligada, recusa TODA emissão real)
+  # W1 — WhatsApp (WAHA, NÃO oficial). MODULE = gerenciar conexões/QR (não envia nada). SEND = envio manual de TESTE (desligada: liga só por ordem do dono, com autorização registrada na tela).
+  # AUTOMATION = réguas automáticas (não existe ainda; fica desligada).
+  WAHA_BASE_INTERNAL_URL: "http://waha:3000"
+  WHATSAPP_MODULE_ENABLED: "true"
+  WHATSAPP_SEND_ENABLED: "false"
+  WHATSAPP_AUTOMATION_ENABLED: "false"
 
 services:
   db:
@@ -48,6 +54,8 @@ services:
         required: false
       - path: .env.credentials   # opcional: K3G_CREDENTIALS_KEY (chave que cifra as credenciais guardadas em Integrações); sem ela usa AUTH_SECRET
         required: false
+      - path: .env.waha   # W1: WAHA_API_KEY (só servidor; o navegador nunca recebe)
+        required: false
     environment: *app-env
     ports:
       - "127.0.0.1:3150:3150"
@@ -69,11 +77,40 @@ services:
         required: false
       - path: .env.credentials   # E10b-4/5: o agendador consulta a Cora (baixa automática e avisos) e precisa abrir as credenciais cifradas
         required: false
+      - path: .env.waha   # W1: WAHA_API_KEY (só servidor; o navegador nunca recebe)
+        required: false
     environment: *app-env
     depends_on:
       db: { condition: service_healthy }
     networks: [k3g_finance]
     mem_limit: 256m
+
+  # W1 — WhatsApp (WAHA CORE, engine GOWS; NÃO oficial). Imagem FIXADA por digest (nunca latest). SEM porta publicada: só web/scheduler/tools da rede k3g_finance a alcançam, e só com a chave.
+  # Precisa de SAÍDA para a internet (servidores do WhatsApp), por isso fica na rede normal, não numa rede "internal". Painel e Swagger desligados.
+  # Sobe SÓ por pedido: `docker compose --profile whatsapp up -d waha`. Em perfil à parte de propósito: sem o arquivo .env.waha (chave) ele nem é lido, e a falta do arquivo não derruba web/scheduler;
+  # e a WAHA nunca sobe sem chave (com env_file obrigatório ela simplesmente não inicia).
+  waha:
+    profiles: [whatsapp]
+    image: devlikeapro/waha:gows-2026.8.2@sha256:23f2d002d262b54c711af02b5fe79b1948bbf31e6b64cf7776cd6bd2f7477b47
+    restart: unless-stopped
+    env_file: [.env.waha]
+    environment:
+      WHATSAPP_DEFAULT_ENGINE: GOWS
+      WAHA_DASHBOARD_ENABLED: "false"
+      WHATSAPP_SWAGGER_ENABLED: "false"
+      WAHA_PRINT_QR: "false"
+      TZ: America/Manaus
+    expose: ["3000"]
+    volumes:
+      - waha_sessions:/app/.sessions
+    networks: [k3g_finance]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/ping >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
 
   # docker compose --profile tools run --rm tools pnpm db:migrate | seed | test
   tools:
@@ -86,6 +123,8 @@ services:
         required: false
       - path: .env.credentials   # opcional: mesma chave do web, para os scripts de operação (ex.: sonda da Cora) abrirem as credenciais cifradas
         required: false
+      - path: .env.waha   # W1: WAHA_API_KEY (só servidor; o navegador nunca recebe)
+        required: false
     environment: *app-env
     depends_on:
       db: { condition: service_healthy }
@@ -93,5 +132,6 @@ services:
 
 volumes:
   k3g_finance_pgdata:
+  waha_sessions:
 networks:
   k3g_finance:

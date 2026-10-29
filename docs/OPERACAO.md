@@ -19,6 +19,14 @@
 4. Restaurar serviço de forma reprodutível; aplicar correção revisada.
 5. Registrar postmortem/ADR para evitar recorrência.
 
+## WhatsApp (WAHA) — operação (W1)
+- Subir/parar: `docker compose --profile whatsapp up -d waha` / `docker compose stop waha`. Perfil à parte de propósito: `web`/`scheduler` não dependem dele.
+- Chave: arquivo `.env.waha` (fora do Git, modo 600; nunca ler/colar). Trocar a chave: editar o arquivo, `docker compose --profile whatsapp up -d --force-recreate waha web scheduler`.
+- Sessões ficam no volume `waha_sessions` (sobrevivem a restart). Backup do volume só com o container parado; nunca copiar para docs.
+- Smoke: `waha` saudável; de dentro do `web`: `/ping` 200, `/api/sessions` sem chave 401; porta 3000 não escutando no host.
+- Imagem fixada por digest (`gows-2026.8.2`). Trocar de versão = novo spike (rotas, estados, HMAC) antes; nunca `latest`.
+- Incidentes: desconectou/“com problema” → pausar em /whatsapp e reconectar manualmente; «sem confirmação» → conferir o aparelho, nunca reenviar sozinho; suspeita de restrição → desligar `WHATSAPP_SEND_ENABLED` e investigar (sem contornos técnicos).
+
 ## Rollback de migrações (Drizzle não gera "down")
 Regra: antes de `pnpm db:migrate` em produção, `scripts/backup.sh`. A reversão é **restaurar o backup** (`docs/DEPLOY.md`, `scripts/restore-test.sh` valida o formato) ou aplicar o SQL inverso abaixo se nada foi gravado nas estruturas novas. Primeiro subir de volta a imagem anterior do `web` (compatível com o esquema antigo), depois reverter o banco.
 
@@ -68,5 +76,6 @@ Regra: antes de `pnpm db:migrate` em produção, `scripts/backup.sh`. A reversã
 | 0043 | colunas `issuance_requests.settled_at` e `issuance_settings.auto_settle` (E10b-4) + tabelas `cora_webhooks` e `cora_webhook_events` (E10b-5) | Desativar os avisos em Integrações → Cora (remove os endpoints na Cora). Colunas novas são ignoradas pelo código antigo. `DROP TABLE cora_webhook_events, cora_webhooks;` é seguro (nada depende delas). Baixas automáticas indesejadas: estornar o pagamento pela tela (ou restaurar o backup) |
 | 0044 | modo `cora_producao` nos CHECKs de `issuance_settings`, `issuance_requests` e `boleto_cancellations`; colunas `issuance_settings.live_authorized_by/at` e `live_canary`; CHECK `issuance_settings_live_auth_chk` (E10b-6) | Voltar a empresa para *Simulado* (apaga a autorização) e desligar `CORA_PROD_EMISSION_ENABLED`. Só reverter a migração se NÃO houver solicitações/cancelamentos `cora_producao` (boletos reais existem na Cora: manter a migração e o registro). Restaurar backup só em último caso |
 | 0045 | `message_queue.generation` (0 = original; N = reenvio do e-mail de EMISSÃO após boleto cancelado e reemitido); índice único `message_queue_one_uq` passa a incluir `generation`; CHECK `message_queue_generation_chk` (só `emissao` tem geração > 0) | Migração ADITIVA e compatível com o código anterior (que grava geração 0): reverter só o código. NÃO dropar a coluna/recriar o índice antigo se houver linhas `generation > 0` (mensagem enviada é imutável; o índice sem geração falharia). Restaurar backup só em último caso |
+| 0046 | tabelas novas `whatsapp_sessions`, `whatsapp_session_companies`, `whatsapp_send_authorizations`, `whatsapp_send_log` (W1, WhatsApp/WAHA) com gatilhos de imutabilidade e anti-TRUNCATE | Migração ADITIVA (não toca tabelas existentes): reverter só o código e desligar `WHATSAPP_MODULE_ENABLED`/`WHATSAPP_SEND_ENABLED`; `docker compose stop waha`. Registros são permanentes (envio, autorização, vínculo): NÃO apagar; dropar as tabelas só com ordem do dono e backup. Restaurar backup só em último caso |
 
 Cada nova migração deve acrescentar sua linha nesta tabela no mesmo commit.

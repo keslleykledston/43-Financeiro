@@ -26,6 +26,11 @@ x-env: &env
   CRM_API_TOKEN: sandbox-crm-token
   CRM_ALLOW_INSECURE_HTTP: "true"
   CRM_ALLOWED_HOSTS: sandbox-crm
+  WAHA_BASE_INTERNAL_URL: http://waha:3000
+  WAHA_API_KEY: sandbox-waha-key
+  WHATSAPP_MODULE_ENABLED: "true"
+  WHATSAPP_SEND_ENABLED: "true"   # só no sandbox (WAHA falsa); em produção fica "false" até ordem do dono
+  WHATSAPP_AUTOMATION_ENABLED: "false"
 
 services:
   sandbox-db:
@@ -45,10 +50,17 @@ services:
     volumes: ["./scripts/fake-crm.mjs:/srv/fake-crm.mjs:ro"]
     healthcheck: { test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"], interval: 3s, timeout: 3s, retries: 20 }
 
+  sandbox-waha:
+    image: node:22-slim
+    command: ["node", "/srv/fake-waha.mjs"]
+    volumes: ["./scripts/fake-waha.mjs:/srv/fake-waha.mjs:ro"]
+    networks: { default: { aliases: [waha] } }
+    healthcheck: { test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/ping').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"], interval: 3s, timeout: 3s, retries: 20 }
+
   sandbox-web:
     build: { context: ., target: runner }
     environment: *env
-    depends_on: { sandbox-db: { condition: service_healthy }, sandbox-crm: { condition: service_healthy } }
+    depends_on: { sandbox-db: { condition: service_healthy }, sandbox-crm: { condition: service_healthy }, sandbox-waha: { condition: service_healthy } }
 
   sandbox-e2e:
     image: mcr.microsoft.com/playwright:v1.64.1-noble
@@ -60,6 +72,8 @@ services:
       SANDBOX_ADMIN_EMAIL: admin@sandbox.test
       SANDBOX_ADMIN_PASSWORD: Sandbox-Admin-Pass-123
       FAKE_CRM_URL: http://sandbox-crm:4000
+      FAKE_WAHA_URL: http://waha:3000
+      FAKE_WAHA_KEY: sandbox-waha-key
       CI: "1"
     depends_on: { sandbox-web: { condition: service_healthy } }
     command: ["sh", "-c", "npx playwright test; rc=$$?; chown -R 1000:1000 e2e-results 2>/dev/null; exit $$rc"]
