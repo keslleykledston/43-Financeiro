@@ -41,9 +41,13 @@ O teste existe para provar que a conexão funciona, **com texto fixo e sem dado 
 - envios da empresa pausados (Mensagens → Configuração);
 - autorização ausente ou número fora da lista; número inválido;
 - fora da janela de envio (horário, dia da semana, feriado, em Manaus);
+- número que não existe no WhatsApp, ou que a consulta devolve diferente do autorizado;
 - limite diário atingido: o da autorização, **10 por empresa** e **20 por conexão** (a conexão pode ser compartilhada entre empresas).
 
-Todo bloqueio mostra o motivo na tela e fica registrado no *Registro de atividades*.
+O limite diário conta as **tentativas reservadas** (inclusive uma consulta que bloqueou o envio). Todo bloqueio mostra o motivo na tela e fica registrado no *Registro de atividades*.
+
+### «Número não encontrado» e o 9º dígito
+Antes de enviar, o sistema **consulta o número no WhatsApp** (a consulta não envia nada). Se ele não existir, o envio é bloqueado com esse aviso. Algumas contas antigas do WhatsApp existem **sem o 9º dígito** do celular: o sistema aceita essa forma **somente** quando ela é o mesmo número que você autorizou (mesmo DDD e mesmos 8 últimos dígitos). Qualquer outra diferença bloqueia o envio.
 
 ### «Sem confirmação»
 Se a WAHA não responder a tempo, o envio fica como **sem confirmação**: a mensagem **pode ter chegado**. O sistema **não reenvia sozinho**, para não duplicar. Confira o aparelho de destino.
