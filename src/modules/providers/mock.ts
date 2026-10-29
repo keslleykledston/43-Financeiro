@@ -34,6 +34,7 @@ export function createMockProviders(): Providers {
       },
       async find(key) { const r = byKey.get(`boleto:${key}`); return r ? { providerRef: r, status: boletos.get(r)!, digitableLineMasked: "00000.00000 •••••.••••• •••••.••••• 0 00000000000000" } : null; },
       async status(r) { const s = seen(r); if (!s) throw new Error("boleto_inexistente"); return s; },
+      async details(r) { const s = seen(r); if (!s) throw new Error("boleto_inexistente"); return { status: s, rawStatus: s.toUpperCase(), totalAmountCents: 0, totalPaidCents: 0, dueDate: null, paidOn: null, payments: [], digitable: null, barcode: null, pdfUrl: null }; },
       async cancel(r) { const s = seen(r); if (!s) throw new Error("boleto_inexistente"); if (s === "pago") throw new Error("boleto_pago"); boletos.set(r, "cancelado"); },
     },
     nfse: {

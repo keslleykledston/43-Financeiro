@@ -146,7 +146,7 @@ Aceite: números rastreáveis, sem duplicar intercompany, notas de dados ausente
 - [x] Adaptador SMTP (nodemailer) com proteção SSRF, TLS verificado, lista de destinatários, tempos limite; reservar → enviar → registrar; desconhecido nunca reenvia; registro imutável (migração 0027).
 - [x] Integrações → "Envio real — canário": autorização (referência, lista, limite diário), revogar, e-mail de teste, últimos envios. Banner do topo muda quando ativo.
 - [ ] **NÃO LIGADO**: ligar exige autorização escrita do dono + trocar `EMAIL_EXTERNAL_ENABLED` no docker-compose.yml + registrar a autorização na tela + SPF/DKIM/DMARC do domínio. Passo a passo em docs/E10_GOLIVE.md.
-- [ ] Boleto na mensagem (link/linha digitável/PDF) — adaptador da Cora de testes pronto (E10b-1); falta guardar/mostrar o link nas mensagens (E10b-3). **E10b-2 [x]** atualizar situação dos boletos da Cora de testes (só consulta, 2026-10-28).
+- [ ] Boleto na mensagem (link/linha digitável/PDF) — adaptador da Cora de testes pronto (E10b-1); falta guardar/mostrar o link nas mensagens (E10b-3). **E10b-2 [x]** atualizar situação dos boletos da Cora de testes (só consulta, 2026-10-28). **E10b-3 [x]** dados do boleto ao vivo (linha digitável/PDF, só domínio Cora). **E10b-4 [x]** baixa automática (opt-in, só quando tudo confere; conferência manual nos demais casos). **E10b-5 [x]** webhooks da Cora de testes (gatilho de reconsulta; validado no stage com aviso real). Falta: E10b-6 emissão em PRODUÇÃO.
 - [ ] Tratamento de e-mail devolvido (bounce) e cabeçalhos de lista (List-Unsubscribe) antes de sair do canário.
 - [ ] Envio automático real pelo scheduler: hoje PROIBIDO de propósito (Codex E23 P1); só reabrir com decisão do dono depois do canário.
 

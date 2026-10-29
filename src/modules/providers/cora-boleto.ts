@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { CoraHttpError, CoraNetworkError, type CoraClient, type Invoice } from "./cora-http";
 import { IssuanceRetryable, IssuanceTimeout } from "./errors";
-import type { BoletoInput, BoletoProvider, BoletoResult } from "./types";
+import type { BoletoDetails, BoletoInput, BoletoProvider, BoletoResult } from "./types";
 
 /**
  * E10b-1 — adaptador de BOLETO da Cora para o motor de emissão. Traduz o contrato do motor (BoletoProvider) para a API v2 de boletos.
@@ -37,6 +37,13 @@ export function mapCoraError(e: unknown, op: "issue" | "find" | "status" | "canc
   }
   throw e instanceof Error ? e : new Error("erro_desconhecido"); // 5xx e o resto: resultado desconhecido (o motor reconsulta)
 }
+
+/** Pagamentos CONCLUÍDOS (a Cora marca `SUCCESS`); os demais (iniciados/falhos) não contam como dinheiro recebido. */
+export const detailsOf = (inv: Invoice): BoletoDetails => ({
+  status: statusOf(inv.status), rawStatus: inv.status, totalAmountCents: inv.totalAmountCents, totalPaidCents: inv.totalPaidCents, dueDate: inv.dueDate, paidOn: inv.occurrenceDate,
+  payments: inv.payments.filter((p) => p.status === "SUCCESS").map(({ id, totalPaidCents, interestCents, fineCents, finalizedAt }) => ({ id, totalPaidCents, interestCents, fineCents, finalizedAt })),
+  digitable: inv.digitable, barcode: inv.barcode, pdfUrl: inv.pdfUrl,
+});
 
 export function createCoraBoletoProvider(client: CoraClient): BoletoProvider {
   return {
@@ -83,6 +90,10 @@ export function createCoraBoletoProvider(client: CoraClient): BoletoProvider {
 
     async status(ref: string) {
       try { return statusOf((await client.getInvoice(ref)).status); } catch (e) { return mapCoraError(e, "status"); }
+    },
+
+    async details(ref: string) {
+      try { return detailsOf(await client.getInvoice(ref)); } catch (e) { return mapCoraError(e, "status"); }
     },
 
     async cancel(ref: string) {

@@ -34,6 +34,10 @@ const ROUTES: Route[] = [
   { method: "GET", re: /^\/v2\/invoices\/inv_[A-Za-z0-9_-]{4,64}$/ },
   { method: "POST", re: /^\/v2\/invoices$/ },
   { method: "DELETE", re: /^\/v2\/invoices\/inv_[A-Za-z0-9_-]{4,64}$/ }, // cancelar boleto (só a diretoria chama, via fluxo E20/E30; bloqueado em produção)
+  // E10b-5 — webhooks (avisos de boleto pago/cancelado): cadastro do ENDEREÇO que a Cora vai chamar. Não movimenta dinheiro; em produção segue a mesma trava de escrita.
+  { method: "GET", re: /^\/endpoints\/?$/ },
+  { method: "POST", re: /^\/endpoints\/?$/ },
+  { method: "DELETE", re: /^\/endpoints\/[A-Za-z0-9_-]{4,64}$/ },
 ];
 export const routeAllowed = (method: string, path: string) => ROUTES.some((r) => r.method === method && r.re.test(path));
 
@@ -79,6 +83,10 @@ export type InvoiceStatus = "DRAFT" | "OPEN" | "IN_PAYMENT" | "LATE" | "PAID" | 
 export type Invoice = {
   id: string; status: InvoiceStatus | string; code: string | null; totalAmountCents: number; totalPaidCents: number; dueDate: string | null;
   customerName: string | null; digitable: string | null; barcode: string | null; pdfUrl: string | null;
+  /** Data em que o cliente pagou no banco (AAAA-MM-DD), quando a Cora informa. */
+  occurrenceDate: string | null;
+  /** Pagamentos do boleto (vazio se não houve). Valores em centavos; `interest`/`fine` = encargos cobrados neste pagamento. */
+  payments: { id: string; status: string; totalPaidCents: number; interestCents: number; fineCents: number; finalizedAt: string | null }[];
 };
 
 /** CPF (11 dígitos) ou CNPJ (14; desde 2026 pode ter letras nas 12 primeiras posições): sem pontuação, em maiúsculas. */
@@ -95,6 +103,8 @@ export function normalizeInvoice(raw: unknown): Invoice {
     totalAmountCents: int(o.total_amount ?? o.amount), totalPaidCents: int(o.total_paid),
     dueDate: str(terms.due_date) ?? str(o.due_date), customerName: str(cust.name),
     digitable: str(slip.digitable), barcode: str(slip.barcode), pdfUrl: str(slip.url),
+    occurrenceDate: /^\d{4}-\d{2}-\d{2}/.test(str(o.occurrence_date) ?? "") ? str(o.occurrence_date)!.slice(0, 10) : null,
+    payments: (Array.isArray(o.payments) ? o.payments : []).map((p) => { const q = asObj(p); return { id: String(q.id ?? ""), status: String(q.status ?? ""), totalPaidCents: int(q.total_paid), interestCents: int(q.interest), fineCents: int(q.fine), finalizedAt: str(q.finalized_at) }; }),
   };
 }
 
@@ -156,6 +166,21 @@ export class CoraClient {
   async cancelInvoice(id: string): Promise<void> {
     await this.authed("DELETE", `/v2/invoices/${id}`);
   }
+
+  /** Webhook (aviso): cadastra o endereço que a Cora chamará quando o boleto mudar de situação. Só `invoice` + gatilho. O aviso da Cora NÃO tem assinatura nem corpo: serve só de gatilho para reconsultar. */
+  async createEndpoint(i: { idempotencyKey: string; url: string; trigger: "paid" | "canceled" | "overdue" }): Promise<{ id: string; url: string; trigger: string; active: boolean }> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(i.idempotencyKey)) throw new RangeError("Idempotency-Key deve ser UUID");
+    if (!/^https:\/\/[^\s]{4,300}$/.test(i.url)) throw new RangeError("Endereço do webhook deve ser https");
+    const o = asObj(await this.authed("POST", "/endpoints", { headers: { "Idempotency-Key": i.idempotencyKey }, json: { url: i.url, resource: "invoice", trigger: i.trigger } }));
+    const id = str(o.id);
+    if (!id || !/^[A-Za-z0-9_-]{4,64}$/.test(id)) throw new CoraHttpError(200, "Resposta da Cora sem id de endpoint");
+    return { id, url: String(o.url ?? ""), trigger: String(o.trigger ?? ""), active: o.active !== false };
+  }
+  async listEndpoints(): Promise<{ id: string; resource: string; trigger: string; active: boolean }[]> {
+    const j = await this.authed("GET", "/endpoints/");
+    return (Array.isArray(j) ? j : []).map((e) => { const o = asObj(e); return { id: String(o.id ?? ""), resource: String(o.resource ?? ""), trigger: String(o.trigger ?? ""), active: o.active !== false }; }); // a URL (que leva o segredo) NÃO é devolvida
+  }
+  async deleteEndpoint(id: string): Promise<void> { await this.authed("DELETE", `/endpoints/${id}`); }
 
   /** Emite UM boleto. `idempotencyKey` deve ser UUID (a Cora usa para não duplicar se a resposta se perder). */
   async createInvoice(i: { idempotencyKey: string; code: string; amountCents: number; dueDate: string; customerName: string; customerDocument: string; description: string }): Promise<Invoice> {

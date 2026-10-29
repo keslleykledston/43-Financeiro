@@ -20,7 +20,8 @@ import { listSendLog } from "@/modules/providers/email-live";
 import { getEmailStatus, hasEmailAccount } from "@/modules/providers/email-config";
 import { SECURITY_LABEL } from "@/modules/providers/email";
 import { nfseProfileComplete } from "@/modules/companies/fiscal";
-import { removeCoraAction, removeEmailAction, revokeEmailLiveAction } from "./actions";
+import { disableWebhookAction, enableWebhookAction, removeCoraAction, removeEmailAction, revokeEmailLiveAction } from "./actions";
+import { webhookStatus } from "@/modules/issuance/webhooks";
 
 const REASON: Record<string, string> = { duplicate_document: "Já existe um cadastro local com este documento", document_collision: "O documento colide com outro cadastro ativo", ambiguous_company: "Não foi possível saber a qual empresa pertence" };
 const fmt = (d: Date) => d.toLocaleString("pt-BR", { timeZone: "America/Manaus" });
@@ -36,6 +37,7 @@ export default async function Integracoes() {
   const [conn, conflicts, runs] = await Promise.all([getConnection(db, ctx.current.id), manage ? listConflicts(db, ctx.user.id, ctx.current.id) : Promise.resolve([]), listRuns(db, ctx.user.id, ctx.current.id)]);
   const coraAccess = can(role, "providers.credentials");
   const cora = coraAccess ? await getCoraStatus(db, ctx.user.id, ctx.current.id) : [];
+  const hooks = coraAccess ? await webhookStatus(db, ctx.user.id, ctx.current.id) : [];
   const coraInDb = coraAccess ? await hasCoraCredentials(db, ctx.user.id, ctx.current.id) : false;
   const email = coraAccess ? await getEmailStatus(db, ctx.user.id, ctx.current.id) : null;
   const live = coraAccess ? await getEmailLiveStatus(db, ctx.user.id, ctx.current.id) : null;
@@ -115,6 +117,19 @@ export default async function Integracoes() {
               </li>
             ))}
           </ul>
+          {hooks.map((h) => (
+            <div key={h.environment} className="mb-4 rounded-md border p-3 text-sm">
+              <p className="font-medium">Avisos de pagamento (webhook) — {ENV_LABEL[h.environment]}</p>
+              <p className="mt-1 text-xs text-muted-foreground">A Cora avisa quando um boleto é <strong>pago</strong> ou <strong>cancelado</strong>. O aviso não vale por si só: a plataforma <strong>reconsulta o boleto na Cora</strong> antes de qualquer coisa. Não movimenta dinheiro.</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${h.active ? "bg-positive-soft text-positive-foreground" : "bg-muted"}`}>{h.active ? `Ativo (${h.triggers} aviso(s) cadastrados)` : "Desativado"}</span>
+                {h.pending > 0 && <span className="text-xs text-muted-foreground">{h.pending} aviso(s) na fila</span>}
+                {cora.find((c) => c.environment === h.environment)?.configured && (
+                  <form action={enableWebhookAction}><input type="hidden" name="environment" value={h.environment} /><button className="rounded-md px-2.5 py-1 text-xs ring-1 ring-border">{h.active ? "Girar segredo (recadastrar)" : "Ativar avisos"}</button></form>)}
+                {h.active && <form action={disableWebhookAction}><input type="hidden" name="environment" value={h.environment} /><button className="rounded-md px-2.5 py-1 text-xs text-negative-foreground ring-1 ring-border">Desativar</button></form>}
+              </div>
+            </div>
+          ))}
           <p className="mb-3 rounded-md bg-muted p-3 text-xs text-muted-foreground">Guardar as credenciais <strong>não liga a emissão real</strong>. Ela continua desligada até a homologação e a sua autorização escrita (veja o checklist abaixo). Na Cora, crie a integração direta só com o que é preciso para boletos.</p>
           <CoraForm />
         </>) : <p className="text-sm text-muted-foreground">As credenciais da Cora são cadastradas somente pela diretoria.</p>}

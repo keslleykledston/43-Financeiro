@@ -65,6 +65,8 @@ services:
       - .env.auth
       - path: .env.crm
         required: false
+      - path: .env.credentials   # E10b-4/5: o agendador consulta a Cora (baixa automática e avisos) e precisa abrir as credenciais cifradas
+        required: false
     environment: *app-env
     depends_on:
       db: { condition: service_healthy }

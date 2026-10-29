@@ -67,6 +67,8 @@ test("E10 — motor de emissão SIMULADO: nasce pausado, solicita, processa uma 
     await expect(cora).toHaveText(/desligado no servidor/);
     await expect(cora).toBeDisabled();
     await expect(page.getByText(/Simulação: este motor ensaia o fluxo/)).toBeVisible();
+    await expect(page.getByLabel(/Baixa automática pela Cora/)).toBeDisabled(); // só vale com provedor da Cora
+    await expect(page.getByRole("button", { name: "Atualizar situação na Cora" })).toHaveCount(0);
   });
 
   await test.step("lote com emissão concluída não pode ser reaberto", async () => {

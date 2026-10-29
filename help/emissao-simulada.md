@@ -30,6 +30,19 @@ Com o provedor **Cora — testes**, o botão **Atualizar situação na Cora** (E
 - **Aberto ou atrasado:** nada muda.
 Cada rodada confere até 50 boletos; se houver mais, clique de novo. Se a Cora limitar o acesso, a rodada para e avisa.
 
+## Baixa automática pela Cora (opcional, só diretoria)
+Em *Controle*, a opção **Baixa automática pela Cora** faz a plataforma **registrar o pagamento sozinha** quando a Cora informa que o boleto foi pago. Ela só lança o que a Cora diz ter recebido; nunca move dinheiro.
+- A baixa só é feita se tudo conferir: pagamento concluído na Cora, valor pago = valor da cobrança (juros/multa viram acréscimo) e sem cancelamento em andamento.
+- O lançamento aparece na cobrança com a forma **boleto** e o autor **Cora (automático)**; dá para estornar como qualquer pagamento.
+- Se algo não bater (valor diferente, por exemplo), nada é lançado: a cobrança mostra "pago na Cora" e a diretoria confere e dá a baixa manual.
+- A situação é conferida a cada 10 minutos e também ao clicar em **Atualizar situação na Cora**.
+
+## Avisos da Cora (webhook)
+Em *Integrações → Cora → Avisos de pagamento*, a diretoria pode **ativar** os avisos: a Cora avisa quando um boleto é pago ou cancelado e a plataforma reconsulta o boleto na hora. O aviso, sozinho, **não baixa nada**: quem decide é a consulta autenticada à Cora. Se o aviso falhar, a conferência a cada 10 minutos cobre.
+
+## Dados do boleto
+Na cobrança, **Ver dados do boleto** mostra a linha digitável e o PDF, consultados agora na Cora (nada fica guardado aqui).
+
 ## O que falta para a emissão real
 Veja *Integrações → Portão da emissão real*: credenciais fora do Git, homologação, calendário fiscal aprovado e **autorização escrita da diretoria**. O roteiro completo está em `docs/E10_GOLIVE.md`.
 

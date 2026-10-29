@@ -25,7 +25,7 @@ export async function processIssuanceAction() {
 }
 export async function syncBoletoStatusAction() {
   let err = "", ok = "";
-  try { const c = await ctx(); const r = await syncBoletoStatus(db, c.userId, c.companyId); ok = `sync:${r.checked}:${r.paid}:${r.cancelled}:${r.failed}${r.skipped ? ":" + encodeURIComponent(r.skipped) : ""}`; } catch (e) { err = known(e); }
+  try { const c = await ctx(); const r = await syncBoletoStatus(db, c.userId, c.companyId); ok = `sync:${r.checked}:${r.paid}:${r.cancelled}:${r.failed}:${r.settled}:${r.needsReview}${r.skipped ? ":" + encodeURIComponent(r.skipped) : ""}`; } catch (e) { err = known(e); }
   revalidatePath("/faturamento/emissoes"); go(err, ok);
 }
 export async function cancelIssuanceAction(fd: FormData) {
@@ -35,6 +35,6 @@ export async function cancelIssuanceAction(fd: FormData) {
 }
 export async function saveIssuanceSettingsAction(fd: FormData) {
   let err = "";
-  try { const c = await ctx(); await saveIssuanceSettings(db, c.userId, c.companyId, { paused: fd.get("paused") === "on", dailyLimit: fd.get("dailyLimit"), boletoProvider: fd.get("boletoProvider") ?? undefined }); } catch (e) { err = known(e); }
+  try { const c = await ctx(); await saveIssuanceSettings(db, c.userId, c.companyId, { paused: fd.get("paused") === "on", dailyLimit: fd.get("dailyLimit"), boletoProvider: fd.get("boletoProvider") ?? undefined, autoSettle: fd.has("autoSettleField") ? fd.get("autoSettle") === "on" : undefined }); } catch (e) { err = known(e); }
   revalidatePath("/faturamento/emissoes"); go(err, "salvo");
 }

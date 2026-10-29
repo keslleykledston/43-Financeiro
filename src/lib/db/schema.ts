@@ -617,6 +617,7 @@ export const issuanceSettings = pgTable("issuance_settings", {
   paused: boolean("paused").notNull().default(true), // nasce PAUSADO (kill switch)
   dailyLimit: integer("daily_limit").notNull().default(20),
   boletoProvider: text("boleto_provider").notNull().default("simulado"), // E10b-1: simulado | cora_homologacao (stage). NÃO há modo de produção
+  autoSettle: boolean("auto_settle").notNull().default(false), // E10b-4: baixa automática (cria o pagamento quando a Cora informa boleto pago); desligada por padrão
   updatedBy: uuid("updated_by").references(() => users.id),
 }, (t) => [
   unique("issuance_settings_company_uq").on(t.companyId),
@@ -637,6 +638,7 @@ export const issuanceRequests = pgTable("issuance_requests", {
   claimedAt: timestamp("claimed_at", { withTimezone: true }),
   externalRef: text("external_ref"),
   externalStatus: text("external_status"),
+  settledAt: timestamp("settled_at", { withTimezone: true }), // E10b-4: quando a baixa automática foi feita (ou conferida como já feita); nulo = ainda não
   lastError: text("last_error"), // código genérico, sem dados do cliente
   requestedBy: uuid("requested_by").notNull().references(() => users.id),
 }, (t) => [
@@ -1294,4 +1296,42 @@ export const contractAlertSnoozes = pgTable("contract_alert_snoozes", {
   uniqueIndex("contract_alert_snoozes_uq").on(t.contractId, t.kind, t.dueDate),
   check("contract_alert_snoozes_kind_chk", sql`${t.kind} in ('vigencia_encerrada', 'vigencia_proxima', 'renovacao_proxima', 'reajuste_atrasado', 'reajuste_proximo')`),
   check("contract_alert_snoozes_note_chk", sql`char_length(${t.note}) <= 200`),
+]);
+
+// E10b-5 — webhooks da Cora (avisos de boleto pago/cancelado). A Cora NÃO assina o aviso nem manda corpo: só `webhook-event-type` e `webhook-resource-id`.
+// Por isso o aviso é apenas um GATILHO: nada é gravado a partir dele; a plataforma reconsulta o boleto na Cora (mTLS) e só então age. O endereço leva um segredo
+// aleatório (256 bits) na rota; guardamos só o HASH (o endereço completo existe apenas na Cora).
+export const coraWebhooks = pgTable("cora_webhooks", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  environment: text("environment").notNull(), // homologacao | producao
+  secretHash: text("secret_hash").notNull(), // sha-256 do segredo da rota
+  endpointIds: jsonb("endpoint_ids").notNull().default(sql`'[]'::jsonb`), // ids dos endpoints cadastrados na Cora (para remover)
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+}, (t) => [
+  unique("cora_webhooks_company_env_uq").on(t.companyId, t.environment),
+  uniqueIndex("cora_webhooks_secret_uq").on(t.secretHash),
+  check("cora_webhooks_env_chk", sql`${t.environment} in ('homologacao', 'producao')`),
+  check("cora_webhooks_hash_chk", sql`${t.secretHash} ~ '^[0-9a-f]{64}$'`),
+]);
+
+export const coraWebhookEvents = pgTable("cora_webhook_events", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  environment: text("environment").notNull(),
+  eventType: text("event_type").notNull(), // ex.: invoice.paid
+  resourceId: text("resource_id").notNull(), // inv_…
+  eventId: text("event_id"), // cabeçalho webhook-event-id (opcional)
+  status: text("status").notNull().default("pendente"), // pendente | processado | ignorado | erro
+  attempts: integer("attempts").notNull().default(0),
+  outcome: text("outcome"),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+}, (t) => [
+  index("cora_webhook_events_pending_idx").on(t.status, t.createdAt),
+  uniqueIndex("cora_webhook_events_event_uq").on(t.companyId, t.eventId).where(sql`${t.eventId} is not null`), // reenvio do mesmo aviso: um só (mesmo em chamadas simultâneas)
+  uniqueIndex("cora_webhook_events_pending_uq").on(t.companyId, t.resourceId, t.eventType).where(sql`${t.status} = 'pendente'`), // sem id: no máximo um pendente igual por boleto/tipo
+  check("cora_webhook_events_env_chk", sql`${t.environment} in ('homologacao', 'producao')`),
+  check("cora_webhook_events_attempts_chk", sql`${t.attempts} between 0 and 20`),
+  check("cora_webhook_events_status_chk", sql`${t.status} in ('pendente', 'processado', 'ignorado', 'erro')`),
+  check("cora_webhook_events_shape_chk", sql`${t.eventType} ~ '^[a-z_]{2,20}[.][a-z_*]{2,20}$' and ${t.resourceId} ~ '^inv_[A-Za-z0-9_-]{4,64}$' and (${t.eventId} is null or char_length(${t.eventId}) <= 100)`),
 ]);

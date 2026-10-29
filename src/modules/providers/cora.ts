@@ -12,6 +12,7 @@ export const CORA_SCOPE = {
     { key: "boleto.consultar", label: "Consultar a situação do boleto (emitido, pago, atrasado)" },
     { key: "boleto.segunda_via", label: "Emitir segunda via do boleto" },
     { key: "boleto.cancelar", label: "Cancelar boleto — só a diretoria, com motivo; fica tudo registrado" },
+    { key: "boleto.avisos", label: "Receber avisos (webhook) de boleto pago ou cancelado e reconsultar o boleto" },
   ],
   forbidden: [
     { key: "pagamento", label: "Pagar contas ou boletos" },

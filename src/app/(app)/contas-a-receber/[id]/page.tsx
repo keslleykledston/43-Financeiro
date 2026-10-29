@@ -16,12 +16,13 @@ import { cancelBoletoAction, decideCancelRequestAction, payAction, recheckBoleto
 import { REQUEST_STATUS_LABEL, cancelRequestsForCharge } from "@/modules/issuance/cancel-request";
 import { boletoPanel, CANCEL_ERROR_LABEL, CANCEL_STATUS_LABEL } from "@/modules/issuance/cancel";
 import { STATUS_LABEL as ISSUANCE_LABEL } from "@/modules/issuance/service";
+import { boletoView } from "@/modules/issuance/boleto-details";
 
 const TONE: Record<Situation, StatusTone> = { quitada: "positive", parcial: "warning", vencida: "negative", a_vencer: "info" };
 const br = (d: string) => d.split("-").reverse().join("/");
 const OK: Record<string, string> = { pago: "Pagamento registrado.", quitada: "Pagamento registrado. Cobrança quitada: as mensagens da régua foram interrompidas.", pedido_enviado: "Pedido de cancelamento enviado para a diretoria. Nada muda no boleto até ela decidir.", pedido_retirado: "Pedido de cancelamento retirado.", pedido_recusado: "Pedido de cancelamento recusado. O boleto continua valendo.", boleto_cancelado: "Boleto cancelado e registrado. A régua de mensagens desta cobrança foi interrompida; para cobrar de novo, solicite uma nova emissão.", boleto_sem_resposta: "O provedor não respondeu de forma conclusiva. Use «Reconsultar» antes de tentar de novo.", estornado: "Pagamento estornado. O saldo voltou; se quiser retomar a régua, use Mensagens → Programar." };
 
-export default async function Cobranca({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ erro?: string; ok?: string }> }) {
+export default async function Cobranca({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ erro?: string; ok?: string; boleto?: string }> }) {
   const [{ id }, sp, ctx] = await Promise.all([params, searchParams, requireContext()]);
   const role = ctx.current ? await activeRole(db, ctx.user.id, ctx.current.id) : null;
   if (!ctx.current || !role || !can(role, "receivables.read")) return <Callout tone="warning">Seu papel não tem acesso às contas a receber.</Callout>;
@@ -29,6 +30,7 @@ export default async function Cobranca({ params, searchParams }: { params: Promi
   if (!r) notFound();
   const pay = can(role, "receivables.pay"), reverse = can(role, "receivables.reverse"), cancelBoletoPerm = can(role, "boletos.cancel"), requestCancelPerm = can(role, "boletos.request") && !can(role, "boletos.cancel");
   const panel = can(role, "issuance.read") ? await boletoPanel(db, ctx.user.id, ctx.current.id, r.id) : null;
+  const view = can(role, "issuance.read") && sp.boleto === "1" && panel?.request?.status === "emitido" ? await boletoView(db, ctx.user.id, ctx.current.id, r.id) : null; // consulta ao vivo, só quando pedida
   const cancelRequests = can(role, "issuance.read") ? await cancelRequestsForCharge(db, ctx.user.id, ctx.current.id, r.id) : [];
   const pendingRequest = cancelRequests.find((q) => q.status === "pendente" || q.stuck);
   const canApproveNow = !!panel && panel.request?.status === "emitido" && r.payments.length === 0;
@@ -69,6 +71,17 @@ export default async function Cobranca({ params, searchParams }: { params: Promi
         <SectionCard title="Boleto">
           {panel.request?.externalStatus === "pago" && <Callout tone="warning">O provedor informa que este boleto foi <strong>pago</strong>. Confira o recebimento e registre a baixa. As mensagens de cobrança foram interrompidas.</Callout>}
           <p className="text-sm">{panel.request ? <>Situação da emissão: <strong>{ISSUANCE_LABEL[panel.request.status] ?? panel.request.status}</strong>{panel.request.externalStatus ? ` · no provedor: ${panel.request.externalStatus}` : ""}</> : "Sem boleto ativo (o anterior foi cancelado). Solicite uma nova emissão em Faturamento → Emissões."}</p>
+          {panel.request?.status === "emitido" && !view && <p className="mt-2"><AppLink href={`/contas-a-receber/${r.id}?boleto=1`} className={buttonClass("outline", "sm")}>Ver dados do boleto</AppLink></p>}
+          {view?.kind === "simulado" && <Callout tone="info">Boleto simulado: não há linha digitável nem PDF reais.</Callout>}
+          {view?.kind === "indisponivel" && <Callout tone="warning">{view.reason}</Callout>}
+          {view?.kind === "ok" && (
+            <div className="mt-3 space-y-1 rounded-md border bg-muted/30 p-3 text-sm" role="status">
+              <p><strong>Dados na Cora{view.mode === "cora_homologacao" ? " de testes (boleto de teste, não é real)" : ""}</strong> · situação: {view.details.rawStatus} · valor <Money cents={view.details.totalAmountCents} />{view.details.totalPaidCents > 0 && <> · pago <Money cents={view.details.totalPaidCents} />{view.details.paidOn ? ` em ${br(view.details.paidOn)}` : ""}</>}</p>
+              {view.details.digitable && <p>Linha digitável: <span className="num select-all font-mono">{view.details.digitable}</span></p>}
+              {view.details.pdfUrl ? <p><a href={view.details.pdfUrl} target="_blank" rel="noopener noreferrer" className="font-medium underline">Abrir o PDF do boleto</a></p> : <p className="text-muted-foreground">PDF indisponível.</p>}
+              <p className="text-xs text-muted-foreground">Consultado agora na Cora; nada disto fica guardado aqui.</p>
+            </div>
+          )}
           {cancelBoletoPerm && panel.request?.status === "emitido" && r.payments.length === 0 && !panel.history.some((h) => h.status === "enviando" || h.status === "desconhecido") && (
             <details className="mt-3"><summary className="cursor-pointer text-sm font-medium text-negative-foreground">Cancelar boleto (só a diretoria)</summary>
               <form action={cancelBoletoAction} className="mt-2 grid max-w-xl gap-3">

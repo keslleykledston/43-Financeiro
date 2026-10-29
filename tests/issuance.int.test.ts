@@ -85,7 +85,7 @@ describe.skipIf(!enabled)("E10 motor de emissão (simulado): reservar → chamar
 
   it("nasce PAUSADO; só diretoria altera; limites validados; nada é processado pausado", async () => {
     await approvedBatch();
-    expect(await getIssuanceSettings(db, contA, A)).toEqual({ paused: true, dailyLimit: 20, boletoProvider: "simulado" });
+    expect(await getIssuanceSettings(db, contA, A)).toEqual({ paused: true, dailyLimit: 20, boletoProvider: "simulado", autoSettle: false });
     await expect(saveIssuanceSettings(db, gerA, A, { paused: false, dailyLimit: 10 })).rejects.toThrow(Forbidden);
     await expect(saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 0 })).rejects.toThrow(/Limite diário/);
     await expect(saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 501 })).rejects.toThrow(Invalid);

@@ -31,18 +31,18 @@ const backoff = (attempts: number) => Math.min(60, 2 ** attempts) * 60_000; // 2
 
 export { IssuanceRetryable, IssuanceTimeout } from "@/modules/providers/errors";
 
-export type IssuanceSettings = { paused: boolean; dailyLimit: number; boletoProvider: BoletoProviderMode };
+export type IssuanceSettings = { paused: boolean; dailyLimit: number; boletoProvider: BoletoProviderMode; autoSettle: boolean };
 export async function getIssuanceSettings(db: DB, actorId: string, companyId: string): Promise<IssuanceSettings> {
   await requirePerm(db, actorId, companyId, "issuance.read");
   return load(db, companyId);
 }
 async function load(x: DB, companyId: string): Promise<IssuanceSettings> {
   const [r] = await x.select().from(issuanceSettings).where(eq(issuanceSettings.companyId, companyId));
-  return r ? { paused: r.paused, dailyLimit: r.dailyLimit, boletoProvider: isBoletoMode(r.boletoProvider) ? r.boletoProvider : "simulado" } : { paused: true, dailyLimit: 20, boletoProvider: "simulado" };
+  return r ? { paused: r.paused, dailyLimit: r.dailyLimit, boletoProvider: isBoletoMode(r.boletoProvider) ? r.boletoProvider : "simulado", autoSettle: r.autoSettle } : { paused: true, dailyLimit: 20, boletoProvider: "simulado", autoSettle: false };
 }
 /** `boletoProvider` ausente = mantém o atual (formulários antigos e chamadas existentes não mudam o provedor sem querer). */
-export async function saveIssuanceSettings(db: DB, actorId: string, companyId: string, i: { paused: boolean; dailyLimit: unknown; boletoProvider?: unknown }) {
-  await requirePerm(db, actorId, companyId, "issuance.manage");
+export async function saveIssuanceSettings(db: DB, actorId: string, companyId: string, i: { paused: boolean; dailyLimit: unknown; boletoProvider?: unknown; autoSettle?: boolean }) {
+  await requirePerm(db, actorId, companyId, "issuance.manage"); // `autoSettle` ausente = mantém o atual (formulários antigos não ligam nem desligam a baixa sem querer)
   const n = Number(i.dailyLimit);
   if (!Number.isInteger(n) || n < 1 || n > 500) throw new Invalid("Limite diário: valor entre 1 e 500");
   if (i.boletoProvider !== undefined && !(typeof i.boletoProvider === "string" && isBoletoMode(i.boletoProvider))) throw new Invalid("Provedor de boleto inválido");
@@ -58,9 +58,11 @@ export async function saveIssuanceSettings(db: DB, actorId: string, companyId: s
       const [{ open }] = (await x.execute(sql`select count(*)::int open from issuance_requests where company_id = ${companyId} and kind = 'boleto' and status in ('pendente', 'enviando', 'desconhecido')`)) as unknown as { open: number }[];
       if (open > 0) throw new Invalid("Há boletos em andamento (aguardando, enviando ou a reconsultar). Conclua ou cancele-os antes de trocar o provedor");
     }
-    await x.insert(issuanceSettings).values({ companyId, paused: i.paused === true, dailyLimit: n, boletoProvider: provider, updatedBy: actorId })
-      .onConflictDoUpdate({ target: issuanceSettings.companyId, set: { paused: i.paused === true, dailyLimit: n, boletoProvider: provider, updatedBy: actorId, updatedAt: new Date() } });
-    await audit(x, companyId, actorId, "issuance.settings.saved", { paused: i.paused === true, dailyLimit: n, boletoProvider: provider, ...(provider !== prev.boletoProvider ? { providerChangedFrom: prev.boletoProvider } : {}) });
+    const auto = i.autoSettle === undefined ? prev.autoSettle : i.autoSettle === true;
+    if (auto && provider === "simulado") throw new Invalid("A baixa automática só vale com um provedor da Cora (testes ou produção)");
+    await x.insert(issuanceSettings).values({ companyId, paused: i.paused === true, dailyLimit: n, boletoProvider: provider, autoSettle: auto, updatedBy: actorId })
+      .onConflictDoUpdate({ target: issuanceSettings.companyId, set: { paused: i.paused === true, dailyLimit: n, boletoProvider: provider, autoSettle: auto, updatedBy: actorId, updatedAt: new Date() } });
+    await audit(x, companyId, actorId, "issuance.settings.saved", { paused: i.paused === true, dailyLimit: n, boletoProvider: provider, autoSettle: auto, ...(provider !== prev.boletoProvider ? { providerChangedFrom: prev.boletoProvider } : {}) });
   });
 }
 

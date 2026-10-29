@@ -18,7 +18,7 @@ function okText(ok?: string, stage = false) {
   const [k, ...n] = (ok ?? "").split(":"); const v = n.map(Number);
   if (k === "solicitado") return `${v[0]} solicitação(ões) criada(s).`;
   if (k === "rodada") return `${stage ? "Rodada na Cora de testes" : "Rodada simulada"}: ${v[0]} emitido(s), ${v[1]} em processamento, ${v[2]} a reconsultar, ${v[3]} para repetir, ${v[4]} com falha, ${v[5]} dispensado(s).${n[6] ? ` Aviso: ${decodeURIComponent(n[6])}.` : ""}`;
-  if (k === "sync") return `Situação conferida na Cora de testes: ${v[0]} boleto(s) consultado(s), ${v[1]} pago(s), ${v[2]} cancelado(s) lá fora, ${v[3]} com falha.${n[4] ? ` Aviso: ${decodeURIComponent(n[4])}` : ""}`;
+  if (k === "sync") return `Situação conferida na Cora de testes: ${v[0]} boleto(s) consultado(s), ${v[1]} pago(s), ${v[2]} cancelado(s) lá fora, ${v[3]} com falha. Baixas automáticas feitas: ${v[4]}; pagos aguardando conferência: ${v[5]}.${n[6] ? ` Aviso: ${decodeURIComponent(n[6])}` : ""}`;
   if (k === "cancelado") return "Solicitação cancelada.";
   if (k === "salvo") return "Configuração salva.";
   return "";
@@ -55,6 +55,7 @@ export default async function Emissoes({ searchParams }: { searchParams: Promise
             <select id="boletoProvider" name="boletoProvider" defaultValue={st.boletoProvider} disabled={!manage} className={`${inputClass} w-64`}>
               {BOLETO_PROVIDER_MODES.map((m) => <option key={m} value={m} disabled={m !== "simulado" && !stageOn && st.boletoProvider !== m}>{MODE_LABEL[m]}{m !== "simulado" && !stageOn ? " (desligado no servidor)" : ""}</option>)}
             </select></div>
+          <label className={`flex items-start gap-2 text-sm ${stage ? "" : "text-muted-foreground"}`}><input type="hidden" name="autoSettleField" value="1" /><input type="checkbox" name="autoSettle" defaultChecked={st.autoSettle && stage} disabled={!manage || !stage} className="mt-0.5 size-4 accent-primary" /> <span>Baixa automática pela Cora<span className="block text-xs text-muted-foreground">Quando a Cora informar boleto pago e os valores conferirem, o pagamento é registrado sozinho (usuário “Cora (automático)”). Se algo não bater, fica para conferência manual.</span></span></label>
           {manage ? <button className={buttonClass("outline", "sm")}>Salvar</button> : <span className="text-xs text-muted-foreground">Só a diretoria altera.</span>}
         </form>
       </SectionCard>

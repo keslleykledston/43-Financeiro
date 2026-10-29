@@ -13,6 +13,10 @@ import { approveBatch, generateBatch, getBatch } from "@/modules/billing/batches
 import { listIssuance, processIssuance, requestBatchIssuance, saveIssuanceSettings } from "@/modules/issuance/service";
 import { cancelBoleto } from "@/modules/issuance/cancel";
 import { syncBoletoStatus } from "@/modules/issuance/sync";
+import { boletoView } from "@/modules/issuance/boleto-details";
+import { registerPayment, reversePayment } from "@/modules/receivables/service";
+import { MAX_EVENT_ATTEMPTS, disableCoraWebhook, enableCoraWebhook, processWebhookEvents, receiveCoraWebhook, webhookStatus } from "@/modules/issuance/webhooks";
+import { createHash } from "node:crypto";
 import { LiveNotAvailable, __setCoraTransportForTests } from "@/modules/providers/registry";
 import { saveCoraCredentials } from "@/modules/providers/cora-config";
 import { CORA_HOSTS, CoraNetworkError, type Transport } from "@/modules/providers/cora-http";
@@ -29,15 +33,27 @@ type Inv = { id: string; status: string; code: string; amount: number; due: stri
 function fakeCora() {
   const inv = new Map<string, Inv>(); const byIdem = new Map<string, string>();
   const calls: { host: string; method: string; path: string; headers: Record<string, string>; body?: any }[] = [];
-  const hooks = { dropAfterCreate: 0, failCreate: null as null | { status: number; body: unknown }, failBeforeCreate: 0, amountOverride: null as null | number, paid: new Set<string>() };
-  let seq = 0;
+  const hooks = { failEndpointAt: 0, getFails: 0, pdfUrl: null as null | ((id: string) => string), paidOn: null as null | string, paidTotal: null as null | number, paidInterest: null as null | number, paidFine: null as null | number, dropAfterCreate: 0, failCreate: null as null | { status: number; body: unknown }, failBeforeCreate: 0, amountOverride: null as null | number, paid: new Set<string>() };
+  let seq = 0, epSeq = 0;
+  const endpoints = new Map<string, { id: string; url: string; resource: string; trigger: string }>();
   const j = (status: number, body: unknown) => ({ status, body: body === null ? "" : JSON.stringify(body) });
-  const full = (i: Inv) => ({ id: i.id, status: i.status, code: i.code, total_amount: hooks.amountOverride ?? i.amount, total_paid: i.status === "PAID" ? i.amount : 0, customer: { name: i.name, document: { identity: i.doc, type: i.doc.length === 11 ? "CPF" : "CNPJ" } }, services: [{ name: i.description.slice(0, 100), amount: i.amount }], payment_terms: { due_date: i.due }, payment_options: { bank_slip: { digitable: "00190000090321583700012584580174791420000002000", barcode: "00197914200000020000000003215837001258458017", our_number: "1", registered: true, url: `https://pdf.invalid/${i.id}.pdf` } }, payments: [] });
+  const full = (i: Inv) => ({ id: i.id, status: i.status, code: i.code, total_amount: hooks.amountOverride ?? i.amount, total_paid: i.status === "PAID" ? (hooks.paidTotal ?? i.amount) : 0, customer: { name: i.name, document: { identity: i.doc, type: i.doc.length === 11 ? "CPF" : "CNPJ" } }, services: [{ name: i.description.slice(0, 100), amount: i.amount }], payment_terms: { due_date: i.due }, payment_options: { bank_slip: { digitable: "00190000090321583700012584580174791420000002000", barcode: "00197914200000020000000003215837001258458017", our_number: "1", registered: true, url: hooks.pdfUrl?.(i.id) ?? `https://pdf.cora.com.br/${i.id}.pdf` } }, occurrence_date: i.status === "PAID" ? (hooks.paidOn ?? "2026-10-20") : undefined, payments: i.status === "PAID" ? [{ id: `pay_${i.id}`, status: "SUCCESS", created_at: "2026-10-20T10:00:00Z", finalized_at: "2026-10-20T10:00:05Z", total_paid: hooks.paidTotal ?? i.amount, method: "BANK_SLIP", order: 1, interest: hooks.paidInterest ?? 0, fine: hooks.paidFine ?? 0 }] : [] });
   const summary = (i: Inv) => ({ id: i.id, status: i.status, total_amount: i.amount, due_date: i.due, customer: { name: i.name } }); // a listagem real NÃO traz `code`
   const transport: Transport = async (o) => {
     const body = o.body && o.headers["content-type"] === "application/json" ? JSON.parse(o.body) : undefined;
     calls.push({ host: o.host, method: o.method, path: o.path, headers: o.headers, body });
     const [path, qs] = o.path.split("?"); const q = new URLSearchParams(qs ?? "");
+    if (path === "/endpoints" || path === "/endpoints/") {
+      if (o.method === "POST") {
+        if (hooks.failEndpointAt && endpoints.size >= hooks.failEndpointAt - 1) return j(400, { code: "invalid_request", message: "bad url" });
+        if (!/^https:\/\//.test(body.url) || body.resource !== "invoice") return j(400, { code: "invalid_request" });
+        const e = { id: `ep_fake${++epSeq}`, url: body.url, resource: body.resource, trigger: body.trigger }; endpoints.set(e.id, e); return j(200, { ...e, connectionTimeout: 1000, readTimeout: 2000, includeResource: false, expandable: false, active: true });
+      }
+      if (o.method === "GET") return j(200, [...endpoints.values()].map((e) => ({ ...e, active: true })));
+    }
+    const em = /^\/endpoints\/(ep_\w+)$/.exec(path);
+    if (em && o.method === "DELETE") { if (!endpoints.delete(em[1])) return j(422, { code: "invalid" }); return j(204, null); }
+    if (hooks.getFails > 0 && o.method === "GET" && /^\/v2\/invoices\/inv_/.test(path)) { hooks.getFails--; return j(429, { code: "rate_limit" }); }
     if (path === "/token") return j(200, { access_token: "tok_fake_" + calls.length, expires_in: 3600, token_type: "Bearer" });
     if (o.method === "POST" && path === "/v2/invoices") {
       if (hooks.failBeforeCreate > 0) { hooks.failBeforeCreate--; throw new CoraNetworkError("conexão caiu antes de enviar"); }
@@ -69,7 +85,7 @@ function fakeCora() {
     }
     return j(404, { code: "not_found" });
   };
-  return { transport, inv, calls, hooks, posts: () => calls.filter((c) => c.method === "POST" && c.path === "/v2/invoices") };
+  return { transport, inv, endpoints, calls, hooks, posts: () => calls.filter((c) => c.method === "POST" && c.path === "/v2/invoices") };
 }
 
 describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a ponta contra uma Cora falsa com estado (DB de teste)", () => {
@@ -255,6 +271,27 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     expect(cora.calls.every((c) => c.host === CORA_HOSTS.homologacao)).toBe(true);
   });
 
+  it("DADOS DO BOLETO (E10b-3): consulta ao vivo na Cora, só https no PDF, nada guardado; simulado não tem dado real; sem permissão não consulta", async () => {
+    const batchId = await approvedBatch(); await useCora();
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, NOW);
+    const c1 = await chargeOf(cli1);
+    const v = await boletoView(db, gerA, A, c1.id);
+    expect(v).toMatchObject({ kind: "ok", mode: "cora_homologacao", details: { rawStatus: "OPEN", totalAmountCents: 250000, totalPaidCents: 0, payments: [] } });
+    if (v.kind === "ok") { expect(v.details.digitable).toMatch(/^\d{40,50}$/); expect(v.details.pdfUrl).toMatch(/^https:\/\/pdf\.cora\.com\.br\//); }
+    cora.hooks.pdfUrl = () => "javascript:alert(1)"; // esquema perigoso vindo da resposta externa: nunca devolvido
+    const v2 = await boletoView(db, gerA, A, c1.id);
+    expect(v2.kind === "ok" && v2.details.pdfUrl).toBeNull();
+    cora.hooks.pdfUrl = () => "https://evil.example.com/boleto.pdf"; // https, mas de outro domínio: também não
+    const v3 = await boletoView(db, gerA, A, c1.id);
+    expect(v3.kind === "ok" && v3.details.pdfUrl).toBeNull();
+    const outsider = (await db.insert(schema.users).values({ email: "fora@t.com", name: "fora", passwordHash: "x" }).returning())[0].id;
+    await expect(boletoView(db, outsider, A, c1.id)).rejects.toThrow(); // sem papel na empresa: recusado
+    expect(await n("audit_log where detail::text like '%00190000090321583700%'")).toBe(0); // linha digitável não vai para a auditoria
+    delete process.env.CORA_STAGE_ENABLED;
+    expect(await boletoView(db, gerA, A, c1.id)).toMatchObject({ kind: "indisponivel" }); // chave desligada: falha fechada
+  });
+
   it("ATUALIZAR SITUAÇÃO (só consulta): pago → marca e para a régua sem criar baixa; cancelado lá fora → sai das ativas e permite novo boleto (g1); aberto → nada muda", async () => {
     const batchId = await approvedBatch(); await useCora();
     await requestBatchIssuance(db, gerA, A, batchId, "boleto");
@@ -299,6 +336,199 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     await db.execute(sql`update boleto_cancellations set status = 'cancelado', resolved_at = now()`); // terminou
     await db.update(schema.issuanceRequests).set({ status: "cancelado", externalStatus: "cancelado" }).where(eq(schema.issuanceRequests.id, r1.id));
     expect(await syncBoletoStatus(db, gerA, A, new Date(NOW.getTime() + 60_000))).toMatchObject({ cancelled: 0 }); // nada a fazer
+  });
+
+  it("BAIXA AUTOMÁTICA (E10b-4): só com a opção ligada e tudo conferindo; idempotente; juros/multa viram acréscimo; valor diferente vai para conferência; já baixada não duplica", async () => {
+    const batchId = await approvedBatch(); await useCora();
+    await expect(saveIssuanceSettings(db, gerA, A, { paused: false, dailyLimit: 20, autoSettle: true })).rejects.toThrow(); // só diretoria
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, NOW);
+    const c1 = await chargeOf(cli1), c2 = await chargeOf(cli2);
+    const r1 = (await reqs()).find((x) => x.chargeId === c1.id)!, r2 = (await reqs()).find((x) => x.chargeId === c2.id)!;
+    // 1) desligada: pago só marca (já coberto em outro teste); ligar e repetir
+    await saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, autoSettle: true });
+    expect((await saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20 }), (await db.select().from(schema.issuanceSettings))[0].autoSettle)).toBe(true); // omitido mantém
+    // 2) cliente 1 pagou com juros/multa: pago 2.520,00 = principal 2.500,00 + 20,00 de encargos
+    cora.inv.get(r1.externalRef!)!.status = "PAID"; cora.hooks.paidTotal = 252000; cora.hooks.paidFine = 1500; cora.hooks.paidInterest = 500; cora.hooks.paidOn = "2026-10-20";
+    const o1 = await syncBoletoStatus(db, gerA, A, NOW);
+    expect(o1).toMatchObject({ checked: 2, paid: 1, settled: 1, needsReview: 0 });
+    const p1 = await db.select().from(schema.payments).where(eq(schema.payments.chargeId, c1.id));
+    expect(p1).toHaveLength(1);
+    expect(p1[0]).toMatchObject({ amount: "2500.00", interestAmount: "20.00", discountAmount: "0.00", paidAt: "2026-10-20", method: "boleto", status: "ativo" });
+    const sys = (await db.select().from(schema.users).where(eq(schema.users.email, "sistema-cora@k3g.invalid")))[0];
+    expect(sys.disabledAt).not.toBeNull(); expect(p1[0].registeredBy).toBe(sys.id); // usuário de sistema, sem login
+    expect((await reqs()).find((x) => x.id === r1.id)).toMatchObject({ externalStatus: "pago" });
+    expect((await reqs()).find((x) => x.id === r1.id)!.settledAt).not.toBeNull();
+    // repetir: nada novo (nem pagamento duplicado)
+    expect(await syncBoletoStatus(db, gerA, A, new Date(NOW.getTime() + 60_000))).toMatchObject({ settled: 0, paid: 0 });
+    expect(await db.select().from(schema.payments).where(eq(schema.payments.chargeId, c1.id))).toHaveLength(1);
+    // 3) cliente 2 pagou valor DIFERENTE do saldo (2.490,00): não baixa; fica para conferência manual
+    cora.hooks.paidTotal = 249000; cora.hooks.paidFine = 0; cora.hooks.paidInterest = 0;
+    cora.inv.get(r2.externalRef!)!.status = "PAID";
+    const o2 = await syncBoletoStatus(db, gerA, A, new Date(NOW.getTime() + 120_000));
+    expect(o2).toMatchObject({ paid: 1, settled: 0, needsReview: 1 });
+    expect(await db.select().from(schema.payments).where(eq(schema.payments.chargeId, c2.id))).toHaveLength(0);
+    expect((await reqs()).find((x) => x.id === r2.id)).toMatchObject({ externalStatus: "pago", settledAt: null });
+    expect(await n("audit_log where action = 'boleto.settle_review'")).toBe(1);
+    // 4) a diretoria dá a baixa manual; a próxima rodada vê "já baixada" e NÃO duplica
+    await registerPayment(db, dirA, A, c2.id, { amount: "2.500,00", method: "pix", paidAt: "2026-10-21" });
+    cora.hooks.paidTotal = 250000;
+    expect(await syncBoletoStatus(db, gerA, A, new Date(NOW.getTime() + 180_000))).toMatchObject({ settled: 0 });
+    expect(await db.select().from(schema.payments).where(eq(schema.payments.chargeId, c2.id))).toHaveLength(1);
+    expect((await reqs()).find((x) => x.id === r2.id)!.settledAt).not.toBeNull();
+    // nada de rotas de pagamento na Cora
+    expect(cora.calls.every((c) => c.method === "GET" || c.path === "/token" || c.path === "/v2/invoices")).toBe(true);
+  });
+
+  it("BAIXA AUTOMÁTICA: sem pagamento concluído, soma diferente do total ou desligada, nunca baixa; no simulado a opção é recusada", async () => {
+    const batchId = await approvedBatch(); await useCora();
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, NOW);
+    const c1 = await chargeOf(cli1); const r1 = (await reqs()).find((x) => x.chargeId === c1.id)!;
+    // desligada (padrão): pago não gera pagamento
+    cora.inv.get(r1.externalRef!)!.status = "PAID";
+    expect(await syncBoletoStatus(db, gerA, A, NOW)).toMatchObject({ paid: 1, settled: 0 });
+    expect(await n("payments")).toBe(0);
+    // ligada, mas a Cora mostra pago SEM pagamento concluído (total_paid ≠ soma): conferência
+    await saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, autoSettle: true });
+    cora.hooks.paidTotal = 100;
+    const inv = cora.inv.get(r1.externalRef!)!; inv.status = "PAID";
+    expect(await syncBoletoStatus(db, gerA, A, new Date(NOW.getTime() + 60_000))).toMatchObject({ settled: 0, needsReview: 1 });
+    expect(await n("payments")).toBe(0);
+    // trocar para simulado com a opção ligada é recusado
+    await db.update(schema.issuanceRequests).set({ status: "cancelado" }).where(eq(schema.issuanceRequests.id, r1.id)).catch(() => undefined);
+    await expect(saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, boletoProvider: "simulado", autoSettle: true })).rejects.toThrow(Invalid);
+  });
+
+  it("BAIXA AUTOMÁTICA: data futura/ausente, valor do boleto ≠ cobrança e baixa já estornada vão para conferência; nunca ajusta data nem refaz baixa estornada", async () => {
+    const batchId = await approvedBatch(); await useCora();
+    await saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, autoSettle: true });
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, NOW);
+    const c1 = await chargeOf(cli1), c2 = await chargeOf(cli2);
+    const r1 = (await reqs()).find((x) => x.chargeId === c1.id)!, r2 = (await reqs()).find((x) => x.chargeId === c2.id)!;
+    const at = (m: number) => new Date(NOW.getTime() + m * 60_000);
+    // data futura: conferência (não vira "hoje")
+    cora.inv.get(r1.externalRef!)!.status = "PAID"; cora.hooks.paidOn = "2999-01-01";
+    expect(await syncBoletoStatus(db, gerA, A, at(1))).toMatchObject({ settled: 0, needsReview: 1 });
+    expect(await n("payments")).toBe(0);
+    // data válida: baixa; depois a diretoria ESTORNA e a rodada seguinte NÃO refaz sozinha
+    cora.hooks.paidOn = "2026-10-20";
+    expect(await syncBoletoStatus(db, gerA, A, at(2))).toMatchObject({ settled: 1 });
+    const pay = (await db.select().from(schema.payments).where(eq(schema.payments.chargeId, c1.id)))[0];
+    await reversePayment(db, dirA, A, pay.id, "estorno de teste");
+    await db.execute(sql`update issuance_requests set settled_at = null where id = ${r1.id}`); // como se a baixa ainda não tivesse sido conferida
+    expect(await syncBoletoStatus(db, gerA, A, at(3))).toMatchObject({ settled: 0, needsReview: 1 });
+    expect(await db.select().from(schema.payments).where(eq(schema.payments.chargeId, c1.id))).toHaveLength(1); // só o estornado
+    expect((await reqs()).find((x) => x.id === r1.id)!.settledAt).toBeNull();
+    // boleto com valor diferente do da cobrança (alguém mexeu na Cora): conferência
+    cora.hooks.amountOverride = 199900; cora.inv.get(r2.externalRef!)!.status = "PAID"; cora.hooks.paidTotal = 199900;
+    expect(await syncBoletoStatus(db, gerA, A, at(4))).toMatchObject({ settled: 0 });
+    expect(await db.select().from(schema.payments).where(eq(schema.payments.chargeId, c2.id))).toHaveLength(0);
+    expect((await db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "boleto.settle_review"))).map((a) => (a.detail as { reason: string }).reason).sort())
+      .toEqual(["baixa_anterior_estornada", "data_do_pagamento_ausente_ou_futura", "valor_do_boleto_diferente_da_cobranca", "valor_do_boleto_diferente_da_cobranca"]); // um por boleto e motivo
+    await syncBoletoStatus(db, gerA, A, at(5)); await syncBoletoStatus(db, gerA, A, at(6)); // repetir a conferência NÃO repete o registro de auditoria (sem ruído a cada 10 min)
+    expect(await n("audit_log where action = 'boleto.settle_review'")).toBe(4);
+  });
+
+  it("WEBHOOK: aviso repetido (com ou sem id) e chamadas simultâneas geram um evento só", async () => {
+    stageOn(); await creds();
+    await enableCoraWebhook(db, dirA, A, "homologacao", "https://app.exemplo.com.br", cora.transport);
+    const secret = /([A-Za-z0-9_-]{43})$/.exec([...cora.endpoints.values()][0].url)![1];
+    const h = { type: "invoice.paid", resourceId: "inv_abcdefg1" };
+    await Promise.all([1, 2, 3, 4, 5].map(() => receiveCoraWebhook(db, secret, { ...h, eventId: "ev-sim" })));
+    await Promise.all([1, 2, 3, 4, 5].map(() => receiveCoraWebhook(db, secret, { ...h, eventId: null }))); // mesmo boleto/tipo já pendente: não duplica
+    await Promise.all([1, 2, 3, 4, 5].map(() => receiveCoraWebhook(db, secret, { type: "invoice.canceled", resourceId: "inv_abcdefg2", eventId: null }))); // outro boleto, sem id: um só
+    expect(await n("cora_webhook_events where event_id = 'ev-sim'")).toBe(1);
+    expect(await n("cora_webhook_events where event_id is null")).toBe(1);
+    expect(await n("cora_webhook_events")).toBe(2);
+    // retenção: processado antigo é apagado
+    await db.execute(sql`update cora_webhook_events set status = 'processado', processed_at = now() - interval '40 days'`);
+    await processWebhookEvents(db, new Date());
+    expect(await n("cora_webhook_events")).toBe(0);
+  });
+
+  it("WEBHOOK (E10b-5): ativar cadastra 2 avisos na Cora, guarda só o HASH do segredo, gira o segredo removendo os antigos, desativar remove; só diretoria; só https; só homologação por ora", async () => {
+    stageOn(); await creds();
+    await expect(enableCoraWebhook(db, gerA, A, "homologacao", "https://app.exemplo.com.br", cora.transport)).rejects.toThrow(); // só quem gerencia credenciais
+    await expect(enableCoraWebhook(db, dirA, A, "homologacao", "http://inseguro.exemplo.com", cora.transport)).rejects.toThrow(Invalid);
+    for (const bad of ["https://app.exemplo.com.br:8443", "https://app.exemplo.com.br/caminho", "https://user:pw@app.exemplo.com.br", "https://localhost", "https://exemplo..com"]) await expect(enableCoraWebhook(db, dirA, A, "homologacao", bad, cora.transport)).rejects.toThrow(Invalid);
+    await expect(enableCoraWebhook(db, dirA, A, "producao", "https://app.exemplo.com.br", cora.transport)).rejects.toThrow(Invalid); // produção só na fase própria
+    await expect(enableCoraWebhook(db, dirA, A, "homologacao", "https://app.exemplo.com.br", cora.transport)).resolves.toEqual({ triggers: 2 });
+    const eps = [...cora.endpoints.values()];
+    expect(eps.map((e) => e.trigger).sort()).toEqual(["canceled", "paid"]);
+    const secret1 = /\/api\/v1\/webhooks\/cora\/([A-Za-z0-9_-]{43})$/.exec(eps[0].url)![1];
+    const row = (await db.select().from(schema.coraWebhooks))[0];
+    expect(row.secretHash).toBe(createHash("sha256").update(secret1).digest("hex")); // só o hash
+    expect(JSON.stringify(row)).not.toContain(secret1);
+    expect(await n("audit_log where detail::text like '%" + secret1 + "%'")).toBe(0);
+    expect(await webhookStatus(db, dirA, A)).toEqual([expect.objectContaining({ environment: "homologacao", active: true, triggers: 2 })]);
+    // girar: antigos removidos na Cora, segredo antigo deixa de valer
+    await enableCoraWebhook(db, dirA, A, "homologacao", "https://app.exemplo.com.br", cora.transport);
+    expect(cora.endpoints.size).toBe(2);
+    expect([...cora.endpoints.values()].every((e) => !e.url.endsWith(secret1))).toBe(true);
+    expect((await receiveCoraWebhook(db, secret1, { type: "invoice.paid", resourceId: "inv_abcdefg1", eventId: null })).status).toBe(404);
+    // falha no meio do cadastro: desfaz o que criou e não ativa nada novo
+    await disableCoraWebhook(db, dirA, A, "homologacao", cora.transport);
+    expect(cora.endpoints.size).toBe(0); expect(await n("cora_webhooks")).toBe(0);
+    cora.hooks.failEndpointAt = 2;
+    await expect(enableCoraWebhook(db, dirA, A, "homologacao", "https://app.exemplo.com.br", cora.transport)).rejects.toThrow(Invalid);
+    expect(cora.endpoints.size).toBe(0); expect(await n("cora_webhooks")).toBe(0);
+  });
+
+  it("WEBHOOK: receptor valida segredo e formato, grava evento pendente sem confiar em nada, ignora duplicado/outros tipos e limita a frequência", async () => {
+    stageOn(); await creds();
+    await enableCoraWebhook(db, dirA, A, "homologacao", "https://app.exemplo.com.br", cora.transport);
+    const secret = /([A-Za-z0-9_-]{43})$/.exec([...cora.endpoints.values()][0].url)![1];
+    expect((await receiveCoraWebhook(db, "curto", { type: "invoice.paid", resourceId: "inv_abcdefg1", eventId: null })).status).toBe(404);
+    expect((await receiveCoraWebhook(db, "x".repeat(43), { type: "invoice.paid", resourceId: "inv_abcdefg1", eventId: null })).status).toBe(404);
+    expect(await n("cora_webhook_events")).toBe(0);
+    expect((await receiveCoraWebhook(db, secret, { type: "invoice.paid", resourceId: "inv_abcdefg1", eventId: "ev-1" })).status).toBe(200);
+    expect((await receiveCoraWebhook(db, secret, { type: "invoice.paid", resourceId: "inv_abcdefg1", eventId: "ev-1" })).status).toBe(200); // reenvio: um evento só
+    expect((await receiveCoraWebhook(db, secret, { type: "invoice.CANCELED", resourceId: "inv_abcdefg9", eventId: "ev-up" })).status).toBe(200); // a Cora manda o gatilho em MAIÚSCULAS: normalizado
+    expect((await receiveCoraWebhook(db, secret, { type: "transfer.completed", resourceId: "inv_abcdefg1", eventId: null })).status).toBe(200); // outro recurso: aceito e ignorado
+    expect((await receiveCoraWebhook(db, secret, { type: "invoice.paid", resourceId: "'; drop table x;--", eventId: null })).status).toBe(200); // formato inválido: ignorado
+    expect((await receiveCoraWebhook(db, secret, { type: null, resourceId: null, eventId: null })).status).toBe(200);
+    expect(await n("cora_webhook_events")).toBe(2);
+    expect((await db.select().from(schema.coraWebhookEvents).where(eq(schema.coraWebhookEvents.resourceId, "inv_abcdefg1")))[0]).toMatchObject({ status: "pendente", eventType: "invoice.paid", environment: "homologacao" });
+    expect((await db.select().from(schema.coraWebhookEvents).where(eq(schema.coraWebhookEvents.resourceId, "inv_abcdefg9")))[0].eventType).toBe("invoice.canceled");
+    const t0 = new Date();
+    let last = 200;
+    for (let i = 0; i < 610; i++) last = (await receiveCoraWebhook(db, secret, { type: "invoice.paid", resourceId: "inv_abcdefg1", eventId: null }, t0)).status;
+    expect(last).toBe(429);
+  });
+
+  it("WEBHOOK: o aviso só dispara a RECONSULTA — pago na Cora baixa (com a opção ligada); aviso falso/de boleto desconhecido é ignorado; falha da Cora repete até o limite", async () => {
+    const batchId = await approvedBatch(); await useCora();
+    await saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, autoSettle: true });
+    await enableCoraWebhook(db, dirA, A, "homologacao", "https://app.exemplo.com.br", cora.transport);
+    const secret = /([A-Za-z0-9_-]{43})$/.exec([...cora.endpoints.values()][0].url)![1];
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, NOW);
+    const c1 = await chargeOf(cli1), c2 = await chargeOf(cli2);
+    const r1 = (await reqs()).find((x) => x.chargeId === c1.id)!, r2 = (await reqs()).find((x) => x.chargeId === c2.id)!;
+    // aviso FALSO de pagamento (Cora ainda mostra OPEN): reconsulta, nada muda
+    await receiveCoraWebhook(db, secret, { type: "invoice.paid", resourceId: r2.externalRef!, eventId: null });
+    expect(await processWebhookEvents(db, NOW)).toMatchObject({ processed: 1, errors: 0 });
+    expect(await n("payments")).toBe(0);
+    expect((await db.select().from(schema.coraWebhookEvents))[0]).toMatchObject({ status: "processado", outcome: "sem_mudanca" });
+    // aviso de boleto que não é nosso: ignorado
+    await receiveCoraWebhook(db, secret, { type: "invoice.paid", resourceId: "inv_naoexiste1", eventId: null });
+    expect(await processWebhookEvents(db, NOW)).toMatchObject({ processed: 0, ignored: 1 });
+    // pago de verdade na Cora + aviso: baixa automática
+    cora.inv.get(r1.externalRef!)!.status = "PAID"; cora.hooks.paidOn = "2026-10-22";
+    await receiveCoraWebhook(db, secret, { type: "invoice.paid", resourceId: r1.externalRef!, eventId: "ev-pago" });
+    expect(await processWebhookEvents(db, NOW)).toMatchObject({ processed: 1 });
+    expect((await db.select().from(schema.payments).where(eq(schema.payments.chargeId, c1.id)))[0]).toMatchObject({ amount: "2500.00", paidAt: "2026-10-22", method: "boleto" });
+    expect(await n("cora_webhook_events where outcome = 'baixado'")).toBe(1);
+    // a Cora limita a consulta: evento volta para a fila; após o limite de tentativas vira erro
+    cora.inv.get(r2.externalRef!)!.status = "CANCELLED";
+    await receiveCoraWebhook(db, secret, { type: "invoice.canceled", resourceId: r2.externalRef!, eventId: "ev-canc" });
+    cora.hooks.getFails = 100;
+    for (let i = 1; i < MAX_EVENT_ATTEMPTS; i++) { expect(await processWebhookEvents(db, NOW)).toMatchObject({ errors: 1 }); expect((await db.select().from(schema.coraWebhookEvents).where(eq(schema.coraWebhookEvents.eventId, "ev-canc")))[0].status).toBe("pendente"); }
+    expect(await processWebhookEvents(db, NOW)).toMatchObject({ errors: 1 });
+    expect((await db.select().from(schema.coraWebhookEvents).where(eq(schema.coraWebhookEvents.eventId, "ev-canc")))[0]).toMatchObject({ status: "erro", attempts: MAX_EVENT_ATTEMPTS });
+    expect(cora.calls.every((c) => c.host === CORA_HOSTS.homologacao)).toBe(true);
   });
 
   it("ATUALIZAR SITUAÇÃO com a chave do servidor desligada: não consulta nem altera nada (falha fechada, com aviso)", async () => {

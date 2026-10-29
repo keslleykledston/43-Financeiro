@@ -6,6 +6,7 @@ import { Forbidden, Invalid } from "@/modules/identity/service";
 import { setCustomerMode } from "@/modules/crm/service";
 import { getCrmAdapter } from "@/modules/integrations/crm/factory";
 import { removeCoraCredentials, saveCoraCredentials } from "@/modules/providers/cora-config";
+import { disableCoraWebhook, enableCoraWebhook } from "@/modules/issuance/webhooks";
 import { removeEmailAccount, saveEmailAccount } from "@/modules/providers/email-config";
 import { authorizeEmailLive, revokeEmailLive } from "@/modules/providers/email-auth";
 import { sendTestEmail } from "@/modules/providers/email-live";
@@ -94,6 +95,15 @@ export async function saveCoraAction(_: CoraState, fd: FormData): Promise<CoraSt
     console.error("cora: falha inesperada ao guardar credenciais", e instanceof Error ? e.name : "erro"); // nunca o conteúdo
     return { error: "Não foi possível guardar agora. Tente de novo; se persistir, avise o suporte." };
   }
+}
+
+export async function enableWebhookAction(fd: FormData) {
+  try { const c = await ctx(); await enableCoraWebhook(db, c.userId, c.companyId, String(fd.get("environment") ?? ""), process.env.AUTH_URL ?? ""); } catch (e) { msg(e); }
+  revalidatePath("/integracoes");
+}
+export async function disableWebhookAction(fd: FormData) {
+  try { const c = await ctx(); await disableCoraWebhook(db, c.userId, c.companyId, String(fd.get("environment") ?? "")); } catch (e) { msg(e); }
+  revalidatePath("/integracoes");
 }
 
 export async function removeCoraAction(fd: FormData) {

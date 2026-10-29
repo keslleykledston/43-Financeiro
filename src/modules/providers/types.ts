@@ -17,6 +17,12 @@ export interface WhatsappProvider {
 
 export type BoletoInput = { idempotencyKey: string; amountCents: number; dueDate: string; customerName: string; customerDocument: string; /** texto/instruções do boleto deste cliente (E26), já com os campos preenchidos */ instructions?: string };
 export type BoletoResult = { providerRef: string; status: "emitido" | "pago" | "cancelado"; digitableLineMasked: string };
+/** Situação completa de UM boleto no provedor (consulta). `payments` só tem pagamentos concluídos. Valores em centavos. */
+export type BoletoDetails = {
+  status: BoletoResult["status"]; rawStatus: string; totalAmountCents: number; totalPaidCents: number; dueDate: string | null; paidOn: string | null;
+  payments: { id: string; totalPaidCents: number; interestCents: number; fineCents: number; finalizedAt: string | null }[];
+  digitable: string | null; barcode: string | null; pdfUrl: string | null;
+};
 /** Cora: SOMENTE boletos (emitir, consultar situação, segunda via e cancelar — o cancelamento só pela diretoria, com motivo e registro). Sem pagamento, transferência, saldo/extrato (escopo do dono, 2026-10-24; ver CORA_SCOPE e ADR-017). */
 export interface BoletoProvider { // Cora (boletos v2)
   readonly mode: "mock" | "live";
@@ -24,6 +30,8 @@ export interface BoletoProvider { // Cora (boletos v2)
   /** Reconsulta por chave de idempotência: já existe? (usada quando a resposta da emissão se perdeu). null = não existe. */
   find(idempotencyKey: string, ctx?: { customerDocument: string; dueDate: string }): Promise<BoletoResult | null>;
   status(ref: string): Promise<BoletoResult["status"]>;
+  /** Consulta completa (valor, pagamentos, linha digitável, PDF). Só leitura. */
+  details(ref: string): Promise<BoletoDetails>;
   /** Cancela um boleto EMITIDO e ainda sem pagamento. Só é chamado pelo fluxo de cancelamento da diretoria (E20). */
   cancel(ref: string): Promise<void>;
 }

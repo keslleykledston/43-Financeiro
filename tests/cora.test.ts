@@ -9,14 +9,14 @@ const NOW = new Date(); // o certificado de teste vale 10 anos a partir de quand
 
 describe("Cora — escopo somente de boletos", () => {
   it("a lista permitida não tem nada que mexa em dinheiro, e a proibida cobre pagamento, transferência e extrato", () => {
-    expect(CORA_SCOPE.allowed.map((a) => a.key)).toEqual(["boleto.emitir", "boleto.consultar", "boleto.segunda_via", "boleto.cancelar"]);
+    expect(CORA_SCOPE.allowed.map((a) => a.key)).toEqual(["boleto.emitir", "boleto.consultar", "boleto.segunda_via", "boleto.cancelar", "boleto.avisos"]);
     expect(CORA_SCOPE.allowed.some((a) => /pag|transf|pix|saldo|extrato/i.test(a.key))).toBe(false);
     expect(CORA_SCOPE.forbidden.map((a) => a.key)).toEqual(expect.arrayContaining(["pagamento", "transferencia", "extrato_saldo"]));
   });
 
   it("o provedor de boleto não tem operação de pagamento/transferência/saldo e o catálogo não promete extrato", () => {
     const methods = Object.keys(createMockProviders().boleto).sort();
-    expect(methods).toEqual(["cancel", "find", "issue", "mode", "status"]);                      // nada além do escopo
+    expect(methods).toEqual(["cancel", "details", "find", "issue", "mode", "status"]);                      // nada além do escopo
     expect(methods.filter((m) => /pag|transf|pix|saldo|extrato|withdraw|send/i.test(m))).toEqual([]);
     expect(Object.keys(createMockProviders()).sort()).toEqual(["boleto", "email", "nfse", "whatsapp"]); // sem provedor de extrato
     expect(PROVIDER_CATALOG.some((p) => /extrato|saldo/i.test(p.label))).toBe(false);
