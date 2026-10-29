@@ -81,3 +81,12 @@ export const DEFAULTS: Record<Kind, { subject: string; body: string }> = {
   d_mais_3: { subject: "Cobrança em aberto desde {{vencimento}}", body: "Olá, {{cliente}}.\n\nNão identificamos o pagamento de {{valor}} ({{descricao}}), vencido em {{vencimento}}.\n\nLinha digitável do boleto:\n{{linha_digitavel}}\nO PDF do boleto segue em anexo.\n\nSe já pagou, desconsidere. Caso precise de ajuda, responda esta mensagem.\n\n{{empresa}}" },
   d_mais_7: { subject: "Cobrança em aberto — {{empresa}}", body: "Olá, {{cliente}}.\n\nA cobrança de {{valor}} ({{descricao}}), vencida em {{vencimento}}, segue em aberto.\n\nLinha digitável do boleto:\n{{linha_digitavel}}\nO PDF do boleto segue em anexo.\n\nSe houver algum problema, fale conosco para combinarmos a melhor solução.\n\n{{empresa}}" },
 };
+
+/** Textos padrão do WhatsApp (curtos, sem dados do boleto, com identificação da empresa e a saída «responda PARAR»). O «PARAR» só é honrado depois que o receptor de respostas (entrega 3b) estiver no ar. */
+export const WA_DEFAULTS: Record<Kind, string> = {
+  emissao: "Olá, {{cliente}}. Aqui é o financeiro da {{empresa}}. Sua cobrança de {{valor}} ({{descricao}}) vence em {{vencimento}}. Se já pagou, desconsidere. Para não receber avisos no WhatsApp, responda PARAR.",
+  d_menos_3: "Olá, {{cliente}}. Lembrete do financeiro da {{empresa}}: a cobrança de {{valor}} vence em {{vencimento}}. Se já pagou, desconsidere. Para não receber avisos no WhatsApp, responda PARAR.",
+  d0: "Olá, {{cliente}}. O financeiro da {{empresa}} lembra que a cobrança de {{valor}} vence hoje ({{vencimento}}). Se já pagou, desconsidere. Para não receber avisos no WhatsApp, responda PARAR.",
+  d_mais_3: "Olá, {{cliente}}. Não identificamos o pagamento de {{valor}} ({{descricao}}), vencido em {{vencimento}}. Se já pagou, desconsidere; se precisar de ajuda, responda esta mensagem. Para não receber avisos no WhatsApp, responda PARAR.",
+  d_mais_7: "Olá, {{cliente}}. A cobrança de {{valor}} ({{descricao}}), vencida em {{vencimento}}, segue em aberto na {{empresa}}. Se houver algum problema, responda esta mensagem para combinarmos a melhor solução. Para não receber avisos no WhatsApp, responda PARAR.",
+};

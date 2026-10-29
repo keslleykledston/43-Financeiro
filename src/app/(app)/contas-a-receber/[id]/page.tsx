@@ -41,7 +41,7 @@ export default async function Cobranca({ params, searchParams }: { params: Promi
   return (
     <div className="space-y-5">
       <PageHeader title={r.customerName} description={`${r.description} · competência ${r.competenceMonth.slice(5, 7)}/${r.competenceMonth.slice(0, 4)}`}
-        actions={<AppLink href="/contas-a-receber" className={buttonClass("outline")}><ArrowLeft className="size-4" aria-hidden /> Contas a receber</AppLink>} />
+        actions={<>{role && can(role, "whatsapp.send") && r.openCents > 0 && <AppLink href={`/whatsapp/enviar?chargeId=${r.id}`} className={buttonClass("outline")}>Enviar por WhatsApp</AppLink>}<AppLink href="/contas-a-receber" className={buttonClass("outline")}><ArrowLeft className="size-4" aria-hidden /> Contas a receber</AppLink></>} />
       {sp.erro && <Callout tone="negative" role="alert">{sp.erro}</Callout>}
       {sp.ok && OK[sp.ok] && <Callout tone="positive" role="status">{OK[sp.ok]}</Callout>}
 

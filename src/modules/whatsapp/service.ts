@@ -17,16 +17,16 @@ import { BLOCK_REASON_LABEL, CAPS, EVIDENCE_SOURCES, GLOBAL_OPT_IN_SOURCES, chat
 export const moduleOn = (env: WahaEnv = process.env) => env.WHATSAPP_MODULE_ENABLED === "true";
 export const sendOn = (env: WahaEnv = process.env) => env.WHATSAPP_SEND_ENABLED === "true";
 export type Deps = { waha?: WahaClient; env?: WahaEnv; now?: Date };
-const envOf = (d?: Deps) => d?.env ?? process.env;
-const clientOf = (d?: Deps) => d?.waha ?? createWahaClient(envOf(d));
-const manausDay = (d = new Date()) => d.toLocaleDateString("sv-SE", { timeZone: "America/Manaus" });
+export const envOf = (d?: Deps) => d?.env ?? process.env;
+export const clientOf = (d?: Deps) => d?.waha ?? createWahaClient(envOf(d));
+export const manausDay = (d = new Date()) => d.toLocaleDateString("sv-SE", { timeZone: "America/Manaus" });
 const MAX_SESSIONS = 3;
-const clean = (s: unknown, max: number) => String(s ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+export const clean = (s: unknown, max: number) => String(s ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
 
-const audit = (x: DB, companyId: string, actorId: string | null, action: string, detail: Record<string, unknown> = {}) => x.insert(auditLog).values({ companyId, actorId, action, detail });
+export const audit = (x: DB, companyId: string, actorId: string | null, action: string, detail: Record<string, unknown> = {}) => x.insert(auditLog).values({ companyId, actorId, action, detail });
 
 /** A conexão só existe para quem tem vínculo ATIVO com a empresa: outra empresa recebe o mesmo "não encontrada" (sem vazar que existe). */
-async function bound(x: DB, companyId: string, sessionId: string) {
+export async function bound(x: DB, companyId: string, sessionId: string) {
   if (!/^[0-9a-f-]{36}$/i.test(sessionId ?? "")) throw new Invalid("Conexão não encontrada");
   const [r] = await x.select({ s: whatsappSessions, b: whatsappSessionCompanies }).from(whatsappSessions)
     .innerJoin(whatsappSessionCompanies, and(eq(whatsappSessionCompanies.sessionId, whatsappSessions.id), eq(whatsappSessionCompanies.companyId, companyId), isNull(whatsappSessionCompanies.revokedAt)))
@@ -181,11 +181,12 @@ export async function revokeAuthorization(db: DB, actorId: string, companyId: st
 }
 
 // ---------- Envio manual de teste ----------
-async function usedToday(x: DB, companyId: string, sessionId: string, today = manausDay()) {
+export async function usedToday(x: DB, companyId: string, sessionId: string, today = manausDay(), exceptOutboxId?: string) {
   const r = (await x.execute(sql`select
-      count(*) filter (where company_id = ${companyId})::int company,
-      count(*) filter (where session_id = ${sessionId})::int session
-    from whatsapp_send_log where status in ('enviando', 'enviado', 'desconhecido') and (created_at at time zone 'America/Manaus')::date = ${today}::date and (company_id = ${companyId} or session_id = ${sessionId})`)) as unknown as { company: number; session: number }[];
+      (select count(*) from whatsapp_send_log where status in ('enviando', 'enviado', 'desconhecido') and (created_at at time zone 'America/Manaus')::date = ${today}::date and company_id = ${companyId})
+      + (select count(*) from whatsapp_outbox where status in ('enviando', 'enviado', 'desconhecido') and (coalesce(sent_at, finished_at, updated_at) at time zone 'America/Manaus')::date = ${today}::date and company_id = ${companyId} and (${exceptOutboxId ?? null}::uuid is null or id <> ${exceptOutboxId ?? null}::uuid)) company,
+      (select count(*) from whatsapp_send_log where status in ('enviando', 'enviado', 'desconhecido') and (created_at at time zone 'America/Manaus')::date = ${today}::date and session_id = ${sessionId})
+      + (select count(*) from whatsapp_outbox where status in ('enviando', 'enviado', 'desconhecido') and (coalesce(sent_at, finished_at, updated_at) at time zone 'America/Manaus')::date = ${today}::date and session_id = ${sessionId} and (${exceptOutboxId ?? null}::uuid is null or id <> ${exceptOutboxId ?? null}::uuid)) session`)) as unknown as { company: number; session: number }[];
   return { company: Number(r[0].company), session: Number(r[0].session) };
 }
 
@@ -226,6 +227,43 @@ export async function evaluateTestSend(db: DB, actorId: string, companyId: strin
     add("cap_session", u.session < CAPS.sessionDaily, "Limite diário da conexão", u.session < CAPS.sessionDaily ? undefined : `Limite de ${CAPS.sessionDaily} por dia atingido (soma das empresas)`);
   }
   return { checks, canSend: checks.every((c) => c.ok), digits, session: sess?.s ?? null, senderIdentity: sess?.b.senderIdentity ?? null, authorizationId: auth?.id ?? null };
+}
+
+/** Resultado da entrega pela WAHA. `abort`/`fail` = NADA saiu; `result` = a WAHA respondeu (falhou) ou ficou ambígua (desconhecido: pode ter saído, nunca reenviar sozinho). */
+export type DeliverOutcome =
+  | { kind: "sent"; providerRef: string }
+  | { kind: "abort"; code: string }
+  | { kind: "fail"; code: string; message: string }
+  | { kind: "result"; status: "falhou" | "desconhecido"; error: string };
+
+/**
+ * NÚCLEO ÚNICO de entrega (teste e cobrança passam pelas mesmas travas): reconferência local → estado da conexão LIDO NA WAHA (exige WORKING) → consulta do número (não envia) →
+ * o destino é o id canônico da WAHA, mas só se for o MESMO número pedido (igual ou equivalência oficial do 9º dígito) → nova reconferência → `sendText`. Exceção inesperada nunca vira «enviado».
+ */
+export async function deliverViaWaha(db: DB, o: { session: { id: string; providerSession: string }; digits: string; text: string; recheckBefore: () => Promise<string | null>; recheckAfterCheck: () => Promise<string | null>; deps?: Deps }): Promise<DeliverOutcome> {
+  let calling = false; // true a partir do instante em que o pedido de envio pode ter saído
+  try {
+    const c1 = await o.recheckBefore();
+    if (c1) return { kind: "abort", code: c1 };
+    const w = clientOf(o.deps);
+    let live: WahaSession | null = null;
+    try { live = await w.getSession(o.session.providerSession); } catch { return { kind: "abort", code: "conexao_sem_resposta" }; }
+    if (live?.status !== "WORKING") { await syncFromWaha(db, o.session.id, o.session.providerSession, async () => live, o.deps); return { kind: "abort", code: "conexao_nao_conectada" }; }
+    // o motor precisa resolver o número antes de enviar (sem isso: "no LID found"); a consulta NÃO envia nada
+    let chk: { exists: boolean; chatId: string | null };
+    try { chk = await w.checkNumber(o.session.providerSession, o.digits); } catch { return { kind: "abort", code: "conexao_sem_resposta" }; } // a consulta não envia: falhar aqui = nada saiu
+    if (!chk.exists) return { kind: "fail", code: "numero_fora_do_whatsapp", message: "Este número não foi encontrado no WhatsApp. Confira o número. Nada foi enviado" };
+    if (!chk.chatId) return { kind: "fail", code: "numero_sem_id_canonico", message: "O WhatsApp não devolveu o identificador deste número. Nada foi enviado" };
+    // só conversa INDIVIDUAL (c.us) e o mesmo número
+    if (!/^55\d{10,11}@c\.us$/.test(chk.chatId) || !sameBrNumber(o.digits, chk.chatId.slice(0, chk.chatId.indexOf("@")))) return { kind: "fail", code: "numero_divergente", message: "O WhatsApp devolveu outro número para este contato. Nada foi enviado" };
+    const c2 = await o.recheckAfterCheck();
+    if (c2) return { kind: "abort", code: c2 };
+    calling = true;
+    const res = await w.sendText({ session: o.session.providerSession, chatId: chk.chatId, text: o.text });
+    return res.ok ? { kind: "sent", providerRef: refHash(res.providerRef) } : { kind: "result", status: res.unknown ? "desconhecido" : "falhou", error: res.error };
+  } catch {
+    return calling ? { kind: "result", status: "desconhecido", error: "erro_interno" } : { kind: "fail", code: "erro_interno_antes_de_enviar", message: "Erro inesperado antes do envio. Nada foi enviado" };
+  }
 }
 
 const IDEM = /^[A-Za-z0-9_-]{8,64}$/;
@@ -274,44 +312,29 @@ export async function sendTest(db: DB, actorId: string, companyId: string, input
     });
   };
   const abort = async (code: string) => { await finish({ status: "falhou", error: code }); throw new Invalid("O envio foi bloqueado no último momento (chave, pausa, autorização ou conexão mudou). Nada foi enviado"); };
-  let calling = false; // true a partir do instante em que o pedido de envio pode ter saído
-  try {
-    // última conferência antes de sair: chave, pausa, autorização e CONEXÃO (lida na WAHA agora) podem ter mudado entre reservar e enviar
-    const [still] = await db.select({ p: whatsappSessions.paused, st: whatsappSessions.status }).from(whatsappSessions).where(eq(whatsappSessions.id, session.id));
-    const [authNow] = await db.select({ id: whatsappSendAuthorizations.id }).from(whatsappSendAuthorizations).where(and(eq(whatsappSendAuthorizations.companyId, companyId), eq(whatsappSendAuthorizations.active, true)));
-    const [bnd] = await db.select({ id: whatsappSessionCompanies.id }).from(whatsappSessionCompanies).where(and(eq(whatsappSessionCompanies.sessionId, session.id), eq(whatsappSessionCompanies.companyId, companyId), isNull(whatsappSessionCompanies.revokedAt)));
-    if (!sendOn(env) || still?.p !== false || still?.st !== "CONNECTED" || authNow?.id !== authId || !bnd) return await abort("bloqueado_antes_de_enviar");
-    const w = clientOf(deps);
-    let live: WahaSession | null = null;
-    try { live = await w.getSession(session.providerSession); } catch { return await abort("conexao_sem_resposta"); }
-    if (live?.status !== "WORKING") { await syncFromWaha(db, session.id, session.providerSession, async () => live, deps); return await abort("conexao_nao_conectada"); }
-    // o motor precisa resolver o número antes de enviar (sem isso: "no LID found"); a consulta NÃO envia nada. O destino é o id canônico que a WAHA conhece, mas SÓ se for o número autorizado
-    // (igual, ou a equivalência oficial do 9º dígito). Sem id canônico válido ou com outro número: nada sai.
-    let chatId = chatIdFor(digits);
-    try {
-      const chk = await w.checkNumber(session.providerSession, digits);
-      if (!chk.exists) { await finish({ status: "falhou", error: "numero_fora_do_whatsapp" }); throw new Invalid("Este número não foi encontrado no WhatsApp. Confira o número. Nada foi enviado"); }
-      if (!chk.chatId) { await finish({ status: "falhou", error: "numero_sem_id_canonico" }); throw new Invalid("O WhatsApp não devolveu o identificador deste número. Nada foi enviado"); }
-      // só conversa INDIVIDUAL (c.us) e o mesmo número autorizado
-      if (!/^55\d{10,11}@c\.us$/.test(chk.chatId) || !sameBrNumber(digits, chk.chatId.slice(0, chk.chatId.indexOf("@")))) { await finish({ status: "falhou", error: "numero_divergente" }); throw new Invalid("O WhatsApp devolveu outro número para este contato. Nada foi enviado"); }
-      chatId = chk.chatId;
-    } catch (e) { if (e instanceof Invalid) throw e; return await abort("conexao_sem_resposta"); } // a consulta não envia: falhar aqui = nada saiu
-    // revalida pausa e autorização no último instante (a consulta levou tempo de rede)
-    const [p2] = await db.select({ p: whatsappSessions.paused }).from(whatsappSessions).where(eq(whatsappSessions.id, session.id));
-    const [a2] = await db.select({ id: whatsappSendAuthorizations.id }).from(whatsappSendAuthorizations).where(and(eq(whatsappSendAuthorizations.companyId, companyId), eq(whatsappSendAuthorizations.active, true)));
-    const cs2 = await consentState(db, companyId, digits);
-    if (!sendOn(env) || p2?.p !== false || a2?.id !== authId || cs2.state === "opt_out_company" || cs2.state === "opt_out_global") return await abort("bloqueado_antes_de_enviar"); // opt-out de última hora também barra
-    calling = true;
-    const res = await w.sendText({ session: session.providerSession, chatId, text: testText(ev.senderIdentity) });
-    await finish(res.ok ? { status: "enviado", providerRef: refHash(res.providerRef) } : { status: res.unknown ? "desconhecido" : "falhou", error: res.error });
-    if (!res.ok) throw new Invalid(res.unknown ? "A WAHA não confirmou o envio (a mensagem PODE ter chegado). Confira o aparelho; ela não será reenviada sozinha" : `A WAHA recusou o envio (${res.error}). Nada foi enviado`);
-    return { logId };
-  } catch (e) {
-    if (e instanceof Invalid) throw e;
-    // exceção inesperada depois da reserva: nunca deixar «enviando» pendurado. Antes do pedido = não saiu; depois = pode ter saído (sem confirmação, nunca reenviado sozinho)
-    await finish(calling ? { status: "desconhecido", error: "erro_interno" } : { status: "falhou", error: "erro_interno_antes_de_enviar" }).catch(() => { /* a reserva presa será encerrada por settleStaleSends */ });
-    throw new Invalid(calling ? "Erro inesperado durante o envio: a mensagem PODE ter sido enviada. Confira o aparelho; ela não será reenviada sozinha" : "Erro inesperado antes do envio. Nada foi enviado");
-  }
+  const outcome = await deliverViaWaha(db, {
+    session, digits, text: testText(ev.senderIdentity), deps,
+    // última conferência antes de sair: chave, pausa, autorização e CONEXÃO podem ter mudado entre reservar e enviar
+    recheckBefore: async () => {
+      const [still] = await db.select({ p: whatsappSessions.paused, st: whatsappSessions.status }).from(whatsappSessions).where(eq(whatsappSessions.id, session.id));
+      const [authNow] = await db.select({ id: whatsappSendAuthorizations.id }).from(whatsappSendAuthorizations).where(and(eq(whatsappSendAuthorizations.companyId, companyId), eq(whatsappSendAuthorizations.active, true)));
+      const [bnd] = await db.select({ id: whatsappSessionCompanies.id }).from(whatsappSessionCompanies).where(and(eq(whatsappSessionCompanies.sessionId, session.id), eq(whatsappSessionCompanies.companyId, companyId), isNull(whatsappSessionCompanies.revokedAt)));
+      return !sendOn(env) || still?.p !== false || still?.st !== "CONNECTED" || authNow?.id !== authId || !bnd ? "bloqueado_antes_de_enviar" : null;
+    },
+    // revalida pausa, autorização e opt-out no último instante (a consulta do número levou tempo de rede)
+    recheckAfterCheck: async () => {
+      const [p2] = await db.select({ p: whatsappSessions.paused }).from(whatsappSessions).where(eq(whatsappSessions.id, session.id));
+      const [a2] = await db.select({ id: whatsappSendAuthorizations.id }).from(whatsappSendAuthorizations).where(and(eq(whatsappSendAuthorizations.companyId, companyId), eq(whatsappSendAuthorizations.active, true)));
+      const cs2 = await consentState(db, companyId, digits);
+      return !sendOn(env) || p2?.p !== false || a2?.id !== authId || cs2.state === "opt_out_company" || cs2.state === "opt_out_global" ? "bloqueado_antes_de_enviar" : null; // opt-out de última hora também barra
+    },
+  });
+  if (outcome.kind === "sent") { await finish({ status: "enviado", providerRef: outcome.providerRef }); return { logId }; }
+  if (outcome.kind === "abort") { await finish({ status: "falhou", error: outcome.code }); throw new Invalid("O envio foi bloqueado no último momento (chave, pausa, autorização ou conexão mudou). Nada foi enviado"); }
+  if (outcome.kind === "fail") { await finish({ status: "falhou", error: outcome.code }); throw new Invalid(outcome.message); }
+  await finish({ status: outcome.status, error: outcome.error });
+  throw new Invalid(outcome.error === "erro_interno" ? "Erro inesperado durante o envio: a mensagem PODE ter sido enviada. Confira o aparelho; ela não será reenviada sozinha"
+    : outcome.status === "desconhecido" ? "A WAHA não confirmou o envio (a mensagem PODE ter chegado). Confira o aparelho; ela não será reenviada sozinha" : `A WAHA recusou o envio (${outcome.error}). Nada foi enviado`);
 }
 
 /** Reservas que ficaram em "enviando" (processo caiu entre reservar e fechar) viram "sem confirmação" depois de 10 minutos: contam no limite, NUNCA são reenviadas. Só a diretoria. */
@@ -320,8 +343,10 @@ export async function settleStaleSends(db: DB, actorId: string, companyId: strin
   return db.transaction(async (tx) => {
     const x = tx as unknown as DB;
     const r = await x.execute(sql`update whatsapp_send_log set status = 'desconhecido', error = 'reserva_abandonada', finished_at = now(), updated_at = now() where company_id = ${companyId} and status = 'enviando' and created_at < now() - interval '10 minutes' returning id`);
-    if (r.length) await audit(x, companyId, actorId, "whatsapp.stale_sends_settled", { count: r.length });
-    return r.length;
+    const o = await x.execute(sql`update whatsapp_outbox set status = 'desconhecido', reason = 'reserva_abandonada', finished_at = now(), updated_at = now() where company_id = ${companyId} and status = 'enviando' and updated_at < now() - interval '10 minutes' returning id`);
+    const n = r.length + o.length;
+    if (n) await audit(x, companyId, actorId, "whatsapp.stale_sends_settled", { count: r.length, outbox: o.length });
+    return n;
   });
 }
 

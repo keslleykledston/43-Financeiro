@@ -131,7 +131,7 @@ export async function syncCore(db: DB, companyId: string, actorId: string, now =
         } else if (d.status === "cancelado") {
           const u = await x.update(issuanceRequests).set({ status: "cancelado", externalStatus: "cancelado", updatedAt: now }).where(live).returning({ id: issuanceRequests.id });
           if (!u.length) return;
-          await cancelQueueForCharges(x, companyId, [r.chargeId]);
+          await cancelQueueForCharges(x, companyId, [r.chargeId], { keepWhatsapp: true });
           await x.insert(auditLog).values({ companyId, actorId, action: "boleto.cancelled_at_provider", detail: { chargeId: r.chargeId, requestId: r.id, via: "sync" } });
           out.cancelled++;
         } else {

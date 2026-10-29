@@ -1209,6 +1209,64 @@ export const whatsappConsents = pgTable("whatsapp_consents", {
   check("whatsapp_consents_ref_chk", sql`char_length(${t.evidenceRef}) between 3 and 200`),
 ]);
 
+// W3 — configuração de WhatsApp POR EMPRESA. Nasce DESLIGADA: enviar a CLIENTES (cobrança manual assistida) só depois que a diretoria registra a autorização escrita e digita a frase de confirmação.
+// `automation_enabled` é das réguas automáticas (entrega 4) e continua desligada. `daily_cap` só pode ser MENOR que o teto do sistema (10).
+export const whatsappCompanySettings = pgTable("whatsapp_company_settings", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  sendEnabled: boolean("send_enabled").notNull().default(false),
+  automationEnabled: boolean("automation_enabled").notNull().default(false),
+  dailyCap: integer("daily_cap").notNull().default(10),
+  reference: text("reference"), // onde está a autorização escrita da empresa para cobrar clientes por WhatsApp
+  authorizedBy: uuid("authorized_by").references(() => users.id),
+  authorizedAt: timestamp("authorized_at", { withTimezone: true }),
+}, (t) => [
+  uniqueIndex("whatsapp_company_settings_company_uq").on(t.companyId),
+  check("whatsapp_company_settings_cap_chk", sql`${t.dailyCap} between 1 and 10`),
+  check("whatsapp_company_settings_auth_chk", sql`not (${t.sendEnabled} or ${t.automationEnabled}) or (${t.reference} is not null and char_length(${t.reference}) >= 5 and ${t.authorizedBy} is not null and ${t.authorizedAt} is not null)`),
+]);
+// Fila/histórico de mensagens a CLIENTES. O texto fica CIFRADO (secretbox, ligado à empresa); telefone cru só aqui (precisa para enviar) e mascarado em toda tela.
+// Estados: na_fila → enviando → enviado | desconhecido | falhou; na_fila/enviando → suprimido (pago, opt-out, sem consentimento…); na_fila → cancelado. `desconhecido` NUNCA é reenviado:
+// só a conferência humana o resolve (enviado/falhou). Gatilho: identidade imutável, transições só para frente, nada se apaga.
+export const whatsappOutbox = pgTable("whatsapp_outbox", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  sessionId: uuid("session_id").notNull().references(() => whatsappSessions.id),
+  chargeId: uuid("charge_id").notNull(),
+  customerId: uuid("customer_id").notNull(),
+  templateVersionId: uuid("template_version_id").notNull(),
+  milestone: text("milestone").notNull(), // marco = tipo do modelo (emissao | d_menos_3 | d0 | d_mais_3 | d_mais_7)
+  phone: text("phone").notNull(),
+  phoneMasked: text("phone_masked").notNull(),
+  bodyEnc: text("body_enc").notNull(),
+  bodySha: text("body_sha").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  status: text("status").notNull().default("na_fila"),
+  reason: text("reason"), // código curto do motivo (supressão, falha, resolução manual)
+  providerRef: text("provider_ref"), // SHA-256 (32 hex) do id da WAHA
+  delivery: text("delivery"), // entregue | lido (só quando o evento confiável chega: entrega 3b)
+  deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+  readAt: timestamp("read_at", { withTimezone: true }),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  requestedBy: uuid("requested_by").notNull().references(() => users.id),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.chargeId], foreignColumns: [charges.companyId, charges.id] }),
+  foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
+  foreignKey({ columns: [t.companyId, t.templateVersionId], foreignColumns: [messageTemplateVersions.companyId, messageTemplateVersions.id] }),
+  uniqueIndex("whatsapp_outbox_idem_uq").on(t.companyId, t.idempotencyKey),
+  uniqueIndex("whatsapp_outbox_dedupe_uq").on(t.companyId, t.chargeId, t.milestone, t.phone).where(sql`${t.status} in ('na_fila', 'enviando', 'enviado', 'desconhecido')`),
+  index("whatsapp_outbox_company_idx").on(t.companyId, t.createdAt),
+  index("whatsapp_outbox_customer_idx").on(t.companyId, t.customerId, t.createdAt),
+  index("whatsapp_outbox_ref_idx").on(t.providerRef),
+  check("whatsapp_outbox_status_chk", sql`${t.status} in ('na_fila', 'enviando', 'enviado', 'desconhecido', 'falhou', 'suprimido', 'cancelado')`),
+  check("whatsapp_outbox_phone_chk", sql`${t.phone} ~ '^55[0-9]{10,11}$'`),
+  check("whatsapp_outbox_milestone_chk", sql`${t.milestone} in ('emissao', 'd_menos_3', 'd0', 'd_mais_3', 'd_mais_7')`),
+  check("whatsapp_outbox_idem_chk", sql`${t.idempotencyKey} ~ '^[A-Za-z0-9_-]{8,64}$'`),
+  check("whatsapp_outbox_delivery_chk", sql`${t.delivery} is null or ${t.delivery} in ('entregue', 'lido')`),
+  check("whatsapp_outbox_finished_chk", sql`(${t.status} in ('enviado', 'desconhecido', 'falhou', 'suprimido', 'cancelado')) = (${t.finishedAt} is not null)`),
+]);
+
 // H1 — histórico a partir da planilha de boletos (docs/HISTORICO_E_CAIXA.md). STAGING imutável: cada linha da planilha como veio, por empresa. NÃO é cobrança nem
 // contrato: nada aqui alimenta lotes, régua, emissão, contas a receber ou painel. Serve ao relatório de divergências e (H2/H3, com autorização própria) à carga histórica.
 // D3 — staging do histórico de DESPESAS (planilha Despesas__2026). Imutável como o H1; NÃO cria conta a pagar, sócio, lançamento nem fornecedor.

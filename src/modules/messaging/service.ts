@@ -4,7 +4,7 @@ import { auditLog, billingBatches, charges, companies, customerContacts, custome
 import { centsFromNumeric } from "@/lib/money";
 import { formatBRL } from "@/lib/format";
 import { Invalid, requirePerm } from "@/modules/identity/service";
-import { CHANNELS, DEFAULTS, KINDS, ladder, render, toEmailHtml, validateTemplate, SAMPLE_VARS, type Channel, type Kind, type QueueKind, type Vars } from "./templates";
+import { CHANNELS, DEFAULTS, KINDS, WA_DEFAULTS, ladder, render, toEmailHtml, validateTemplate, SAMPLE_VARS, type Channel, type Kind, type QueueKind, type Vars } from "./templates";
 import { DEFAULT_SETTINGS, WINDOW_REASON, localParts, parseSettings, windowState, type MessagingSettings } from "./window";
 import { addDays } from "./dates";
 import { resolveProviders } from "@/modules/providers/registry";
@@ -46,11 +46,37 @@ export async function ensureDefaultTemplates(db: DB, actorId: string, companyId:
       const [t] = await x.insert(messageTemplates).values({ companyId, kind, channel }).onConflictDoNothing().returning();
       if (!t) continue;
       const d = DEFAULTS[kind];
-      await x.insert(messageTemplateVersions).values({ companyId, templateId: t.id, version: 1, subject: channel === "email" ? d.subject : "", body: d.body, state: "ativa", createdBy: actorId, activatedBy: actorId, activatedAt: new Date() });
+      await x.insert(messageTemplateVersions).values({ companyId, templateId: t.id, version: 1, subject: channel === "email" ? d.subject : "", body: channel === "whatsapp" ? WA_DEFAULTS[kind] : d.body, state: "ativa", createdBy: actorId, activatedBy: actorId, activatedAt: new Date() });
       created++;
     }
     await audit(x, companyId, actorId, "messages.templates.defaults", { created });
     return { created };
+  });
+}
+
+const BOLETO_IN_BODY = /\{\{\s*(linha_digitavel|link_boleto|pix_copia_cola)\s*\}\}/;
+/**
+ * Garante os modelos de WhatsApp PRÓPRIOS (curtos, sem dados do boleto): cria os que faltam e, onde o modelo ativo ainda usa dados do boleto (texto padrão antigo), publica uma nova versão
+ * e arquiva a anterior. Modelo já editado por uma pessoa (sem campos do boleto) NÃO é tocado.
+ */
+export async function ensureWhatsappDefaults(db: DB, actorId: string, companyId: string) {
+  await requirePerm(db, actorId, companyId, "messages.templates");
+  return db.transaction(async (tx) => {
+    const x = tx as unknown as DB;
+    await lockQueue(x, companyId);
+    let created = 0, upgraded = 0;
+    for (const kind of KINDS) {
+      let [t] = await x.select().from(messageTemplates).where(and(eq(messageTemplates.companyId, companyId), eq(messageTemplates.kind, kind), eq(messageTemplates.channel, "whatsapp")));
+      if (!t) { [t] = await x.insert(messageTemplates).values({ companyId, kind, channel: "whatsapp" }).returning(); }
+      const vs = await x.select().from(messageTemplateVersions).where(and(eq(messageTemplateVersions.companyId, companyId), eq(messageTemplateVersions.templateId, t.id))).orderBy(desc(messageTemplateVersions.version));
+      const active = vs.find((v) => v.state === "ativa");
+      if (active && !BOLETO_IN_BODY.test(active.body)) continue;
+      if (active) await x.update(messageTemplateVersions).set({ state: "arquivada", updatedAt: new Date() }).where(eq(messageTemplateVersions.id, active.id));
+      await x.insert(messageTemplateVersions).values({ companyId, templateId: t.id, version: (vs[0]?.version ?? 0) + 1, subject: "", body: WA_DEFAULTS[kind], state: "ativa", createdBy: actorId, activatedBy: actorId, activatedAt: new Date() });
+      if (active) upgraded++; else created++;
+    }
+    await audit(x, companyId, actorId, "messages.templates.whatsapp_defaults", { created, upgraded });
+    return { created, upgraded };
   });
 }
 
@@ -164,8 +190,12 @@ async function cancelOrphans(x: DB, companyId: string) {
 }
 
 /** Usado por reabrir/cancelar lote e (E07) pagamento: cancela itens abertos das cobranças dadas. Dentro da transação do chamador. */
-export async function cancelQueueForCharges(x: DB, companyId: string, chargeIds: string[]) {
+export async function cancelQueueForCharges(x: DB, companyId: string, chargeIds: string[], o: { keepWhatsapp?: boolean } = {}) {
   if (chargeIds.length === 0) return 0;
+  // W3: a fila de WhatsApp a cliente também para quando a cobrança deixa de valer (paga, lote reaberto/cancelado): «na fila» vira «suprimido» (e o envio revalida de qualquer jeito).
+  // Cancelar só o BOLETO (`keepWhatsapp`) NÃO suprime: a cobrança segue devida e o texto do WhatsApp não depende do boleto.
+  if (!o.keepWhatsapp) await x.execute(sql`update whatsapp_outbox set status = 'suprimido', reason = 'cobranca_alterada', finished_at = now(), updated_at = now()
+    where company_id = ${companyId} and status = 'na_fila' and charge_id in (${sql.join(chargeIds.map((id) => sql`${id}::uuid`), sql`, `)})`);
   const res = await x.update(messageQueue).set({ status: "cancelado", blockedReason: null, updatedAt: new Date() })
     .where(and(eq(messageQueue.companyId, companyId), inArray(messageQueue.chargeId, chargeIds), inArray(messageQueue.status, ["pendente", "bloqueado"]))).returning({ id: messageQueue.id });
   return res.length;

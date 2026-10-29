@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
+import { cancelOutbox, dispatchOutbox, queueCustomerMessage, resolveUnknown, saveCompanySettings } from "@/modules/whatsapp/outbound";
+import { ensureWhatsappDefaults } from "@/modules/messaging/service";
 import { bindCompany, createSession, disconnectSession, recordConsent, revokeAuthorization, saveAuthorization, sendTest, setPaused, settleStaleSends, startSession, unbindCompany } from "@/modules/whatsapp/service";
 
 export type FormState = { error?: string; saved?: string; sessionId?: string } | undefined;
@@ -85,4 +87,53 @@ export async function recordConsentAction(_: FormState, fd: FormData): Promise<F
   } catch (e) { return { error: known(e) }; }
   revalidatePath("/whatsapp/consentimentos");
   redirect("/whatsapp/consentimentos?ok=registrado");
+}
+
+// ---------- W3a: cobrança de cliente por WhatsApp ----------
+export async function saveCompanySettingsAction(_: FormState, fd: FormData): Promise<FormState> {
+  try {
+    const c = await ctx();
+    await saveCompanySettings(db, c.userId, c.companyId, { enable: fd.get("enable") === "1", reference: text(fd, "reference", 300), dailyCap: text(fd, "dailyCap", 5), phrase: text(fd, "phrase", 80) });
+  } catch (e) { return { error: known(e) }; }
+  revalidatePath("/whatsapp/configuracao");
+  redirect("/whatsapp/configuracao?ok=salvo");
+}
+export async function ensureWhatsappDefaultsAction() {
+  let err = "";
+  try { const c = await ctx(); await ensureWhatsappDefaults(db, c.userId, c.companyId); } catch (e) { err = known(e); }
+  revalidatePath("/whatsapp/configuracao"); redirect(`/whatsapp/configuracao${err ? `?erro=${encodeURIComponent(err)}` : "?ok=modelos"}`);
+}
+export async function queueCustomerAction(_: FormState, fd: FormData): Promise<FormState> {
+  try {
+    const c = await ctx();
+    await queueCustomerMessage(db, c.userId, c.companyId, { chargeId: text(fd, "chargeId", 40), templateVersionId: text(fd, "templateVersionId", 40), sessionId: text(fd, "sessionId", 40), confirm: fd.get("confirm") === "on", key: text(fd, "key", 80) });
+  } catch (e) { return { error: known(e) }; }
+  revalidatePath("/whatsapp/historico");
+  redirect("/whatsapp/historico?ok=na_fila");
+}
+const histBack = (err: string, ok = "") => redirect(`/whatsapp/historico${err ? `?erro=${encodeURIComponent(err)}` : ok ? `?ok=${ok}` : ""}`);
+export async function dispatchOutboxAction(fd: FormData) {
+  let err = "";
+  try { const c = await ctx(); await dispatchOutbox(db, c.userId, c.companyId, text(fd, "id", 40)); } catch (e) { err = known(e); }
+  revalidatePath("/whatsapp/historico"); histBack(err, "enviado");
+}
+export async function cancelOutboxAction(fd: FormData) {
+  let err = "";
+  try { const c = await ctx(); await cancelOutbox(db, c.userId, c.companyId, text(fd, "id", 40)); } catch (e) { err = known(e); }
+  revalidatePath("/whatsapp/historico"); histBack(err, "cancelado");
+}
+export async function resolveUnknownAction(fd: FormData) {
+  let err = "";
+  try { const c = await ctx(); await resolveUnknown(db, c.userId, c.companyId, text(fd, "id", 40), text(fd, "outcome", 10) as "enviado" | "falhou"); } catch (e) { err = known(e); }
+  revalidatePath("/whatsapp/historico"); histBack(err, "conferido");
+}
+export async function disableCompanySendAction() {
+  let err = "";
+  try { const c = await ctx(); await saveCompanySettings(db, c.userId, c.companyId, { enable: false }); } catch (e) { err = known(e); }
+  revalidatePath("/whatsapp/configuracao"); redirect(`/whatsapp/configuracao${err ? `?erro=${encodeURIComponent(err)}` : "?ok=salvo"}`);
+}
+export async function settleStaleOutboxAction() {
+  let err = "";
+  try { const c = await ctx(); await settleStaleSends(db, c.userId, c.companyId); } catch (e) { err = known(e); }
+  revalidatePath("/whatsapp/historico"); histBack(err, "reservas");
 }

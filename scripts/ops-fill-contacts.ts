@@ -17,13 +17,14 @@ const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCa
   const { auditLog, companies, customerContacts, customers, users } = await import("../src/lib/db/schema");
   const { and, eq, sql } = await import("drizzle-orm");
   const { readWorkbook } = await import("../src/modules/contracts/planilha");
+  type Cell = import("../src/modules/contracts/planilha").Cell;
   const { planContacts, wantedFromEntries } = await import("../src/modules/crm/contact-fill");
   const { toCsv } = await import("../src/lib/csv");
 
   const [u] = await db.select().from(users).where(eq(sql`lower(${users.email})`, email.toLowerCase()));
   if (!u) throw new Error("Usuário não encontrado");
   const raw = await readXlsxFile(xlsx);
-  const entries = readWorkbook(raw.map((s) => ({ name: s.sheet, rows: s.data })), 2026);
+  const entries = readWorkbook(raw.map((s) => ({ name: s.sheet, rows: s.data as unknown as Cell[][] })), 2026);
   const pendings: string[][] = [["empresa", "cliente", "documento", "motivo"]];
   const confirm = process.env.OPS_CONFIRM === "1";
 

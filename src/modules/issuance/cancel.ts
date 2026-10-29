@@ -45,7 +45,7 @@ async function attempt(db: DB, companyId: string, actorId: string, row: { id: st
       if (status === "cancelado") {
         // o boleto deixou de existir: a solicitação sai da lista de ativas (permite emitir outro, com chave nova) e a régua da cobrança para
         await x.update(issuanceRequests).set({ status: "cancelado", externalStatus: "cancelado", updatedAt: new Date() }).where(and(eq(issuanceRequests.id, row.requestId), eq(issuanceRequests.companyId, companyId)));
-        await cancelQueueForCharges(x, companyId, [row.chargeId]);
+        await cancelQueueForCharges(x, companyId, [row.chargeId], { keepWhatsapp: true }); // só o boleto saiu: a cobrança segue devida
         await reopenEmissionAfterCancel(x, companyId, row.chargeId); // o e-mail de emissão já enviado levava o boleto cancelado: reenvia com o novo
         await audit(x, companyId, actorId, "boleto.cancelled", { cancellationId: row.id, chargeId: row.chargeId, requestId: row.requestId, attempts: row.attempts });
       } else if (status === "falhou") {
