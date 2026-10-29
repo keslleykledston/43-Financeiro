@@ -460,6 +460,27 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     expect(await n("audit_log where action = 'boleto.settle_review'")).toBe(4);
   });
 
+  it("BAIXA AUTOMÁTICA: pago ANTES da data prevista de emissão da cobrança (boleto emitido antes) é baixado com a data da Cora; a baixa MANUAL segue recusando essa data", async () => {
+    const batchId = await approvedBatch(); await useCora();
+    await saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, autoSettle: true });
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, NOW);
+    const c1 = await chargeOf(cli1); const r1 = (await reqs()).find((x) => x.chargeId === c1.id)!;
+    cora.inv.get(r1.externalRef!)!.status = "PAID"; cora.hooks.paidOn = "2026-09-30"; // a cobrança tem emissão prevista em 2026-10-01
+    expect(await syncBoletoStatus(db, gerA, A, new Date(NOW.getTime() + 60_000))).toMatchObject({ paid: 1, settled: 1, failed: 0 });
+    const [pay] = await db.select().from(schema.payments).where(eq(schema.payments.chargeId, c1.id));
+    expect(pay.paidAt).toBe("2026-09-30");
+    const c2 = await chargeOf(cli2); const r2 = (await reqs()).find((x) => x.chargeId === c2.id)!;
+    await expect(registerPayment(db, dirA, A, c2.id, { amount: "2.500,00", method: "pix", paidAt: "2026-09-30" })).rejects.toThrow(/anterior à emissão/);
+    // data absurda (antes da competência 2026-09) ou inexistente: conferência, nunca baixa
+    cora.inv.get(r2.externalRef!)!.status = "PAID";
+    for (const bad of ["1900-01-01", "2026-02-31"]) {
+      cora.hooks.paidOn = bad;
+      expect(await syncBoletoStatus(db, gerA, A, new Date(NOW.getTime() + 120_000))).toMatchObject({ settled: 0, failed: 0 });
+    }
+    expect(await db.select().from(schema.payments).where(eq(schema.payments.chargeId, c2.id))).toHaveLength(0);
+  });
+
   it("WEBHOOK: aviso repetido (com ou sem id) e chamadas simultâneas geram um evento só", async () => {
     stageOn(); await creds();
     await enableCoraWebhook(db, dirA, A, "homologacao", "https://app.exemplo.com.br", cora.transport);

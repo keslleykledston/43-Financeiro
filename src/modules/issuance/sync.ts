@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
 import { auditLog, boletoCancellations, charges, issuanceRequests, issuanceSettings, users } from "@/lib/db/schema";
 import { centsFromNumeric } from "@/lib/money";
-import { requirePerm } from "@/modules/identity/service";
+import { Invalid, requirePerm } from "@/modules/identity/service";
 import { cancelQueueForCharges, todayManaus } from "@/modules/messaging/service";
 import { IssuanceRetryable } from "@/modules/providers/errors";
 import { LiveNotAvailable, resolveProvidersForMode } from "@/modules/providers/registry";
@@ -45,7 +45,7 @@ async function settle(x: DB, companyId: string, systemUser: string, chargeId: st
   const extras = d.payments.reduce((a, p) => a + p.interestCents + p.fineCents, 0);
   const principal = sum - extras;
   if (principal <= 0) return { kind: "review", reason: "valor_invalido" };
-  const [ch] = await x.select({ amount: charges.amount }).from(charges).where(and(eq(charges.id, chargeId), eq(charges.companyId, companyId)));
+  const [ch] = await x.select({ amount: charges.amount, competence: charges.competenceMonth }).from(charges).where(and(eq(charges.id, chargeId), eq(charges.companyId, companyId)));
   if (!ch) return { kind: "review", reason: "cobranca_inexistente" };
   if (d.totalAmountCents !== centsFromNumeric(ch.amount)) return { kind: "review", reason: "valor_do_boleto_diferente_da_cobranca" }; // o boleto na Cora não tem o valor que emitimos
   const [{ paid }] = (await x.execute(sql`select coalesce(sum(amount), 0)::text paid from payments where company_id = ${companyId} and charge_id = ${chargeId} and status = 'ativo'`)) as unknown as { paid: string }[];
@@ -56,13 +56,14 @@ async function settle(x: DB, companyId: string, systemUser: string, chargeId: st
   if (inflight) return { kind: "wait" };
   const today = todayManaus();
   const stamp = d.paidOn ?? (d.payments[0].finalizedAt ?? "").slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(stamp) || stamp > today) return { kind: "review", reason: "data_do_pagamento_ausente_ou_futura" }; // nunca inventa nem ajusta a data
+  const realDate = /^\d{4}-\d{2}-\d{2}$/.test(stamp) && new Date(`${stamp}T00:00:00Z`).toISOString().slice(0, 10) === stamp;
+  if (!realDate || stamp > today || stamp < String(ch.competence).slice(0, 7) + "-01") return { kind: "review", reason: "data_do_pagamento_ausente_ou_futura" }; // nunca inventa nem ajusta a data; antes da competência do serviço também não é plausível
   const paidAt = stamp;
   try {
     const r = await recordPaymentTx(x, companyId, systemUser, chargeId, { cents: principal, interestCents: extras, discountCents: 0, paidAt, method: d.payments.every((p) => p.method === "PIX") ? "pix" : "boleto", note: "Baixa automática: boleto pago na Cora", key: settleKey(ref) }, { via: "cora_auto", ref });
     if (r.duplicate) return { kind: "review", reason: "baixa_anterior_estornada" }; // já houve baixa automática deste boleto e ela foi estornada: nova baixa só com decisão humana
   } catch (e) {
-    if ((e as Error).name === "Invalid") return { kind: "review", reason: "recusada_pela_baixa" }; // ex.: data anterior à emissão; revisão humana
+    if (e instanceof Invalid) return { kind: "review", reason: "recusada_pela_baixa" }; // ex.: data anterior à emissão; revisão humana
     throw e;
   }
   return { kind: "settled" };

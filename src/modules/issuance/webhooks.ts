@@ -123,7 +123,7 @@ export async function processWebhookEvents(db: DB, now = new Date(), limit = 50)
         .where(and(eq(issuanceRequests.companyId, ev.companyId), eq(issuanceRequests.externalRef, ev.resourceId), eq(issuanceRequests.kind, "boleto"), eq(issuanceRequests.mode, MODE_OF[ev.environment as CoraEnvironment])));
       if (!req) { await finish(ev.id, "ignorado", "boleto_desconhecido"); sum.ignored++; continue; }
       const o = await syncCore(db, ev.companyId, sys, now, { requestId: req.id });
-      if (o.skipped || (o.failed > 0 && o.checked === 0)) throw new Error("consulta_indisponivel"); // Cora limitou/credencial/erro: tenta de novo
+      if (o.skipped || o.failed > 0) throw new Error("consulta_indisponivel"); // Cora limitou/credencial/erro: tenta de novo
       await finish(ev.id, "processado", o.settled ? "baixado" : o.paid ? "pago" : o.cancelled ? "cancelado" : "sem_mudanca"); sum.processed++;
     } catch {
       sum.errors++;

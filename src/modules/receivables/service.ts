@@ -173,7 +173,7 @@ export async function recordPaymentTx(x: DB, companyId: string, actorId: string,
         const [dup] = await x.select().from(payments).where(and(eq(payments.companyId, companyId), eq(payments.requestKey, key)));
         if (dup) { if (dup.chargeId !== chargeId) throw new Invalid("Chave de envio já usada"); return { paymentId: dup.id, duplicate: true, settled: false }; }
       }
-      if (input.paidAt < c.c.issueDate) throw new Invalid("A data do pagamento não pode ser anterior à emissão");
+      if (input.paidAt < c.c.issueDate && auditExtra.via !== "cora_auto") throw new Invalid("A data do pagamento não pode ser anterior à emissão"); // a baixa automática vem da data que a Cora informou (e o boleto pode ter sido emitido antes da data prevista da cobrança)
       const [{ paid }] = await x.select({ paid: sql<string>`coalesce(sum(${payments.amount}), 0)::text` }).from(payments).where(and(eq(payments.companyId, companyId), eq(payments.chargeId, chargeId), eq(payments.status, "ativo")));
       const open = centsFromNumeric(c.c.amount) - centsFromNumeric(paid);
       if (cents > open) throw new Invalid(`O valor passa do saldo em aberto (${formatBRL(open)})`);
