@@ -11,7 +11,7 @@ x-app-env: &app-env
   AUTH_TRUST_HOST: "true"
   AUTH_URL: "https://financeiro.devops.k3gsolutions.com.br"
   BILLING_LIVE_ENABLED: "false"
-  EMAIL_EXTERNAL_ENABLED: "false"
+  EMAIL_EXTERNAL_ENABLED: "true"   # LIGADA em 2026-10-29 (canário E33, ordem do dono; autorização registrada só na empresa K3G TESTE, 2 destinatários internos, 5/dia). Sem autorização ativa + conta + lista, nada sai. Kill switch: "false" + restart de web e scheduler.
   CORA_LIVE_ENABLED: "false"
   # Cora de TESTES (stage): permite que uma empresa escolha "Cora — testes (homologação)" como provedor de boleto (diretoria, auditado). Não existe produção.
   CORA_STAGE_ENABLED: "true"
