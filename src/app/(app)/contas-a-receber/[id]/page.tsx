@@ -88,7 +88,8 @@ export default async function Cobranca({ params, searchParams }: { params: Promi
                 <input type="hidden" name="id" value={r.id} />
                 <div><label htmlFor="cancel-reason" className="mb-1 block text-sm font-medium">Motivo (3 a 200 caracteres)</label><input id="cancel-reason" name="reason" required minLength={3} maxLength={200} className={inputClass} placeholder="Ex.: valor errado; vencimento a corrigir" /></div>
                 <label className="flex items-start gap-2 text-sm"><input type="checkbox" name="confirm" required className="mt-1" /> Confirmo o cancelamento deste boleto. A ação fica registrada com meu nome, data e motivo e não pode ser desfeita.</label>
-                <div><PendingButton className={buttonClass("danger")} pendingText="Cancelando…">Cancelar boleto</PendingButton></div>
+                {panel.request?.mode === "cora_producao" && <label className="flex items-start gap-2 text-sm font-medium text-negative-foreground"><input type="checkbox" name="confirmLive" required className="mt-1" /> Este é um boleto REAL (Cora produção). Confirmo que quero cancelá-lo de verdade na Cora.</label>}
+                                <div><PendingButton className={buttonClass("danger")} pendingText="Cancelando…">Cancelar boleto</PendingButton></div>
               </form></details>
           )}
           {requestCancelPerm && panel.request?.status === "emitido" && r.payments.length === 0 && !pendingRequest && !panel.history.some((h) => h.status === "enviando" || h.status === "desconhecido") && (
@@ -110,7 +111,7 @@ export default async function Cobranca({ params, searchParams }: { params: Promi
                     <form action={decideCancelRequestAction} className="grid gap-2">
                       <input type="hidden" name="id" value={r.id} /><input type="hidden" name="requestId" value={pendingRequest.id} /><input type="hidden" name="decision" value="aprovar" />
                       <label className="flex items-start gap-2"><input type="checkbox" name="confirm" required className="mt-1" /> Confirmo o cancelamento deste boleto. A ação fica registrada com meu nome e não pode ser desfeita.</label>
-                      <div><PendingButton className={buttonClass("danger")} pendingText="Cancelando…">Aprovar e cancelar o boleto</PendingButton></div>
+                      {panel.request?.mode === "cora_producao" && <label className="flex items-start gap-2 text-sm font-medium text-negative-foreground"><input type="checkbox" name="confirmLive" required className="mt-1" /> Este é um boleto REAL (Cora produção). Confirmo que quero cancelá-lo de verdade na Cora.</label>}                      <div><PendingButton className={buttonClass("danger")} pendingText="Cancelando…">Aprovar e cancelar o boleto</PendingButton></div>
                     </form>
                   ) : <p className="text-muted-foreground">O boleto não está mais disponível para cancelar (já cancelado ou com pagamento). Você pode encerrar o pedido recusando-o.</p>}
                   {!pendingRequest.stuck && (

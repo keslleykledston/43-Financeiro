@@ -10,6 +10,7 @@ import { ThemeToggle } from "@/components/k3g/theme-toggle";
 import { FullPageMessage } from "@/components/k3g/states";
 import { buttonClass, selectClass } from "@/components/k3g/button";
 import { emailLiveActive } from "@/modules/providers/email-live";
+import { liveBoletosActive } from "@/modules/issuance/service";
 import { switchCompany, logout } from "./actions";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -22,9 +23,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
   const role = await activeRole(db, ctx.user.id, ctx.current.id);
   const emailLive = await emailLiveActive(db, ctx.current.id);
+  const liveBoletos = await liveBoletosActive(db, ctx.current.id);
   return (
     <div className="min-h-screen bg-background">
-      <DemoBanner emailLive={emailLive} />
+      <DemoBanner emailLive={emailLive} liveBoletos={liveBoletos} />
       <a href="#conteudo" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-12 focus:z-50 focus:rounded-md focus:bg-card focus:px-3 focus:py-2">Pular para o conteúdo</a>
       <div className="flex">
         <aside className="sticky top-9 hidden h-[calc(100vh-2.25rem)] w-60 shrink-0 flex-col justify-between border-r bg-sidebar p-3 lg:flex">

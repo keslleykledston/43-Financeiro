@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
@@ -33,7 +33,7 @@ type Inv = { id: string; status: string; code: string; amount: number; due: stri
 function fakeCora() {
   const inv = new Map<string, Inv>(); const byIdem = new Map<string, string>();
   const calls: { host: string; method: string; path: string; headers: Record<string, string>; body?: any }[] = [];
-  const hooks = { failEndpointAt: 0, getFails: 0, pdfUrl: null as null | ((id: string) => string), paidOn: null as null | string, paidTotal: null as null | number, paidInterest: null as null | number, paidFine: null as null | number, dropAfterCreate: 0, failCreate: null as null | { status: number; body: unknown }, failBeforeCreate: 0, amountOverride: null as null | number, paid: new Set<string>() };
+  const hooks = { tokenFail: false, failEndpointAt: 0, getFails: 0, pdfUrl: null as null | ((id: string) => string), paidOn: null as null | string, paidTotal: null as null | number, paidInterest: null as null | number, paidFine: null as null | number, dropAfterCreate: 0, failCreate: null as null | { status: number; body: unknown }, failBeforeCreate: 0, amountOverride: null as null | number, paid: new Set<string>() };
   let seq = 0, epSeq = 0;
   const endpoints = new Map<string, { id: string; url: string; resource: string; trigger: string }>();
   const j = (status: number, body: unknown) => ({ status, body: body === null ? "" : JSON.stringify(body) });
@@ -54,6 +54,7 @@ function fakeCora() {
     const em = /^\/endpoints\/(ep_\w+)$/.exec(path);
     if (em && o.method === "DELETE") { if (!endpoints.delete(em[1])) return j(422, { code: "invalid" }); return j(204, null); }
     if (hooks.getFails > 0 && o.method === "GET" && /^\/v2\/invoices\/inv_/.test(path)) { hooks.getFails--; return j(429, { code: "rate_limit" }); }
+    if (path === "/token" && hooks.tokenFail) return j(401, { error: "access_denied" });
     if (path === "/token") return j(200, { access_token: "tok_fake_" + calls.length, expires_in: 3600, token_type: "Bearer" });
     if (o.method === "POST" && path === "/v2/invoices") {
       if (hooks.failBeforeCreate > 0) { hooks.failBeforeCreate--; throw new CoraNetworkError("conexão caiu antes de enviar"); }
@@ -103,7 +104,7 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     await migrate(db, { migrationsFolder: "./drizzle" });
   });
   afterAll(async () => { __setCoraTransportForTests(undefined); await conn?.end(); await admin?.end(); });
-  afterEach(() => { delete process.env.CORA_STAGE_ENABLED; delete process.env.CORA_LIVE_ENABLED; });
+  afterEach(() => { vi.useRealTimers(); delete process.env.CORA_STAGE_ENABLED; delete process.env.CORA_LIVE_ENABLED; delete process.env.CORA_PROD_EMISSION_ENABLED; });
 
   beforeEach(async () => {
     await db.execute(sql`truncate boleto_cancel_requests, boleto_cancellations, provider_credentials, issuance_requests, issuance_settings, bank_transaction_marks, bank_allocations, bank_transactions, bank_import_rows, bank_import_batches, bank_accounts, payments, messaging_settings, message_queue, message_template_versions, message_templates, charges, billing_batches, holidays, contract_versions, contracts, integration_conflicts, integration_sync_runs, integration_connections, rate_limits, customer_contacts, vendor_contacts, customers, vendors, audit_log, invitations, memberships, companies, users restart identity cascade`);
@@ -141,7 +142,8 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
   it("trocar para a Cora de testes exige as 3 travas (chave do servidor, credencial de homologação, diretoria) e nenhum boleto em andamento", async () => {
     const batchId = await approvedBatch();
     await expect(saveIssuanceSettings(db, gerA, A, { paused: false, dailyLimit: 20, boletoProvider: "cora_homologacao" })).rejects.toThrow(); // só diretoria
-    await expect(saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, boletoProvider: "cora_producao" })).rejects.toThrow(Invalid); // não existe modo de produção
+    await expect(saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, boletoProvider: "cora_inexistente" })).rejects.toThrow(Invalid); // modo desconhecido
+    await expect(saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, boletoProvider: "cora_producao", liveConfirm: "EMITIR BOLETOS REAIS" })).rejects.toThrow(LiveNotAvailable); // produção desligada no servidor (CORA_PROD_EMISSION_ENABLED)
     await expect(saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, boletoProvider: "cora_homologacao" })).rejects.toThrow(LiveNotAvailable); // chave desligada
     stageOn();
     await expect(saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, boletoProvider: "cora_homologacao" })).rejects.toThrow(/Credenciais da Cora de testes/); // sem credencial
@@ -282,6 +284,12 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     cora.hooks.pdfUrl = () => "javascript:alert(1)"; // esquema perigoso vindo da resposta externa: nunca devolvido
     const v2 = await boletoView(db, gerA, A, c1.id);
     expect(v2.kind === "ok" && v2.details.pdfUrl).toBeNull();
+    cora.hooks.pdfUrl = () => "https://storage.googleapis.com/download/storage/v1/b/outro-bucket/o/x.pdf?alt=media"; // mesmo host do Google, mas OUTRO bucket: não
+    const v2b = await boletoView(db, gerA, A, c1.id);
+    expect(v2b.kind === "ok" && v2b.details.pdfUrl).toBeNull();
+    cora.hooks.pdfUrl = () => "https://storage.googleapis.com/download/storage/v1/b/cora_production_exporter_bankslip_storage/o/inv_x.pdf?generation=1&alt=media"; // o formato REAL observado: aceito
+    const v2c = await boletoView(db, gerA, A, c1.id);
+    expect(v2c.kind === "ok" && v2c.details.pdfUrl).toMatch(/cora_production_exporter_bankslip_storage/);
     cora.hooks.pdfUrl = () => "https://evil.example.com/boleto.pdf"; // https, mas de outro domínio: também não
     const v3 = await boletoView(db, gerA, A, c1.id);
     expect(v3.kind === "ok" && v3.details.pdfUrl).toBeNull();
@@ -462,7 +470,7 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     expect(row.secretHash).toBe(createHash("sha256").update(secret1).digest("hex")); // só o hash
     expect(JSON.stringify(row)).not.toContain(secret1);
     expect(await n("audit_log where detail::text like '%" + secret1 + "%'")).toBe(0);
-    expect(await webhookStatus(db, dirA, A)).toEqual([expect.objectContaining({ environment: "homologacao", active: true, triggers: 2 })]);
+    expect(await webhookStatus(db, dirA, A)).toEqual(expect.arrayContaining([expect.objectContaining({ environment: "homologacao", active: true, triggers: 2 }), expect.objectContaining({ environment: "producao", active: false })]));
     // girar: antigos removidos na Cora, segredo antigo deixa de valer
     await enableCoraWebhook(db, dirA, A, "homologacao", "https://app.exemplo.com.br", cora.transport);
     expect(cora.endpoints.size).toBe(2);
@@ -531,6 +539,156 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     expect(cora.calls.every((c) => c.host === CORA_HOSTS.homologacao)).toBe(true);
   });
 
+  // ───────── E10b-6 — emissão em PRODUÇÃO (boletos reais). Tudo contra a Cora falsa; relógio fixado para a regra de vencimento. ─────────
+  const prodOn = () => { process.env.CORA_PROD_EMISSION_ENABLED = "true"; };
+  const credsProd = () => saveCoraCredentials(db, dirA, A, { environment: "producao", label: "Prod", clientId: "int-cliente-prod-123", certificate: TEST_CERT, privateKey: TEST_KEY });
+  const PHRASE = "EMITIR BOLETOS REAIS";
+  const arm = (extra: Record<string, unknown> = {}) => saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, boletoProvider: "cora_producao", liveConfirm: PHRASE, ...extra });
+  const clock = (iso: string) => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(iso)); };
+  const REAL = Date.now(); // o relógio do banco é o real; só o JavaScript (regra de vencimento) usa o relógio fixado
+  const PN = (hours = 0) => new Date(REAL + 5 * 60_000 + hours * 3600_000);
+
+  it("PRODUÇÃO — ARMAR: exige a chave do servidor, credencial de produção, confirmação digitada, acesso que autentica e diretoria; entra em canário; banco guarda quem autorizou", async () => {
+    const batchId = await approvedBatch();
+    await expect(arm()).rejects.toThrow(LiveNotAvailable); // chave do servidor desligada
+    prodOn();
+    await expect(arm()).rejects.toThrow(/Credenciais da Cora de produção/); // sem credencial
+    await credsProd();
+    clock("2026-10-05T12:00:00-04:00"); // (o certificado de teste só vale a partir de hoje: a credencial é gravada antes de fixar o relógio)
+    await expect(saveIssuanceSettings(db, gerA, A, { paused: false, dailyLimit: 20, boletoProvider: "cora_producao", liveConfirm: PHRASE })).rejects.toThrow(); // só diretoria
+    await expect(arm({ liveConfirm: "emitir boletos reais" })).rejects.toThrow(Invalid); // frase exata
+    await expect(arm({ liveConfirm: "" })).rejects.toThrow(Invalid);
+    cora.hooks.tokenFail = true;
+    await expect(arm()).rejects.toThrow(/recusou o acesso de produção/); // a credencial não autentica: nada ligado
+    expect((await db.select().from(schema.issuanceSettings))).toHaveLength(0);
+    cora.hooks.tokenFail = false;
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto"); // pendentes em andamento: não troca
+    await expect(arm()).rejects.toThrow(/boletos em andamento/);
+    await db.execute(sql`update issuance_requests set status = 'cancelado'`);
+    await arm({ liveCanary: false }); // pedir "sem canário" na entrada é ignorado: entra SEMPRE em canário
+    const st = (await db.select().from(schema.issuanceSettings))[0];
+    expect(st).toMatchObject({ boletoProvider: "cora_producao", liveCanary: true, liveAuthorizedBy: dirA });
+    expect(st.liveAuthorizedAt).not.toBeNull();
+    expect(await n("audit_log where action = 'issuance.settings.saved' and detail->>'liveArmed' = 'true'")).toBe(1);
+    expect(cora.calls.every((c) => c.method === "GET" || c.path === "/token")).toBe(true); // armar só autenticou: nada criado
+    expect(cora.calls.every((c) => c.host === CORA_HOSTS.producao || c.host === CORA_HOSTS.homologacao)).toBe(true);
+    // sair do canário exige a frase de novo
+    await expect(saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, liveCanary: false })).rejects.toThrow(Invalid);
+    await saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, liveCanary: false, liveConfirm: PHRASE });
+    expect((await db.select().from(schema.issuanceSettings))[0].liveCanary).toBe(false);
+    // voltar ao simulado apaga a autorização; religar exige tudo de novo
+    await saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, boletoProvider: "simulado" });
+    expect((await db.select().from(schema.issuanceSettings))[0]).toMatchObject({ boletoProvider: "simulado", liveAuthorizedBy: null, liveAuthorizedAt: null });
+  });
+
+  it("PRODUÇÃO — EMITIR: sem confirmação a rodada é recusada; com ela emite no host de produção; canário limita a 3 por dia; anti-duplicidade e vencimento/valor protegem", async () => {
+    await credsProd(); clock("2026-10-05T12:00:00-04:00");
+    const c3 = (await createParty(db, dirA, A, { kind: "cliente", legalName: "Cliente Tres", document: "529.982.247-25" })).id;
+    const c4 = (await createParty(db, dirA, A, { kind: "cliente", legalName: "Cliente Quatro", document: "111.444.777-35" })).id;
+    for (const c of [cli1, cli2, c3, c4]) await activeContract(c);
+    const { batchId } = await generateBatch(db, asstA, A, D);
+    await approveBatch(db, dirA, A, batchId, (await getBatch(db, asstA, A, batchId))!.hash);
+    prodOn(); await arm();
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await expect(processIssuance(db, gerA, A, PN())).rejects.toThrow(/confirmação explícita/); // sem confirmação: nada
+    expect(cora.posts()).toHaveLength(0);
+    // um boleto igual JÁ existe na Cora (emitido à mão) para o cliente 1: não emite, falha com código claro
+    cora.inv.set("inv_manual000001", { id: "inv_manual000001", status: "OPEN", code: "manual-planilha", amount: 250000, due: "2026-10-14", doc: "11222333000181", name: "Cliente Um", description: "x", idem: "m1" });
+    const r1 = await processIssuance(db, gerA, A, PN(), undefined, { confirmLive: true });
+    const chargeIds: Record<string, string> = {}; for (const c of [cli1, cli2, c3, c4]) chargeIds[c] = (await chargeOf(c)).id;
+    // canário: só 3 reservados no dia (a ordem entre os 4 não importa); o resto espera o dia seguinte
+    expect(r1.claimed).toBe(3);
+    expect(r1.waiting).toMatch(/canário/);
+    expect((await reqs()).filter((r) => r.status === "pendente")).toHaveLength(1);
+    expect(cora.calls.filter((c) => c.path !== "/token").every((c) => c.host === CORA_HOSTS.producao)).toBe(true); // só o host de PRODUÇÃO
+    expect(cora.posts().every((c) => c.headers["Idempotency-Key"]?.length === 36 && !/payment|pay|transfer/i.test(c.path))).toBe(true);
+    // dia seguinte: o canário libera mais 3 (resta 1)
+    clock("2026-10-06T12:00:00-04:00");
+    const r2 = await processIssuance(db, gerA, A, PN(26), undefined, { confirmLive: true });
+    expect(r2.claimed).toBe(1);
+    expect((await reqs()).filter((r) => r.status === "pendente")).toHaveLength(0);
+    // no fim: o cliente 1 (já tinha boleto igual na Cora, emitido à mão) NÃO foi emitido; os outros 3 sim, todos reais
+    const all = await reqs();
+    expect(all.find((r) => r.chargeId === chargeIds[cli1])).toMatchObject({ status: "falhou", lastError: "boleto_ja_existe_na_cora", mode: "cora_producao" });
+    const emitted = all.filter((r) => r.status === "emitido");
+    expect(emitted).toHaveLength(3);
+    expect(emitted.every((r) => r.mode === "cora_producao" && /^inv_/.test(r.externalRef ?? ""))).toBe(true);
+    expect(cora.posts()).toHaveLength(3); // nenhum POST para o cliente com boleto igual
+    expect(cora.posts().every((c) => c.body.customer.document.identity !== "11222333000181")).toBe(true);
+  });
+
+  it("PRODUÇÃO — boleto NOSSO já existente na Cora (resposta perdida) é devolvido sem criar outro; vencimento passado e valor acima do teto não emitem", async () => {
+    await credsProd(); clock("2026-10-05T12:00:00-04:00");
+    const batchId = await approvedBatch();
+    prodOn(); await arm({ dailyLimit: 20 });
+    await saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, liveCanary: false, liveConfirm: PHRASE });
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    const c1 = await chargeOf(cli1);
+    // a Cora já tem o boleto com o NOSSO code (emissão anterior cuja resposta se perdeu)
+    cora.inv.set("inv_nosso0000001", { id: "inv_nosso0000001", status: "OPEN", code: `k3g:boleto:${c1.id}`, amount: 250000, due: "2026-10-14", doc: "11222333000181", name: "Cliente Um", description: "x", idem: "n1" });
+    const out = await processIssuance(db, gerA, A, PN(), undefined, { confirmLive: true });
+    expect(out.issued).toBe(2);
+    const mine = (await reqs()).find((r) => r.chargeId === c1.id)!;
+    expect(mine).toMatchObject({ status: "emitido", externalRef: "inv_nosso0000001" });
+    expect(cora.posts()).toHaveLength(1); // só o cliente 2 foi criado
+    // vencimento no passado (relógio avança além de 14/10): recusado localmente, nenhuma chamada de criação
+    await db.execute(sql`update issuance_requests set status = 'cancelado', external_ref = external_ref`);
+    clock("2026-10-20T12:00:00-04:00");
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    const before = cora.posts().length;
+    const o2 = await processIssuance(db, gerA, A, PN(), undefined, { confirmLive: true });
+    expect(o2.failed).toBe(2);
+    expect((await reqs()).filter((r) => r.status === "falhou").every((r) => r.lastError === "vencimento_no_passado")).toBe(true);
+    expect(cora.posts().length).toBe(before);
+  });
+
+  it("PRODUÇÃO — valor acima do teto não emite; cancelar boleto real só com a trava do servidor ligada; webhook de produção só com a trava", async () => {
+    await credsProd(); clock("2026-10-05T12:00:00-04:00");
+    const batchId = await approvedBatch();
+    prodOn(); await arm();
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, PN(), undefined, { confirmLive: true });
+    const c1 = await chargeOf(cli1);
+    const r1 = (await reqs()).find((x) => x.chargeId === c1.id)!;
+    expect(r1.status).toBe("emitido");
+    // cancelar (diretoria): DELETE no host de produção, com a trava ligada
+    await expect(cancelBoleto(db, dirA, A, { chargeId: c1.id, reason: "teste de cancelamento", confirm: true })).rejects.toThrow(/boleto REAL/); // falta a confirmação específica de boleto real
+    expect(cora.calls.filter((c) => c.method === "DELETE")).toHaveLength(0);
+    expect(await cancelBoleto(db, dirA, A, { chargeId: c1.id, reason: "teste de cancelamento", confirm: true, confirmLive: true })).toMatchObject({ status: "cancelado" });
+    expect(cora.calls.filter((c) => c.method === "DELETE").every((c) => c.host === CORA_HOSTS.producao)).toBe(true);
+    // trava do servidor desligada: o outro boleto real NÃO pode ser cancelado (falha fechada, nada enviado)
+    delete process.env.CORA_PROD_EMISSION_ENABLED;
+    const c2 = await chargeOf(cli2);
+    const nCalls = cora.calls.length;
+    await expect(cancelBoleto(db, dirA, A, { chargeId: c2.id, reason: "sem a chave", confirm: true, confirmLive: true })).rejects.toThrow(LiveNotAvailable);
+    expect(cora.calls.length).toBe(nCalls);
+    await expect(enableCoraWebhook(db, dirA, A, "producao", "https://app.exemplo.com.br", cora.transport)).rejects.toThrow(Invalid);
+    prodOn();
+    // empresa NÃO armada para produção: o aviso de produção também não é cadastrado
+    await db.execute(sql`update issuance_settings set boleto_provider = 'simulado', live_authorized_by = null, live_authorized_at = null`);
+    await expect(enableCoraWebhook(db, dirA, A, "producao", "https://app.exemplo.com.br", cora.transport)).rejects.toThrow(/Ligue antes a emissão em produção/);
+    expect(cora.calls.filter((c) => c.path === "/endpoints")).toHaveLength(0);
+    await db.execute(sql`update issuance_settings set boleto_provider = 'cora_producao', live_authorized_by = ${dirA}, live_authorized_at = now()`);
+    await expect(enableCoraWebhook(db, dirA, A, "producao", "https://app.exemplo.com.br", cora.transport)).resolves.toEqual({ triggers: 2 });
+    expect([...cora.calls].filter((c) => c.path === "/endpoints").every((c) => c.host === CORA_HOSTS.producao)).toBe(true);
+  });
+
+  it("PRODUÇÃO — baixa automática e atualização de situação funcionam no modo de produção (só consulta + lançamento)", async () => {
+    await credsProd(); clock("2026-10-05T12:00:00-04:00");
+    const batchId = await approvedBatch();
+    prodOn(); await arm();
+    await saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, autoSettle: true });
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    await processIssuance(db, gerA, A, PN(), undefined, { confirmLive: true });
+    const c1 = await chargeOf(cli1); const r1 = (await reqs()).find((x) => x.chargeId === c1.id)!;
+    cora.inv.get(r1.externalRef!)!.status = "PAID"; cora.hooks.paidOn = "2026-10-05";
+    const before = cora.calls.length;
+    const o = await syncBoletoStatus(db, gerA, A, PN());
+    expect(o).toMatchObject({ paid: 1, settled: 1 });
+    expect(cora.calls.slice(before).every((c) => c.method === "GET" || c.path === "/token")).toBe(true);
+    expect((await db.select().from(schema.payments).where(eq(schema.payments.chargeId, c1.id)))[0]).toMatchObject({ amount: "2500.00", method: "boleto" });
+  });
+
   it("ATUALIZAR SITUAÇÃO com a chave do servidor desligada: não consulta nem altera nada (falha fechada, com aviso)", async () => {
     const batchId = await approvedBatch(); await useCora();
     await requestBatchIssuance(db, gerA, A, batchId, "boleto");
@@ -555,7 +713,7 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     expect((await db.select().from(schema.boletoCancellations))[0].mode).toBe("simulado");
   });
 
-  it("banco protege o boleto real: solicitação da Cora não é apagada (nem em cascata), não troca de modo, e o modo 'cora_producao' não existe", async () => {
+  it("banco protege o boleto real: solicitação da Cora não é apagada (nem em cascata), não troca de modo, e produção não existe sem autorização registrada", async () => {
     const batchId = await approvedBatch(); await useCora();
     await requestBatchIssuance(db, gerA, A, batchId, "boleto");
     await processIssuance(db, gerA, A, NOW);
@@ -563,8 +721,9 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     await refused(db.execute(sql`delete from issuance_requests where charge_id = ${c1.id}`), /issuance_live_protected/);
     await refused(db.execute(sql`delete from charges where id = ${c1.id}`), /issuance_live_protected/); // cascata também recusa
     await refused(db.execute(sql`update issuance_requests set mode = 'simulado' where charge_id = ${c1.id}`), /issuance_live_protected/);
-    await refused(db.execute(sql`update issuance_requests set mode = 'cora_producao' where charge_id = ${c1.id}`), /issuance_requests_mode_chk|issuance_live_protected/);
-    await refused(db.execute(sql`update issuance_settings set boleto_provider = 'cora_producao'`), /issuance_settings_provider_chk/);
+    await refused(db.execute(sql`update issuance_requests set mode = 'cora_producao' where charge_id = ${c1.id}`), /issuance_live_protected/); // o modo não muda depois de definido
+    await refused(db.execute(sql`update issuance_requests set mode = 'cora_inexistente' where charge_id = ${c1.id}`), /issuance_requests_mode_chk|issuance_live_protected/);
+    await refused(db.execute(sql`update issuance_settings set boleto_provider = 'cora_producao'`), /issuance_settings_live_auth_chk/); // o banco recusa produção sem autorização registrada
     expect(await n("issuance_requests where mode = 'cora_homologacao'")).toBe(2);
   });
 });

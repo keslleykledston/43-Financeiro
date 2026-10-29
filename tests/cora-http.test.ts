@@ -34,6 +34,26 @@ describe("Cora — escopo estrutural (só boletos; produção só leitura)", () 
     await expect(c.cancelInvoice("inv_abc1234")).rejects.toThrow(/bloqueados em produção/);
     expect(calls.every((x) => x.host === "matls-clients.api.cora.com.br" && (x.method === "GET" || x.path === "/token"))).toBe(true);
   });
+  it("produção: escrever exige DUAS chaves (cliente com liveWrites + CORA_PROD_EMISSION_ENABLED); uma sozinha não basta", async () => {
+    const input = { idempotencyKey: UUID, code: "x", amountCents: 500, dueDate: "2026-12-01", customerName: "T", customerDocument: "52998224725", description: "d" };
+    const okInv = (c: { path: string }) => c.path === "/token" ? ok(c as never) : { status: 200, body: { id: "inv_prod9999", status: "OPEN", total_amount: 500, payment_terms: { due_date: "2026-12-01" } } };
+    try {
+      delete process.env.CORA_PROD_EMISSION_ENABLED;
+      let f = fake(okInv); // cliente liberado, chave do servidor desligada
+      await expect(new CoraClient(creds, "producao", f.t, Date.now, true).createInvoice(input)).rejects.toThrow(/bloqueados em produção/);
+      expect(f.calls.filter((x) => x.method !== "GET" && x.path !== "/token")).toHaveLength(0);
+      process.env.CORA_PROD_EMISSION_ENABLED = "true";
+      f = fake(okInv); // chave ligada, cliente comum (sem liveWrites)
+      await expect(new CoraClient(creds, "producao", f.t).createInvoice(input)).rejects.toThrow(/bloqueados em produção/);
+      await expect(new CoraClient(creds, "producao", f.t).cancelInvoice("inv_abc1234")).rejects.toThrow(/bloqueados em produção/);
+      expect(f.calls.filter((x) => x.method !== "GET" && x.path !== "/token")).toHaveLength(0);
+      f = fake(okInv); // as duas: passa, no host de produção, e só nas rotas do escopo
+      const inv = await new CoraClient(creds, "producao", f.t, Date.now, true).createInvoice(input);
+      expect(inv.id).toBe("inv_prod9999");
+      expect(f.calls.find((x) => x.path === "/v2/invoices")!.host).toBe("matls-clients.api.cora.com.br");
+      for (const bad of [["POST", "/v2/invoices/pay"], ["POST", "/payments"], ["POST", "/transfers"], ["GET", "/accounts/balance"], ["GET", "/bank-statement"]] as const) expect(routeAllowed(bad[0], bad[1])).toBe(false); // pagar/transferir/saldo/extrato nunca
+    } finally { delete process.env.CORA_PROD_EMISSION_ENABLED; }
+  });
   it("homologação: emite com Idempotency-Key, JSON e Bearer; valida entrada", async () => {
     const { t, calls } = fake((c) => c.path === "/token" ? ok(c) : { status: 200, body: { id: "inv_zzz9999", status: "OPEN", total_amount: 500, payment_terms: { due_date: "2026-12-01" }, payment_options: { bank_slip: { digitable: "123", barcode: "456", url: "https://x/y.pdf" } } } });
     const c = new CoraClient(creds, "homologacao", t);

@@ -60,7 +60,7 @@ export async function withdrawCancelRequest(db: DB, actorId: string, companyId: 
 
 /** Diretoria decide. Aprovar executa o cancelamento (pode terminar "sem resposta conclusiva" — ver a cobrança). */
 export const STUCK_MS = 10 * 60_000; // aprovado sem cancelamento há mais que isso = o processo caiu no meio: a diretoria pode concluir
-export async function decideCancelRequest(db: DB, actorId: string, companyId: string, requestId: string, decision: "aprovar" | "recusar", note = "", providers?: Providers, now = new Date()) {
+export async function decideCancelRequest(db: DB, actorId: string, companyId: string, requestId: string, decision: "aprovar" | "recusar", note = "", providers?: Providers, now = new Date(), opts: { confirmLive?: boolean } = {}) {
   await requirePerm(db, actorId, companyId, "boletos.cancel");
   if (!uuidOk(requestId)) throw new Invalid("Pedido não encontrado");
   const why = String(note ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
@@ -80,7 +80,7 @@ export async function decideCancelRequest(db: DB, actorId: string, companyId: st
   // 2) cancelar de verdade (fora de transação, como o motor de cancelamento exige)
   const revert = () => db.update(boletoCancelRequests).set({ status: "pendente", decidedBy: null, decidedAt: null, decisionNote: null, updatedAt: new Date() }).where(and(eq(boletoCancelRequests.id, r.id), eq(boletoCancelRequests.companyId, companyId), eq(boletoCancelRequests.status, "aprovado"), sql`${boletoCancelRequests.cancellationId} is null`));
   try {
-    const out = await cancelBoleto(db, actorId, companyId, { chargeId: r.chargeId, reason: `Pedido aprovado: ${r.reason}`.slice(0, 200), confirm: true }, providers);
+    const out = await cancelBoleto(db, actorId, companyId, { chargeId: r.chargeId, reason: `Pedido aprovado: ${r.reason}`.slice(0, 200), confirm: true, confirmLive: opts.confirmLive === true }, providers);
     await db.update(boletoCancelRequests).set({ cancellationId: out.cancellationId, updatedAt: new Date() }).where(eq(boletoCancelRequests.id, r.id));
     await audit(db, companyId, actorId, "boleto.cancel_request_approved", { requestId: r.id, chargeId: r.chargeId, cancellationId: out.cancellationId, result: out.status });
     return { status: "aprovado" as const, result: out.status, cancellationId: out.cancellationId };

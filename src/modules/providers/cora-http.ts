@@ -1,5 +1,5 @@
 import { request as httpsRequest } from "node:https";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { DB } from "@/lib/db";
 import { readCoraCredentials } from "./cora-secrets";
 import type { CoraEnvironment } from "./cora";
@@ -7,15 +7,19 @@ import type { CoraEnvironment } from "./cora";
 /**
  * E10b — cliente HTTP da Cora (mTLS, "integração direta"). ÚNICO arquivo autorizado a ler os segredos em claro (cora-secrets).
  * Travas estruturais (valem mesmo que alguém chame errado; a regra do dono é: NENHUMA transação financeira):
- *  - Produção é SOMENTE LEITURA: só autenticar (POST /token) e consultar (GET). Emitir boleto (POST /v2/invoices) só existe em homologação (stage); em produção é recusado AQUI,
- *    e liberar exige mudar este arquivo, com revisão e autorização escrita do dono.
- *  - SÓ estas rotas: POST /token, GET /v2/invoices, GET /v2/invoices/{id}, POST /v2/invoices (emitir, só stage). Qualquer outra (pagar, transferir, extrato, saldo, cancelar…) é recusada AQUI.
+ *  - Produção é SOMENTE LEITURA por padrão: só autenticar (POST /token) e consultar (GET). Escrever em produção (emitir/cancelar boleto, cadastrar aviso) exige DUAS coisas ao mesmo tempo:
+ *    o cliente criado com `liveWrites` (só o registro de provedores faz isso, para o modo "cora_producao") E a chave do servidor `CORA_PROD_EMISSION_ENABLED="true"` (E10b-6, autorizada
+ *    por escrito pelo dono em 2026-10-28). Sem as duas, a escrita em produção é recusada AQUI, antes de qualquer rede.
+ *  - SÓ estas rotas: POST /token, GET /v2/invoices[/id], POST /v2/invoices (emitir), DELETE /v2/invoices/{id} (cancelar) e /endpoints (avisos). Qualquer outra (pagar, transferir, extrato, saldo…) é recusada AQUI.
  *  - Timeout de 30 s (menor que o `STUCK_MS` do motor de emissão), resposta limitada a 2 MB, nada de segredo/token em mensagens de erro ou log.
  */
 // Object.freeze: a trava vale em tempo de execução, não só no TypeScript (nenhum outro módulo consegue esvaziar a lista nem trocar o host).
 export const CORA_HOSTS: Readonly<Record<CoraEnvironment, string>> = Object.freeze({ homologacao: "matls-clients.api.stage.cora.com.br", producao: "matls-clients.api.cora.com.br" });
 /** Ambientes em que o cliente NÃO pode escrever (emitir). Hoje: produção. */
 export const READ_ONLY_ENVS: readonly CoraEnvironment[] = Object.freeze(["producao"] as CoraEnvironment[]);
+/** Chave do servidor que habilita escrita em PRODUÇÃO (compose; vem "false"). Lida a cada chamada, nunca guardada. */
+export const PROD_EMISSION_FLAG = "CORA_PROD_EMISSION_ENABLED";
+export const prodEmissionOn = (env: Record<string, string | undefined> = process.env) => env[PROD_EMISSION_FLAG] === "true";
 export const CORA_TIMEOUT_MS = 30_000;
 const MAX_BODY = 2_000_000;
 
@@ -108,20 +112,26 @@ export function normalizeInvoice(raw: unknown): Invoice {
   };
 }
 
+/** Token reaproveitado entre clientes do MESMO processo (a Cora limita pedidos de token e ele vale 1 h). Só com o transporte real (os testes usam o seu); a chave é um hash, nunca o segredo. */
+const TOKEN_CACHE = new Map<string, { value: string; exp: number }>();
+
 export class CoraClient {
   private token: { value: string; exp: number } | null = null;
-  constructor(private creds: Creds, private env: CoraEnvironment, private transport: Transport = httpsTransport, private now: () => number = Date.now) {
+  private cacheKey(): string | null { return this.transport === httpsTransport ? createHash("sha256").update(`${this.env}|${this.creds.clientId}|${this.creds.certificate}`).digest("hex") : null; }
+  constructor(private creds: Creds, private env: CoraEnvironment, private transport: Transport = httpsTransport, private now: () => number = Date.now, private liveWrites = false) {
   }
 
   private async send(method: Method, path: string, o: { headers?: Record<string, string>; body?: string } = {}): Promise<Raw> {
     const bare = path.split("?")[0];
     if (!routeAllowed(method, bare)) throw new CoraHttpError(0, "Rota da Cora não permitida pelo escopo (somente boletos)");
-    if (method !== "GET" && bare !== "/token" && READ_ONLY_ENVS.includes(this.env)) throw new CoraHttpError(0, "Emissão/cancelamento de boleto bloqueados em produção (somente leitura)");
+    if (method !== "GET" && bare !== "/token" && READ_ONLY_ENVS.includes(this.env) && !(this.liveWrites && prodEmissionOn())) throw new CoraHttpError(0, "Emissão/cancelamento de boleto bloqueados em produção (somente leitura)");
     return this.transport({ host: CORA_HOSTS[this.env], method, path, headers: { accept: "application/json", ...o.headers }, body: o.body, creds: this.creds });
   }
 
   /** Token de 24 h (sem refresh): reaproveitado até 5 min antes de vencer. */
   async accessToken(): Promise<{ expiresInSec: number }> {
+    const ck = this.cacheKey();
+    if (!this.token && ck) { const c = TOKEN_CACHE.get(ck); if (c && c.exp - this.now() > 300_000) this.token = c; }
     if (this.token && this.token.exp - this.now() > 300_000) return { expiresInSec: Math.floor((this.token.exp - this.now()) / 1000) };
     const body = new URLSearchParams({ grant_type: "client_credentials", client_id: this.creds.clientId }).toString();
     const raw = await this.send("POST", "/token", { headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(Buffer.byteLength(body)) }, body });
@@ -130,6 +140,7 @@ export class CoraClient {
     const t = str(j.access_token), exp = typeof j.expires_in === "number" ? j.expires_in : 0;
     if (!t || exp <= 0) throw new CoraHttpError(raw.status, "Cora não devolveu token válido");
     this.token = { value: t, exp: this.now() + exp * 1000 };
+    if (ck) TOKEN_CACHE.set(ck, this.token);
     return { expiresInSec: exp };
   }
 
@@ -139,7 +150,7 @@ export class CoraClient {
     const headers: Record<string, string> = { authorization: `Bearer ${this.token!.value}`, ...o.headers };
     if (body !== undefined) { headers["content-type"] = "application/json"; headers["content-length"] = String(Buffer.byteLength(body)); }
     const raw = await this.send(method, path, { headers, body });
-    if (raw.status === 401) this.token = null; // token recusado: a próxima chamada pede outro
+    if (raw.status === 401) { this.token = null; const ck = this.cacheKey(); if (ck) TOKEN_CACHE.delete(ck); } // token recusado: a próxima chamada pede outro
     if (raw.status < 200 || raw.status >= 300) fail(raw);
     return parseJson(raw);
   }
@@ -200,10 +211,10 @@ export class CoraClient {
 }
 
 /** Cria o cliente a partir das credenciais cifradas da empresa. Lança se não houver credencial cadastrada para o ambiente. */
-export async function coraClientFor(db: DB, companyId: string, env: CoraEnvironment, transport?: Transport): Promise<CoraClient> {
+export async function coraClientFor(db: DB, companyId: string, env: CoraEnvironment, transport?: Transport, opts: { liveWrites?: boolean } = {}): Promise<CoraClient> {
   const creds = await readCoraCredentials(db, companyId, env);
   if (!creds) throw new CoraHttpError(0, "Credenciais da Cora não cadastradas para este ambiente");
-  return new CoraClient(creds, env, transport);
+  return new CoraClient(creds, env, transport, Date.now, opts.liveWrites === true);
 }
 
 export const newIdempotencyKey = () => randomUUID();

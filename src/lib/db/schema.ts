@@ -616,12 +616,16 @@ export const issuanceSettings = pgTable("issuance_settings", {
   companyId: uuid("company_id").notNull().references(() => companies.id),
   paused: boolean("paused").notNull().default(true), // nasce PAUSADO (kill switch)
   dailyLimit: integer("daily_limit").notNull().default(20),
-  boletoProvider: text("boleto_provider").notNull().default("simulado"), // E10b-1: simulado | cora_homologacao (stage). NÃO há modo de produção
+  boletoProvider: text("boleto_provider").notNull().default("simulado"), // simulado | cora_homologacao (stage) | cora_producao (E10b-6: boletos REAIS; exige autorização registrada abaixo)
+  liveAuthorizedBy: uuid("live_authorized_by").references(() => users.id), // E10b-6: quem armou a emissão REAL (diretoria) e quando; exigido pelo banco para cora_producao
+  liveAuthorizedAt: timestamp("live_authorized_at", { withTimezone: true }),
+  liveCanary: boolean("live_canary").notNull().default(true), // E10b-6: modo CANÁRIO (padrão): no máximo 3 boletos reais por dia, qualquer que seja o limite diário
   autoSettle: boolean("auto_settle").notNull().default(false), // E10b-4: baixa automática (cria o pagamento quando a Cora informa boleto pago); desligada por padrão
   updatedBy: uuid("updated_by").references(() => users.id),
 }, (t) => [
   unique("issuance_settings_company_uq").on(t.companyId),
-  check("issuance_settings_provider_chk", sql`${t.boletoProvider} in ('simulado', 'cora_homologacao')`),
+  check("issuance_settings_provider_chk", sql`${t.boletoProvider} in ('simulado', 'cora_homologacao', 'cora_producao')`),
+  check("issuance_settings_live_auth_chk", sql`${t.boletoProvider} <> 'cora_producao' or (${t.liveAuthorizedBy} is not null and ${t.liveAuthorizedAt} is not null)`), // o banco recusa produção sem autorização registrada
   check("issuance_settings_limit_chk", sql`${t.dailyLimit} between 1 and 500`),
 ]);
 
@@ -647,7 +651,7 @@ export const issuanceRequests = pgTable("issuance_requests", {
   uniqueIndex("issuance_requests_one_uq").on(t.companyId, t.chargeId, t.kind).where(sql`${t.status} <> 'cancelado'`),
   uniqueIndex("issuance_requests_idem_uq").on(t.companyId, t.idempotencyKey).where(sql`${t.status} <> 'cancelado'`),
   index("issuance_requests_due_idx").on(t.companyId, t.status, t.nextAttemptAt),
-  check("issuance_requests_mode_chk", sql`${t.mode} in ('simulado', 'cora_homologacao')`),
+  check("issuance_requests_mode_chk", sql`${t.mode} in ('simulado', 'cora_homologacao', 'cora_producao')`),
   check("issuance_requests_kind_chk", sql`${t.kind} in ('boleto', 'nfse')`),
   check("issuance_requests_status_chk", sql`${t.status} in ('pendente', 'enviando', 'processando', 'emitido', 'desconhecido', 'falhou', 'cancelado')`),
   check("issuance_requests_attempts_chk", sql`${t.attempts} between 0 and 20`),
@@ -1001,7 +1005,7 @@ export const boletoCancellations = pgTable("boleto_cancellations", {
   unique("boleto_cancellations_company_id_uq").on(t.companyId, t.id),
   uniqueIndex("boleto_cancellations_one_active_uq").on(t.companyId, t.requestId).where(sql`${t.status} in ('enviando', 'cancelado', 'desconhecido')`),
   index("boleto_cancellations_charge_idx").on(t.companyId, t.chargeId),
-  check("boleto_cancellations_mode_chk", sql`${t.mode} in ('simulado', 'cora_homologacao')`),
+  check("boleto_cancellations_mode_chk", sql`${t.mode} in ('simulado', 'cora_homologacao', 'cora_producao')`),
   check("boleto_cancellations_status_chk", sql`${t.status} in ('enviando', 'cancelado', 'desconhecido', 'falhou')`),
   check("boleto_cancellations_reason_chk", sql`char_length(${t.reason}) between 3 and 200`),
   check("boleto_cancellations_attempts_chk", sql`${t.attempts} between 1 and 20`),

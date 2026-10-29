@@ -1,7 +1,7 @@
 import type { DB } from "@/lib/db";
 import { createMockProviders } from "./mock";
 import { createCoraBoletoProvider } from "./cora-boleto";
-import { coraClientFor, type Transport } from "./cora-http";
+import { coraClientFor, prodEmissionOn, PROD_EMISSION_FLAG, type Transport } from "./cora-http";
 import type { Providers } from "./types";
 
 /** Chaves de emissão/envio reais. TODAS desligadas; ligar uma sem adaptador real implementado (E10) é recusado. */
@@ -50,14 +50,18 @@ export const PROVIDER_CATALOG = [
 
 
 /**
- * E10b-1 — modos do provedor de BOLETO por empresa. "simulado" (padrão) ou "cora_homologacao" (stage da Cora: nenhum boleto real nasce).
- * NÃO existe modo de produção: emitir em produção exige novo modo, nova migração, mudança do cliente HTTP e autorização escrita do dono.
- * O modo da Cora de testes só funciona com TRÊS travas: a chave CORA_STAGE_ENABLED="true" (compose, commit), a empresa configurada nesse modo (diretoria,
- * auditado) e credenciais de homologação cadastradas. Qualquer outra chave real ligada (CORA_LIVE_ENABLED etc.) continua recusando tudo.
+ * Modos do provedor de BOLETO por empresa. "simulado" (padrão), "cora_homologacao" (E10b-1, stage: nenhum boleto real nasce) e "cora_producao" (E10b-6: boletos REAIS).
+ * O modo de TESTES exige: chave CORA_STAGE_ENABLED="true", empresa nesse modo (diretoria, auditado) e credenciais de homologação.
+ * O modo de PRODUÇÃO exige, além de credenciais de produção: a chave CORA_PROD_EMISSION_ENABLED="true" (compose; vem "false"), a empresa configurada nesse modo com AUTORIZAÇÃO REGISTRADA
+ * (diretoria digita a confirmação; quem e quando ficam no banco, e o banco recusa o modo sem isso), modo canário (3 por dia) até a diretoria liberar, e cada rodada confirmada na tela.
+ * A chave legada CORA_LIVE_ENABLED continua sendo a CHAVE DE EMERGÊNCIA GERAL: ligada, tudo é recusado (inclusive os modos da Cora). Qualquer outra chave real ligada idem.
  */
-export const BOLETO_PROVIDER_MODES = ["simulado", "cora_homologacao"] as const;
+export const BOLETO_PROVIDER_MODES = ["simulado", "cora_homologacao", "cora_producao"] as const;
 export type BoletoProviderMode = (typeof BOLETO_PROVIDER_MODES)[number];
-export const MODE_LABEL: Record<string, string> = { simulado: "Simulado", cora_homologacao: "Cora — testes (homologação)" };
+export const MODE_LABEL: Record<string, string> = { simulado: "Simulado", cora_homologacao: "Cora — testes (homologação)", cora_producao: "Cora — PRODUÇÃO (boletos reais)" };
+export const LIVE_CONFIRM_PHRASE = "EMITIR BOLETOS REAIS";
+export const LIVE_CANARY_DAILY_MAX = 3;
+export { prodEmissionOn, PROD_EMISSION_FLAG };
 export const CORA_STAGE_FLAG = "CORA_STAGE_ENABLED";
 export const coraStageOn = (env: Record<string, string | undefined> = process.env) => env[CORA_STAGE_FLAG] === "true";
 export const isBoletoMode = (m: string): m is BoletoProviderMode => (BOLETO_PROVIDER_MODES as readonly string[]).includes(m);
@@ -72,13 +76,15 @@ export function __setCoraTransportForTests(t: Transport | undefined) {
 /** Provedores para um modo de boleto. NFS-e, e-mail e WhatsApp seguem SEMPRE simulados. Falha FECHADA (LiveNotAvailable) se faltar qualquer trava. */
 export async function resolveProvidersForMode(db: DB, companyId: string, mode: string, injected?: Providers, env: Record<string, string | undefined> = process.env): Promise<Providers> {
   if (mode === "simulado") return resolveProviders(injected, env);
-  if (mode !== "cora_homologacao") throw new LiveNotAvailable([mode], "Modo de provedor desconhecido: nada será emitido.");
+  if (mode !== "cora_homologacao" && mode !== "cora_producao") throw new LiveNotAvailable([mode], "Modo de provedor desconhecido: nada será emitido.");
   if (injected && env.VITEST !== "true") throw new Error("Injeção de provedor é proibida fora dos testes");
   const on = unsupportedFlagsOn(env);
   if (on.length > 0) throw new LiveNotAvailable([...on]);
-  if (!coraStageOn(env)) throw new LiveNotAvailable([CORA_STAGE_FLAG], "A Cora de testes está desligada neste servidor (CORA_STAGE_ENABLED). Nada será emitido.");
+  const prod = mode === "cora_producao";
+  if (!prod && !coraStageOn(env)) throw new LiveNotAvailable([CORA_STAGE_FLAG], "A Cora de testes está desligada neste servidor (CORA_STAGE_ENABLED). Nada será emitido.");
+  if (prod && !prodEmissionOn(env)) throw new LiveNotAvailable([PROD_EMISSION_FLAG], "A emissão em produção está desligada neste servidor (CORA_PROD_EMISSION_ENABLED). Nada será emitido.");
   let client;
-  try { client = await coraClientFor(db, companyId, "homologacao", env.VITEST === "true" ? testTransport : undefined); }
-  catch { throw new LiveNotAvailable(["credenciais"], "Credenciais da Cora de testes não cadastradas (Integrações → Cora, aba Homologação). Nada será emitido."); }
-  return { ...createMockProviders(), boleto: createCoraBoletoProvider(client) };
+  try { client = await coraClientFor(db, companyId, prod ? "producao" : "homologacao", env.VITEST === "true" ? testTransport : undefined, { liveWrites: prod }); }
+  catch { throw new LiveNotAvailable(["credenciais"], `Credenciais da Cora ${prod ? "de produção" : "de testes"} não cadastradas (Integrações → Cora, aba ${prod ? "Produção" : "Homologação"}). Nada será emitido.`); }
+  return { ...createMockProviders(), boleto: createCoraBoletoProvider(client, { live: prod }) };
 }

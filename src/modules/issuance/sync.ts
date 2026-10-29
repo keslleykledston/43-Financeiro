@@ -22,7 +22,7 @@ import { recordPaymentTx } from "@/modules/receivables/service";
 export const SYNC_BATCH = 50;
 export const CORA_SYSTEM_EMAIL = "sistema-cora@k3g.invalid";
 export type SyncOutcome = { checked: number; paid: number; settled: number; needsReview: number; cancelled: number; failed: number; skipped: string | null };
-const CORA_MODES = ["cora_homologacao"] as const;
+const CORA_MODES = ["cora_homologacao", "cora_producao"] as const;
 type CoraMode = (typeof CORA_MODES)[number];
 
 /** Usuário de sistema (sem senha utilizável, desativado: não entra no site) que consta como autor das baixas automáticas. */

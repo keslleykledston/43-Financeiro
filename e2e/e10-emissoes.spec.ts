@@ -66,6 +66,10 @@ test("E10 — motor de emissão SIMULADO: nasce pausado, solicita, processa uma 
     const cora = sel.locator("option", { hasText: "Cora — testes (homologação)" });
     await expect(cora).toHaveText(/desligado no servidor/);
     await expect(cora).toBeDisabled();
+    const prod = sel.locator("option", { hasText: "Cora — PRODUÇÃO (boletos reais)" });
+    await expect(prod).toHaveText(/desligado no servidor/); // chave CORA_PROD_EMISSION_ENABLED desligada
+    await expect(prod).toBeDisabled();
+    await expect(page.getByLabel(/digite: EMITIR BOLETOS REAIS/)).toHaveCount(0); // a confirmação só aparece com a chave do servidor ligada
     await expect(page.getByText(/Simulação: este motor ensaia o fluxo/)).toBeVisible();
     await expect(page.getByLabel(/Baixa automática pela Cora/)).toBeDisabled(); // só vale com provedor da Cora
     await expect(page.getByRole("button", { name: "Atualizar situação na Cora" })).toHaveCount(0);

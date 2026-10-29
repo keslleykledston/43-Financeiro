@@ -5,7 +5,7 @@ import { centsFromNumeric } from "@/lib/money";
 import { Invalid, requirePerm } from "@/modules/identity/service";
 import { localParts } from "@/modules/messaging/window";
 import { issuanceTexts } from "./texts";
-import { LiveNotAvailable, isBoletoMode, resolveProviders, resolveProvidersForMode, type BoletoProviderMode } from "@/modules/providers/registry";
+import { LIVE_CANARY_DAILY_MAX, LIVE_CONFIRM_PHRASE, LiveNotAvailable, prodEmissionOn, isBoletoMode, resolveProviders, resolveProvidersForMode, type BoletoProviderMode } from "@/modules/providers/registry";
 import type { Providers } from "@/modules/providers/types";
 
 /**
@@ -31,38 +31,59 @@ const backoff = (attempts: number) => Math.min(60, 2 ** attempts) * 60_000; // 2
 
 export { IssuanceRetryable, IssuanceTimeout } from "@/modules/providers/errors";
 
-export type IssuanceSettings = { paused: boolean; dailyLimit: number; boletoProvider: BoletoProviderMode; autoSettle: boolean };
+export type IssuanceSettings = { paused: boolean; dailyLimit: number; boletoProvider: BoletoProviderMode; autoSettle: boolean; liveCanary: boolean; liveAuthorizedAt: Date | null; liveAuthorizedBy: string | null };
 export async function getIssuanceSettings(db: DB, actorId: string, companyId: string): Promise<IssuanceSettings> {
   await requirePerm(db, actorId, companyId, "issuance.read");
   return load(db, companyId);
 }
+/** A empresa está em modo de boletos REAIS (provedor de produção E chave do servidor ligada)? Alimenta a faixa de aviso do topo. */
+export async function liveBoletosActive(db: DB, companyId: string): Promise<boolean> {
+  if (!prodEmissionOn()) return false;
+  return (await load(db, companyId)).boletoProvider === "cora_producao";
+}
 async function load(x: DB, companyId: string): Promise<IssuanceSettings> {
   const [r] = await x.select().from(issuanceSettings).where(eq(issuanceSettings.companyId, companyId));
-  return r ? { paused: r.paused, dailyLimit: r.dailyLimit, boletoProvider: isBoletoMode(r.boletoProvider) ? r.boletoProvider : "simulado", autoSettle: r.autoSettle } : { paused: true, dailyLimit: 20, boletoProvider: "simulado", autoSettle: false };
+  return r ? { paused: r.paused, dailyLimit: r.dailyLimit, boletoProvider: isBoletoMode(r.boletoProvider) ? r.boletoProvider : "simulado", autoSettle: r.autoSettle, liveCanary: r.liveCanary, liveAuthorizedAt: r.liveAuthorizedAt, liveAuthorizedBy: r.liveAuthorizedBy } : { paused: true, dailyLimit: 20, boletoProvider: "simulado", autoSettle: false, liveCanary: true, liveAuthorizedAt: null, liveAuthorizedBy: null };
 }
 /** `boletoProvider` ausente = mantém o atual (formulários antigos e chamadas existentes não mudam o provedor sem querer). */
-export async function saveIssuanceSettings(db: DB, actorId: string, companyId: string, i: { paused: boolean; dailyLimit: unknown; boletoProvider?: unknown; autoSettle?: boolean }) {
+export async function saveIssuanceSettings(db: DB, actorId: string, companyId: string, i: { paused: boolean; dailyLimit: unknown; boletoProvider?: unknown; autoSettle?: boolean; liveConfirm?: string; liveCanary?: boolean }) {
   await requirePerm(db, actorId, companyId, "issuance.manage"); // `autoSettle` ausente = mantém o atual (formulários antigos não ligam nem desligam a baixa sem querer)
   const n = Number(i.dailyLimit);
   if (!Number.isInteger(n) || n < 1 || n > 500) throw new Invalid("Limite diário: valor entre 1 e 500");
   if (i.boletoProvider !== undefined && !(typeof i.boletoProvider === "string" && isBoletoMode(i.boletoProvider))) throw new Invalid("Provedor de boleto inválido");
+  // Verificações que falam com a Cora ficam FORA da transação (rede). Dentro, só conferimos que a configuração não mudou nesse intervalo.
+  const peek = await load(db, companyId);
+  const target = (i.boletoProvider as BoletoProviderMode | undefined) ?? peek.boletoProvider;
+  if (target !== peek.boletoProvider && target !== "simulado") { // TROCAR para o provedor real exige as travas ligadas AGORA (falha fechada)
+    const rp = await resolveProvidersForMode(db, companyId, target); // lança LiveNotAvailable se faltar chave ou credencial
+    if (target === "cora_producao") { // ARMAR a emissão REAL: confirmação digitada + prova de que a credencial de produção autentica (só consulta, nada é criado)
+      if ((i.liveConfirm ?? "").trim() !== LIVE_CONFIRM_PHRASE) throw new Invalid(`Para ligar a emissão REAL, digite exatamente: ${LIVE_CONFIRM_PHRASE}`);
+      try { await rp.boleto.ping?.(); } catch { throw new Invalid("A Cora recusou o acesso de produção (certificado ou client-id). Nada foi ligado"); }
+    }
+  }
   await db.transaction(async (tx) => {
     const x = tx as unknown as DB;
     await lock(x, companyId);
     const prev = await load(x, companyId);
-    const provider = (i.boletoProvider as BoletoProviderMode | undefined) ?? prev.boletoProvider;
-    if (provider !== prev.boletoProvider && provider !== "simulado") { // TROCAR para o provedor real exige as travas ligadas AGORA (falha fechada)
-      await resolveProvidersForMode(x, companyId, provider); // lança LiveNotAvailable se faltar chave ou credencial
-    }
+    if (prev.boletoProvider !== peek.boletoProvider) throw new Invalid("A configuração mudou enquanto você salvava. Recarregue a página e tente de novo");
+    const provider = target;
+    const intoProd = provider === "cora_producao" && prev.boletoProvider !== "cora_producao";
+    const canary = intoProd ? true : i.liveCanary === undefined ? prev.liveCanary : i.liveCanary === true; // entra SEMPRE em canário; sair do canário exige confirmação digitada
+    if (provider === "cora_producao" && !canary && prev.liveCanary && (i.liveConfirm ?? "").trim() !== LIVE_CONFIRM_PHRASE) throw new Invalid(`Para sair do modo canário, digite exatamente: ${LIVE_CONFIRM_PHRASE}`);
     if (provider !== prev.boletoProvider) {
       const [{ open }] = (await x.execute(sql`select count(*)::int open from issuance_requests where company_id = ${companyId} and kind = 'boleto' and status in ('pendente', 'enviando', 'desconhecido')`)) as unknown as { open: number }[];
       if (open > 0) throw new Invalid("Há boletos em andamento (aguardando, enviando ou a reconsultar). Conclua ou cancele-os antes de trocar o provedor");
     }
     const auto = i.autoSettle === undefined ? prev.autoSettle : i.autoSettle === true;
     if (auto && provider === "simulado") throw new Invalid("A baixa automática só vale com um provedor da Cora (testes ou produção)");
-    await x.insert(issuanceSettings).values({ companyId, paused: i.paused === true, dailyLimit: n, boletoProvider: provider, autoSettle: auto, updatedBy: actorId })
-      .onConflictDoUpdate({ target: issuanceSettings.companyId, set: { paused: i.paused === true, dailyLimit: n, boletoProvider: provider, autoSettle: auto, updatedBy: actorId, updatedAt: new Date() } });
-    await audit(x, companyId, actorId, "issuance.settings.saved", { paused: i.paused === true, dailyLimit: n, boletoProvider: provider, autoSettle: auto, ...(provider !== prev.boletoProvider ? { providerChangedFrom: prev.boletoProvider } : {}) });
+    const now = new Date();
+    const authBy = provider !== "cora_producao" ? null : intoProd ? actorId : undefined; // undefined = mantém o que já está gravado
+    const authAt = provider !== "cora_producao" ? null : intoProd ? now : undefined;
+    const set: Record<string, unknown> = { paused: i.paused === true, dailyLimit: n, boletoProvider: provider, autoSettle: auto, liveCanary: canary, updatedBy: actorId, updatedAt: now };
+    if (authBy !== undefined) { set.liveAuthorizedBy = authBy; set.liveAuthorizedAt = authAt; }
+    await x.insert(issuanceSettings).values({ companyId, paused: i.paused === true, dailyLimit: n, boletoProvider: provider, autoSettle: auto, liveCanary: canary, liveAuthorizedBy: authBy === undefined ? prev.liveAuthorizedBy : authBy, liveAuthorizedAt: authAt === undefined ? prev.liveAuthorizedAt : authAt, updatedBy: actorId })
+      .onConflictDoUpdate({ target: issuanceSettings.companyId, set });
+    await audit(x, companyId, actorId, "issuance.settings.saved", { paused: i.paused === true, dailyLimit: n, boletoProvider: provider, autoSettle: auto, ...(provider === "cora_producao" ? { liveCanary: canary, ...(intoProd ? { liveArmed: true } : {}) } : {}), ...(provider !== prev.boletoProvider ? { providerChangedFrom: prev.boletoProvider } : {}) });
   });
 }
 
@@ -129,7 +150,7 @@ export type RunResult = { claimed: number; issued: number; processing: number; u
 /**
  * Uma rodada do motor. Manual (o agendador de emissão só será ligado no gate real). Respeita pausa e limite diário, e recusa com chave real ligada.
  */
-export async function processIssuance(db: DB, actorId: string, companyId: string, now = new Date(), providers?: Providers): Promise<RunResult> {
+export async function processIssuance(db: DB, actorId: string, companyId: string, now = new Date(), providers?: Providers, opts: { confirmLive?: boolean } = {}): Promise<RunResult> {
   await requirePerm(db, actorId, companyId, "issuance.run");
   const out: RunResult = { claimed: 0, issued: 0, processing: 0, unknown: 0, retry: 0, failed: 0, skipped: 0, recovered: 0 };
   const prov = resolveProviders(providers); // falha FECHADA antes de reservar qualquer coisa
@@ -137,6 +158,7 @@ export async function processIssuance(db: DB, actorId: string, companyId: string
   const byMode = new Map<string, Providers>([["simulado", prov]]);
   let liveError: unknown = null;
   const wanted = (await load(db, companyId)).boletoProvider;
+  if (wanted === "cora_producao" && opts.confirmLive !== true) throw new Invalid("Emissão REAL: a rodada exige a confirmação explícita de que são boletos reais"); // quem chama (tela) passa a confirmação marcada; nada chama isto sozinho
   const rowModes = (await db.execute(sql`select distinct mode from issuance_requests where company_id = ${companyId} and kind = 'boleto' and status in ('pendente', 'enviando', 'desconhecido', 'emitido')`)) as unknown as { mode: string }[];
   for (const m of new Set([wanted, ...rowModes.map((r) => r.mode)])) {
     if (byMode.has(m)) continue;
@@ -163,10 +185,19 @@ export async function processIssuance(db: DB, actorId: string, companyId: string
     const budget = Math.max(0, st.dailyLimit - Number(n));
     // consultas de status (NFS-e "processando") não gastam o limite de emissão
     const poll = await x.select().from(issuanceRequests).where(and(eq(issuanceRequests.companyId, companyId), eq(issuanceRequests.status, "processando"), eq(issuanceRequests.kind, "nfse"))).limit(50);
-    const due = budget === 0 ? [] : await x.select().from(issuanceRequests)
+    const dueAll = budget === 0 ? [] : await x.select().from(issuanceRequests)
       .where(and(eq(issuanceRequests.companyId, companyId), inArray(issuanceRequests.status, ["pendente", "desconhecido"]), inArray(issuanceRequests.mode, modes), sql`${issuanceRequests.nextAttemptAt} <= ${now.toISOString()}::timestamptz`))
       .orderBy(asc(issuanceRequests.nextAttemptAt), asc(issuanceRequests.createdAt)).limit(Math.min(budget, 20)).for("update", { skipLocked: true });
     if (budget === 0) out.waiting = "Limite diário de emissões atingido";
+    // E10b-6 — MODO CANÁRIO da emissão REAL: no máximo LIVE_CANARY_DAILY_MAX boletos reais por dia (contados por solicitação reservada hoje), qualquer que seja o limite diário.
+    const [{ n: liveToday }] = (await x.execute(sql`select count(*)::int n from issuance_requests where company_id = ${companyId} and kind = 'boleto' and mode = 'cora_producao' and claimed_at is not null and (claimed_at at time zone 'America/Manaus')::date = ${today}::date and attempts > 0`)) as unknown as { n: number }[];
+    let liveLeft = st.boletoProvider === "cora_producao" && st.liveCanary ? Math.max(0, LIVE_CANARY_DAILY_MAX - Number(liveToday)) : Number.POSITIVE_INFINITY;
+    const due = dueAll.filter((r) => {
+      const real = r.kind === "boleto" && (r.status === "pendente" ? st.boletoProvider : r.mode) === "cora_producao";
+      if (!real) return true;
+      if (liveLeft <= 0) { out.waiting = `Modo canário: no máximo ${LIVE_CANARY_DAILY_MAX} boletos reais por dia`; return false; }
+      liveLeft--; return true;
+    });
     // O modo do boleto é fixado na PRIMEIRA reserva (a partir da configuração da empresa) e nunca muda: reconsulta e cancelamento falam sempre com o provedor que emitiu.
     for (const r of due) {
       const mode = r.kind === "boleto" && r.status === "pendente" ? st.boletoProvider : r.mode;

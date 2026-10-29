@@ -9,8 +9,8 @@ test("E19 — Cora: escopo só de boletos, credenciais guardadas cifradas, sem m
   await expect(sec.getByText(/Pagar contas ou boletos/)).toBeVisible();
   await expect(sec.getByText(/Transferir ou enviar Pix/)).toBeVisible();
   await expect(sec.getByText("Nenhuma credencial guardada").first()).toBeVisible();
-  await expect(sec.getByText(/Avisos de pagamento \(webhook\)/)).toBeVisible();
-  await expect(sec.getByText("Desativado")).toBeVisible();
+  await expect(sec.getByText(/Avisos de pagamento \(webhook\)/).first()).toBeVisible();
+  await expect(sec.getByText("Desativado")).toHaveCount(2); // homologação e produção
   await expect(sec.getByRole("button", { name: "Ativar avisos" })).toHaveCount(0); // sem credencial de testes não há o que ativar
 
   await test.step("chave com senha é recusada e nada é guardado", async () => {

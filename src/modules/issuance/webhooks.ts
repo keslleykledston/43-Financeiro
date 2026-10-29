@@ -1,10 +1,10 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
-import { auditLog, coraWebhookEvents, coraWebhooks, issuanceRequests } from "@/lib/db/schema";
+import { auditLog, coraWebhookEvents, coraWebhooks, issuanceRequests, issuanceSettings } from "@/lib/db/schema";
 import { hit } from "@/lib/security/rate-limit";
 import { Invalid, requirePerm } from "@/modules/identity/service";
-import { coraClientFor, type Transport } from "@/modules/providers/cora-http";
+import { coraClientFor, prodEmissionOn, type Transport } from "@/modules/providers/cora-http";
 import type { CoraEnvironment } from "@/modules/providers/cora";
 import { ensureCoraSystemUser, syncCore } from "./sync";
 
@@ -23,8 +23,8 @@ export const EVENT_RETENTION_DAYS = 30;
 const MODE_OF: Record<CoraEnvironment, string> = { homologacao: "cora_homologacao", producao: "cora_producao" };
 const hashOf = (secret: string) => createHash("sha256").update(secret).digest("hex");
 const audit = (x: DB, companyId: string, actorId: string | null, action: string, detail: Record<string, unknown>) => x.insert(auditLog).values({ companyId, actorId, action, detail });
-/** Ambientes em que o webhook pode ser cadastrado. Produção entra só na fase de emissão em produção (E10b-6). */
-export const WEBHOOK_ENVIRONMENTS: CoraEnvironment[] = ["homologacao"];
+/** Ambientes em que o webhook pode ser cadastrado. Em produção só com a chave CORA_PROD_EMISSION_ENABLED ligada (o cadastro é uma escrita na Cora de produção). */
+export const WEBHOOK_ENVIRONMENTS: CoraEnvironment[] = ["homologacao", "producao"];
 
 export type WebhookStatus = { environment: CoraEnvironment; active: boolean; triggers: number; since: Date | null; pending: number };
 export async function webhookStatus(db: DB, actorId: string, companyId: string): Promise<WebhookStatus[]> {
@@ -43,8 +43,13 @@ export async function enableCoraWebhook(db: DB, actorId: string, companyId: stri
   try { origin = new URL(baseUrl); } catch { throw new Invalid("Endereço público do site inválido (precisa ser https)"); }
   if (origin.protocol !== "https:" || origin.port !== "" || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash || !/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i.test(origin.hostname)) throw new Invalid("Endereço público do site inválido (precisa ser https, sem porta nem caminho)");
   baseUrl = origin.origin;
+  if (env === "producao") { // cadastrar aviso é escrever na Cora de produção: só com a chave do servidor E a empresa ARMADA (modo de produção com autorização registrada)
+    if (!prodEmissionOn()) throw new Invalid("A Cora de produção está desligada neste servidor (CORA_PROD_EMISSION_ENABLED). Nada foi cadastrado");
+    const [st] = await db.select({ p: issuanceSettings.boletoProvider, at: issuanceSettings.liveAuthorizedAt }).from(issuanceSettings).where(eq(issuanceSettings.companyId, companyId));
+    if (st?.p !== "cora_producao" || !st.at) throw new Invalid("Ligue antes a emissão em produção desta empresa (Emissões → Controle). Os avisos de produção só são cadastrados com a empresa autorizada");
+  }
   let client;
-  try { client = await coraClientFor(db, companyId, env, transport); } catch { throw new Invalid("Cadastre antes as credenciais da Cora deste ambiente"); }
+  try { client = await coraClientFor(db, companyId, env, transport, { liveWrites: env === "producao" }); } catch { throw new Invalid("Cadastre antes as credenciais da Cora deste ambiente"); }
   const [prev] = await db.select().from(coraWebhooks).where(and(eq(coraWebhooks.companyId, companyId), eq(coraWebhooks.environment, env)));
   const secret = randomBytes(32).toString("base64url");
   const url = `${baseUrl}/api/v1/webhooks/cora/${secret}`;
@@ -70,7 +75,7 @@ export async function disableCoraWebhook(db: DB, actorId: string, companyId: str
   const env = environment as CoraEnvironment;
   const [h] = await db.select().from(coraWebhooks).where(and(eq(coraWebhooks.companyId, companyId), eq(coraWebhooks.environment, env)));
   if (!h) return { removed: 0 };
-  const client = await coraClientFor(db, companyId, env, transport).catch(() => null);
+  const client = await coraClientFor(db, companyId, env, transport, { liveWrites: env === "producao" }).catch(() => null);
   if (client) for (const id of h.endpointIds as string[]) { try { await client.deleteEndpoint(id); } catch { /* já removido lá */ } }
   await db.transaction(async (tx) => {
     const x = tx as unknown as DB;

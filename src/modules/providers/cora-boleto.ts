@@ -45,7 +45,17 @@ export const detailsOf = (inv: Invoice): BoletoDetails => ({
   digitable: inv.digitable, barcode: inv.barcode, pdfUrl: inv.pdfUrl,
 });
 
-export function createCoraBoletoProvider(client: CoraClient): BoletoProvider {
+/** Teto de um boleto REAL (produção): acima disso, só com decisão humana fora do motor. */
+export const LIVE_MAX_CENTS = 5_000_000; // R$ 50.000,00
+const MAX_DUP_DETAILS = 20;
+const todayManaus = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Manaus" });
+
+/**
+ * `live` = PRODUÇÃO (boletos reais). Antes de emitir: vencimento não pode estar no passado, valor abaixo do teto e ANTI-DUPLICIDADE — se a Cora já tem, para o mesmo CPF/CNPJ e vencimento, um boleto
+ * não cancelado de MESMO valor que não seja o nosso (as cobranças também foram/são emitidas à mão pela equipe), NÃO emite: falha com `boleto_ja_existe_na_cora` para revisão humana.
+ * Se o boleto achado é o nosso (mesmo `code`, ex.: resposta anterior perdida), devolve-o sem criar outro.
+ */
+export function createCoraBoletoProvider(client: CoraClient, opts: { live?: boolean } = {}): BoletoProvider {
   return {
     mode: "live",
     async issue(i: BoletoInput) {
@@ -53,6 +63,25 @@ export function createCoraBoletoProvider(client: CoraClient): BoletoProvider {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(i.dueDate)) throw new RangeError("vencimento_invalido");
       if (!i.idempotencyKey) throw new RangeError("idempotency_key_ausente");
       if (!i.customerName.trim()) throw new RangeError("cliente_sem_nome");
+      if (opts.live) {
+        if (i.dueDate < todayManaus()) throw new RangeError("vencimento_no_passado");
+        if (i.amountCents > LIVE_MAX_CENTS) throw new RangeError("valor_acima_do_limite");
+        let dupes: Invoice[] = [];
+        try {
+          for (let page = 1; page <= 3; page++) {
+            const l = await client.listInvoices({ search: i.customerDocument, start: i.dueDate, end: i.dueDate, page, perPage: 100 });
+            dupes = dupes.concat(l.items.filter((x) => x.status !== "CANCELLED" && x.totalAmountCents === i.amountCents));
+            if (l.items.length < 100) break;
+            if (page === 3) throw new Error("busca_incompleta");
+          }
+          if (dupes.length > MAX_DUP_DETAILS) throw new Error("busca_incompleta");
+          for (const d of dupes) {
+            const full = await client.getInvoice(d.id);
+            if (full.code === codeFromKey(i.idempotencyKey)) return toResult(full); // é o nosso (emissão anterior): idempotente
+          }
+        } catch (e) { return mapCoraError(e, "find"); }
+        if (dupes.length > 0) throw new RangeError("boleto_ja_existe_na_cora"); // já existe um igual que não é nosso: revisão humana
+      }
       let inv: Invoice;
       try {
         inv = await client.createInvoice({
@@ -90,6 +119,10 @@ export function createCoraBoletoProvider(client: CoraClient): BoletoProvider {
 
     async status(ref: string) {
       try { return statusOf((await client.getInvoice(ref)).status); } catch (e) { return mapCoraError(e, "status"); }
+    },
+
+    async ping() {
+      try { await client.accessToken(); } catch (e) { return mapCoraError(e, "status"); }
     },
 
     async details(ref: string) {

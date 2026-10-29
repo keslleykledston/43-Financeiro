@@ -35,7 +35,7 @@ export async function cancelBoletoAction(fd: FormData) {
   const id = String(fd.get("id") ?? ""); let err = "", ok = "boleto_cancelado";
   try {
     const c = await ctx();
-    const r = await cancelBoleto(db, c.userId, c.companyId, { chargeId: id, reason: String(fd.get("reason") ?? ""), confirm: fd.get("confirm") === "on" });
+    const r = await cancelBoleto(db, c.userId, c.companyId, { chargeId: id, reason: String(fd.get("reason") ?? ""), confirm: fd.get("confirm") === "on", confirmLive: fd.get("confirmLive") === "on" });
     if (r.status === "falhou") err = "O provedor não cancelou o boleto. Veja o motivo no histórico do boleto";
     else if (r.status === "desconhecido") { ok = "boleto_sem_resposta"; }
   } catch (e) { err = known(e); }
@@ -73,7 +73,7 @@ export async function decideCancelRequestAction(fd: FormData) {
   try {
     const c = await ctx(); const approve = fd.get("decision") === "aprovar";
     if (approve && fd.get("confirm") !== "on") throw new Invalid("Confirme o cancelamento marcando a caixa de confirmação");
-    const r = await decideCancelRequest(db, c.userId, c.companyId, String(fd.get("requestId") ?? ""), approve ? "aprovar" : "recusar", String(fd.get("note") ?? ""));
+    const r = await decideCancelRequest(db, c.userId, c.companyId, String(fd.get("requestId") ?? ""), approve ? "aprovar" : "recusar", String(fd.get("note") ?? ""), undefined, new Date(), { confirmLive: fd.get("confirmLive") === "on" });
     if (r.status === "recusado") ok = "pedido_recusado";
     else if (r.result === "falhou") err = "O provedor não cancelou o boleto. Veja o motivo no histórico do boleto";
     else if (r.result === "desconhecido") ok = "boleto_sem_resposta";

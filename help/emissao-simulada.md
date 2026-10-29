@@ -43,6 +43,10 @@ Em *Integrações → Cora → Avisos de pagamento*, a diretoria pode **ativar**
 ## Dados do boleto
 Na cobrança, **Ver dados do boleto** mostra a linha digitável e o PDF, consultados agora na Cora (nada fica guardado aqui).
 
+## Emissão REAL na Cora de produção (desligada até o dono ligar)
+Existe um terceiro provedor, **Cora — PRODUÇÃO (boletos reais)**, que fica **desligado no servidor** até o dono ativar. Quando ligado, a diretoria precisa **armar** a empresa (digitar `EMITIR BOLETOS REAIS`), e a plataforma entra em **modo canário**: no máximo **3 boletos reais por dia**. Cada rodada pede a confirmação "são boletos REAIS". Antes de cada boleto, a plataforma confere se a Cora já tem um **boleto igual** (mesmo cliente, vencimento e valor): se tiver, **não emite** e avisa (a equipe também emite à mão). Vencimento passado e valores acima de R$ 50.000 não são emitidos. Uma faixa vermelha no topo avisa enquanto a empresa estiver em modo real. Para parar: **Pausar emissão**.
+Para cancelar um boleto real, a diretoria marca uma confirmação própria ("este é um boleto REAL"). E-mail, WhatsApp e NFS-e continuam simulados/desligados. O roteiro completo está em `docs/E10_GOLIVE.md`.
+
 ## O que falta para a emissão real
 Veja *Integrações → Portão da emissão real*: credenciais fora do Git, homologação, calendário fiscal aprovado e **autorização escrita da diretoria**. O roteiro completo está em `docs/E10_GOLIVE.md`.
 

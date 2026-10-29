@@ -30,6 +30,8 @@ export interface BoletoProvider { // Cora (boletos v2)
   /** Reconsulta por chave de idempotência: já existe? (usada quando a resposta da emissão se perdeu). null = não existe. */
   find(idempotencyKey: string, ctx?: { customerDocument: string; dueDate: string }): Promise<BoletoResult | null>;
   status(ref: string): Promise<BoletoResult["status"]>;
+  /** Verifica o acesso (autenticação) sem criar nada. Só os adaptadores reais implementam. */
+  ping?(): Promise<void>;
   /** Consulta completa (valor, pagamentos, linha digitável, PDF). Só leitura. */
   details(ref: string): Promise<BoletoDetails>;
   /** Cancela um boleto EMITIDO e ainda sem pagamento. Só é chamado pelo fluxo de cancelamento da diretoria (E20). */

@@ -17,9 +17,20 @@ export type BoletoView =
   | { kind: "ok"; mode: string; ref: string; details: Omit<BoletoDetails, "pdfUrl"> & { pdfUrl: string | null } };
 
 const uuidOk = (s: string) => /^[0-9a-f-]{36}$/i.test(s);
-/** Só https e só domínio da Cora (a resposta é externa: nada de redirecionar o usuário para outro endereço). */
+/**
+ * Só https e só de origens conhecidas da Cora (a resposta é externa: nada de levar o usuário a outro endereço). Observado em produção e no stage (2026-10-28): o PDF fica no Google Cloud Storage,
+ * em `https://storage.googleapis.com/download/storage/v1/b/cora_<production|stage>_exporter_bankslip_storage/o/…`; domínios `*.cora.com.br` também valem.
+ */
 const CORA_HOST = /(^|\.)cora\.com\.br$/i;
-export const safePdfUrl = (u: string | null) => { try { if (!u) return null; const x = new URL(u); return x.protocol === "https:" && !x.username && !x.password && CORA_HOST.test(x.hostname) ? u : null; } catch { return null; } };
+const CORA_BUCKET = /^\/download\/storage\/v1\/b\/cora_(production|stage)_exporter_bankslip_storage\/o\//;
+export const safePdfUrl = (u: string | null) => {
+  try {
+    if (!u) return null;
+    const x = new URL(u);
+    if (x.protocol !== "https:" || x.username || x.password) return null;
+    return CORA_HOST.test(x.hostname) || (x.hostname === "storage.googleapis.com" && CORA_BUCKET.test(x.pathname)) ? u : null;
+  } catch { return null; }
+};
 
 export async function boletoView(db: DB, actorId: string, companyId: string, chargeId: string, providers?: Providers): Promise<BoletoView> {
   await requirePerm(db, actorId, companyId, "issuance.read");

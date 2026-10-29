@@ -18,6 +18,18 @@ describe("segredos do e-mail (SMTP) em claro", () => {
   });
 });
 
+describe("escrita em PRODUÇÃO da Cora (E10b-6)", () => {
+  it("`liveWrites: true` só aparece no registro de provedores e no cadastro de webhook (que ainda exigem a chave do servidor); nenhuma tela/ação liga", () => {
+    const users = walk("src").filter((f) => /liveWrites:\s*(true|prod|env\s*===)/.test(readFileSync(f, "utf8")) || /liveWrites:\s*[a-z]/.test(readFileSync(f, "utf8")));
+    const allowed = ["src/modules/providers/registry.ts", "src/modules/issuance/webhooks.ts", "src/modules/providers/cora-http.ts"];
+    expect(users.map((f) => f.replace(/\\/g, "/")).filter((f) => !allowed.includes(f))).toEqual([]);
+  });
+  it("a chave do servidor vem desligada no compose e nenhum arquivo de src/ a liga", () => {
+    expect(readFileSync("docker-compose.yml", "utf8")).toMatch(/CORA_PROD_EMISSION_ENABLED:\s*"false"/);
+    expect(walk("src").filter((f) => /env\.CORA_PROD_EMISSION_ENABLED\s*=[^=]/.test(readFileSync(f, "utf8")))).toEqual([]);
+  });
+});
+
 describe("segredos da Cora em claro", () => {
   it("nenhum arquivo de src/ (telas, ações, serviços) importa cora-secrets", () => {
     const offenders = walk("src").filter((f) => !f.endsWith("cora-secrets.ts") && /cora-secrets/.test(readFileSync(f, "utf8")) && !AUTHORIZED.includes(f.replace(/\\/g, "/")));

@@ -3,7 +3,15 @@ import { FlaskConical, KeyRound, LogOut } from "lucide-react";
 import { buttonClass } from "./button";
 import { AppLink } from "./app-link";
 
-export function DemoBanner({ emailLive = false }: { emailLive?: boolean }) {
+export function DemoBanner({ emailLive = false, liveBoletos = false }: { emailLive?: boolean; liveBoletos?: boolean }) {
+  if (liveBoletos) {
+    return (
+      <div role="status" className="sticky top-0 z-50 flex h-9 items-center justify-center gap-2 bg-negative-soft px-3 text-center text-xs font-medium text-negative-foreground ring-1 ring-negative/40">
+        <FlaskConical className="size-3.5 shrink-0" aria-hidden />
+        <span><strong>BOLETOS REAIS</strong> — a emissão desta empresa está ligada na Cora de PRODUÇÃO. Nota, e-mail e WhatsApp seguem simulados{emailLive ? " (e-mail real só para a lista autorizada)" : ""}.</span>
+      </div>
+    );
+  }
   return (
     <div role="status" className="sticky top-0 z-50 flex h-9 items-center justify-center gap-2 bg-demo px-3 text-center text-xs font-medium text-demo-foreground">
       <FlaskConical className="size-3.5 shrink-0" aria-hidden />

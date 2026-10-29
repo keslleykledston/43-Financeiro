@@ -24,7 +24,8 @@ export const CANCEL_STATUS_LABEL: Record<string, string> = { enviando: "Enviando
 export const CANCEL_ERROR_LABEL: Record<string, string> = { boleto_pago: "o provedor informa que o boleto já foi pago", boleto_inexistente: "o provedor não encontrou o boleto", tentativas_esgotadas: "tentativas esgotadas: confira no provedor", erro_provedor: "o provedor recusou o cancelamento", timeout: "o provedor não respondeu a tempo", erro_desconhecido: "falha sem resposta conclusiva" };
 
 type Row = Record<string, unknown>;
-export type CancelInput = { chargeId: string; reason: string; confirm: boolean };
+/** `confirmLive`: confirmação ESPECÍFICA de cancelar um boleto REAL (Cora produção), conferida no servidor, além da confirmação genérica. */
+export type CancelInput = { chargeId: string; reason: string; confirm: boolean; confirmLive?: boolean };
 
 const cleanReason = (r: string) => {
   const v = (r ?? "").replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
@@ -84,6 +85,9 @@ export async function cancelBoleto(db: DB, actorId: string, companyId: string, i
   // O cancelamento fala com o provedor que EMITIU o boleto (modo da solicitação), não com o configurado hoje. Falha FECHADA antes de reservar qualquer coisa.
   const [pre] = await db.select({ mode: issuanceRequests.mode }).from(issuanceRequests).where(and(eq(issuanceRequests.companyId, companyId), eq(issuanceRequests.chargeId, input.chargeId), eq(issuanceRequests.kind, "boleto"), eq(issuanceRequests.status, "emitido")));
   if (!pre) throw new Invalid("Esta cobrança não tem boleto emitido para cancelar");
+  // Cancelar um boleto REAL é permitido mesmo depois de a empresa sair do modo de produção (o boleto existe lá fora e pode precisar ser desfeito),
+  // mas só pela diretoria, com a chave do servidor ligada e com esta confirmação própria, diferente da genérica.
+  if (pre.mode === "cora_producao" && input.confirmLive !== true) throw new Invalid("Este é um boleto REAL (Cora produção). Marque a confirmação específica de cancelamento de boleto real");
   const prov = await resolveProvidersForMode(db, companyId, pre.mode, providers);
 
   const row = await db.transaction(async (tx) => {
@@ -132,11 +136,11 @@ export async function recheckCancellation(db: DB, actorId: string, companyId: st
 export async function boletoPanel(db: DB, actorId: string, companyId: string, chargeId: string) {
   await requirePerm(db, actorId, companyId, "issuance.read");
   if (!uuidOk(chargeId ?? "")) return { request: null, history: [] };
-  const reqs = await db.select({ id: issuanceRequests.id, status: issuanceRequests.status, externalStatus: issuanceRequests.externalStatus, externalRef: issuanceRequests.externalRef, createdAt: issuanceRequests.createdAt })
+  const reqs = await db.select({ id: issuanceRequests.id, mode: issuanceRequests.mode, status: issuanceRequests.status, externalStatus: issuanceRequests.externalStatus, externalRef: issuanceRequests.externalRef, createdAt: issuanceRequests.createdAt })
     .from(issuanceRequests).where(and(eq(issuanceRequests.companyId, companyId), eq(issuanceRequests.chargeId, chargeId), eq(issuanceRequests.kind, "boleto"))).orderBy(desc(issuanceRequests.createdAt));
   const live = reqs.find((r) => r.status !== "cancelado") ?? null;
   const history = await db.select({ id: boletoCancellations.id, status: boletoCancellations.status, reason: boletoCancellations.reason, attempts: boletoCancellations.attempts, lastError: boletoCancellations.lastError, createdAt: boletoCancellations.createdAt, resolvedAt: boletoCancellations.resolvedAt, by: users.name })
     .from(boletoCancellations).innerJoin(users, eq(users.id, boletoCancellations.requestedBy)).where(and(eq(boletoCancellations.companyId, companyId), eq(boletoCancellations.chargeId, chargeId))).orderBy(asc(boletoCancellations.createdAt));
-  return { request: live ? { id: live.id, status: live.status, externalStatus: live.externalStatus } : null, history };
+  return { request: live ? { id: live.id, mode: live.mode, status: live.status, externalStatus: live.externalStatus } : null, history };
 }
 
