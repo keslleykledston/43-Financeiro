@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Live = { status: string; label: string; wahaDown: boolean; qr: string | null };
 
@@ -7,6 +8,8 @@ type Live = { status: string; label: string; wahaDown: boolean; qr: string | nul
 export function SessionLive({ id, initial, label, canSeeQr }: { id: string; initial: string; label: string; canSeeQr: boolean }) {
   const [live, setLive] = useState<Live>({ status: initial, label, wahaDown: false, qr: null });
   const [failed, setFailed] = useState(false);
+  const router = useRouter();
+  const shown = useRef(initial); // situação que o cartão (renderizado no servidor) está mostrando
   useEffect(() => {
     let stop = false, timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
@@ -18,6 +21,7 @@ export function SessionLive({ id, initial, label, canSeeQr }: { id: string; init
           if (!r.ok) throw new Error(String(r.status));
           const j = (await r.json()) as Live;
           if (!stop) { setLive(j); setFailed(false); }
+          if (!stop && j.status !== shown.current) { shown.current = j.status; router.refresh(); } // selo, número e botões do cartão acompanham a situação
           if (j.status === "QR_REQUIRED" || j.status === "STARTING") next = 4_000;
         }
       } catch { if (!stop) setFailed(true); }
@@ -25,7 +29,7 @@ export function SessionLive({ id, initial, label, canSeeQr }: { id: string; init
     };
     timer = setTimeout(tick, initial === "QR_REQUIRED" || initial === "STARTING" ? 800 : 5_000);
     return () => { stop = true; clearTimeout(timer); };
-  }, [id, initial]);
+  }, [id, initial, router]);
 
   return (
     <div className="space-y-3" aria-live="polite">
