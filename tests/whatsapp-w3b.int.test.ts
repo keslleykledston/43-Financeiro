@@ -15,7 +15,7 @@ import { ensureWhatsappDefaults, saveSettings } from "@/modules/messaging/servic
 import { FakeWaha } from "./helpers/fake-waha";
 import { bindCompany, consentState, createSession, recordConsent, refreshSession, setPaused, type Deps } from "@/modules/whatsapp/service";
 import { SEND_PHRASE, dispatchOutbox, evaluateCustomerSend, queueCustomerMessage, saveCompanySettings, whatsappTemplateOptions } from "@/modules/whatsapp/outbound";
-import { WEBHOOK_MAX_BYTES, __resetHookLimiter, readBodyCapped, assignTriage, discardTriage, listInbox, listTriage, markDispute, optOutFromInbox, processInboundEvent, processPendingInbound, receiveWahaWebhook, setHandling, verifyHmac } from "@/modules/whatsapp/inbound";
+import { WEBHOOK_MAX_BYTES, __resetHookLimiter, readBodyCapped, assignTriage, discardTriage, listInbox, listTriage, hasOpenReply, markDispute, optOutFromInbox, processInboundEvent, processPendingInbound, receiveWahaWebhook, setHandling, verifyHmac } from "@/modules/whatsapp/inbound";
 import { open } from "@/lib/security/secretbox";
 
 const enabled = !!process.env.POSTGRES_USER;
@@ -268,6 +268,38 @@ describe.skipIf(!enabled)("W3b WhatsApp: webhook assinado, respostas, pedido de 
     expect((await db.select().from(schema.whatsappOutbox))[0].delivery).toBe("lido");
     expect(o.status).toBe("enviado");
     expect(await why(sql`update whatsapp_outbox set reason = 'x' where id = ${id}::uuid`)).toMatch(/resultado do envio/);   // o resultado do envio segue imutável
+  });
+
+  it("ack casa pelo ID da mensagem mesmo com a conversa diferente: o envio devolve «@c.us» e o aviso de entrega/leitura vem com «@lid» (verificado ao vivo)", async () => {
+    waha.refOverride = "true_5592999990000@c.us_3EB0A1B2C3D4E5F60718";
+    const id = await sentOnce();
+    await hook("message.ack", { id: "true_123456789012345@lid_3EB0A1B2C3D4E5F60718", ack: "DEVICE", ackName: "DEVICE" });
+    expect((await db.select().from(schema.whatsappOutbox))[0]).toMatchObject({ id, delivery: "entregue" });
+    await hook("message.ack", { id: "true_123456789012345@lid_3EB0A1B2C3D4E5F60718", ack: "READ", ackName: "READ" });
+    expect((await db.select().from(schema.whatsappOutbox))[0].delivery).toBe("lido");
+    await hook("message.ack", { id: "true_123456789012345@lid_3EB0FFFFFFFFFFFFFFFF", ack: "READ", ackName: "READ" });   // outro ID: não mexe
+    expect((await db.select().from(schema.whatsappOutbox))[0].delivery).toBe("lido");
+  });
+
+  it("número SEM o 9º dígito (como a WAHA devolve p/ contas antigas) é o MESMO contato: a resposta liga ao cliente e suspende a cobrança; «PARAR» bloqueia o cadastro com 9 dígito e suprime a fila", async () => {
+    const SEM9 = "559299990000";                                                                           // DIGITS sem o 9º dígito
+    const a = await queueCustomerMessage(db, gerA, A, { chargeId: ch1, templateVersionId: tpl.d0, sessionId: sid, confirm: true, key: k() }, deps);
+    await dispatchOutbox(db, gerA, A, a.outboxId, deps);
+    await msg(`${SEM9}@c.us`, "oi, qual é esse valor?");
+    const [e] = await events();
+    expect(e).toMatchObject({ classification: "resposta", companyId: A, customerId: cli1, routing: "atribuida" });   // cliente identificado pela conversa, apesar do 12 dígitos
+    expect(await hasOpenReply(db, A, DIGITS)).toBe(true);                                                  // consulta com o 13 dígitos do cadastro
+    expect((await evaluateCustomerSend(db, gerA, A, { chargeId: ch1, templateVersionId: tpl.d_mais_3, sessionId: sid }, deps)).checks.find((c) => c.key === "reply_pending")).toMatchObject({ ok: false });
+    await setHandling(db, gerA, A, e.id, { handling: "resolvido" });
+    expect(await hasOpenReply(db, A, DIGITS)).toBe(false);
+    await msg(`${SEM9}@c.us`, "PARAR");
+    expect((await consentState(db, A, DIGITS)).state).toBe("opt_out_company");                               // cadastro (13) bloqueado pelo pedido vindo em 12
+    expect((await consentState(db, A, SEM9)).state).toBe("opt_out_company");
+    const ev = await evaluateCustomerSend(db, gerA, A, { chargeId: ch1, templateVersionId: tpl.d_mais_3, sessionId: sid }, deps);
+    expect(ev.canSend).toBe(false); expect(ev.checks.find((x) => x.key === "consent")).toMatchObject({ ok: false });
+    expect((await db.select().from(schema.whatsappConsents)).filter((x) => x.decision === "opt_out")).toHaveLength(1);
+    await msg(`${DIGITS}@c.us`, "parar");                                                                  // a mesma pessoa em outra forma: não duplica
+    expect((await db.select().from(schema.whatsappConsents)).filter((x) => x.decision === "opt_out")).toHaveLength(1);
   });
 
   it("aviso de estado da conexão só DISPARA a leitura autenticada (nunca é a fonte): payload mentindo «WORKING» não deixa a conexão «conectada»", async () => {

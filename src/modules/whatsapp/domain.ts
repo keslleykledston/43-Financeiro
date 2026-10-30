@@ -1,5 +1,6 @@
 /** W1 — regras PURAS do módulo WhatsApp (sem banco nem rede). */
 import { createHash } from "node:crypto";
+import { sql } from "drizzle-orm";
 import type { WahaStatus } from "@/modules/providers/waha";
 
 export type SessionStatus = "CREATED" | "STARTING" | "QR_REQUIRED" | "CONNECTED" | "DISCONNECTED" | "DEGRADED" | "REVOKED";
@@ -58,6 +59,23 @@ export type Check = { key: string; ok: boolean; label: string; detail?: string }
 
 /** O id devolvido pela WAHA traz o telefone: o banco guarda só este hash (32 hex). A entrega 3 correlaciona ACK/eventos aplicando o MESMO hash ao id que chegar. */
 export const refHash = (id: string) => createHash("sha256").update(id).digest("hex").slice(0, 32);
+
+/**
+ * Referência da MENSAGEM individual, estável entre o envio e as confirmações: a WAHA devolve `true_<conversa>_<ID>` com a conversa como `…@c.us` no envio e como `…@lid` nos avisos de
+ * entrega/leitura (verificado ao vivo), então o hash do id inteiro nunca casa. Vale só o ID final (hexadecimal). Fora desse formato, cai no hash do id inteiro.
+ */
+export function msgRef(id: string): string {
+  const m = /^(?:true|false)_[^_]+_([0-9A-Fa-f]{8,})$/.exec(id);
+  return refHash(m ? `msg:${m[1].toUpperCase()}` : id);
+}
+
+/**
+ * Chave canônica do telefone. A WAHA devolve o número SEM o 9º dígito para contas antigas (`55 DD XXXXXXXX`) e o cadastro/consentimento guarda COM ele (`55 DD 9 XXXXXXXX`): são a mesma linha
+ * (mesma regra de `sameBrNumber`). Toda comparação de telefone entre consentimento, fila, respostas e pedido de parar usa esta chave (senão o «PARAR» não bloquearia o cliente).
+ */
+export const phoneKey = (d: string) => (/^55\d{2}9[6-9]\d{7}$/.test(d) ? d.slice(0, 4) + d.slice(5) : d);
+/** O mesmo em SQL, sobre uma coluna (nome fixo no código, nunca dado digitado). */
+export const phoneKeySql = (col: string) => sql.raw(`regexp_replace(${col}, '^(55[0-9]{2})9([6-9][0-9]{7})$', '\\1\\2')`);
 
 /**
  * Mesmo assinante? Igualdade exata, OU a equivalência oficial do 9º dígito dos celulares brasileiros: `55 DDD 9 XXXXXXXX` (13 dígitos) e `55 DDD XXXXXXXX` (12) são a MESMA linha

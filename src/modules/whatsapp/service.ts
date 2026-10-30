@@ -6,7 +6,7 @@ import { Invalid, requirePerm } from "@/modules/identity/service";
 import { getSettings } from "@/modules/messaging/service";
 import { WINDOW_REASON, windowState } from "@/modules/messaging/window";
 import { createWahaClient, sessionNameFor, wahaConfigured, WahaError, type WahaClient, type WahaEnv, type WahaSession } from "@/modules/providers/waha";
-import { BLOCK_REASON_LABEL, CAPS, EVIDENCE_SOURCES, GLOBAL_OPT_IN_SOURCES, chatIdFor, looksLikePii, mapWahaStatus, maskMe, maskPhone, parseBrPhone, refHash, sameBrNumber, testText, type Check, type ConsentState, type EvidenceSource, type SessionStatus } from "./domain";
+import { BLOCK_REASON_LABEL, CAPS, EVIDENCE_SOURCES, GLOBAL_OPT_IN_SOURCES, chatIdFor, looksLikePii, mapWahaStatus, maskMe, maskPhone, parseBrPhone, msgRef, phoneKey, phoneKeySql, sameBrNumber, testText, type Check, type ConsentState, type EvidenceSource, type SessionStatus } from "./domain";
 
 /**
  * W1 — conexões de WhatsApp (WAHA, NÃO oficial) e envio MANUAL de teste. Nada aqui é automático: sem régua, sem fila, sem webhook (entregas 2 a 4).
@@ -260,7 +260,7 @@ export async function deliverViaWaha(db: DB, o: { session: { id: string; provide
     if (c2) return { kind: "abort", code: c2 };
     calling = true;
     const res = await w.sendText({ session: o.session.providerSession, chatId: chk.chatId, text: o.text });
-    return res.ok ? { kind: "sent", providerRef: refHash(res.providerRef) } : { kind: "result", status: res.unknown ? "desconhecido" : "falhou", error: res.error };
+    return res.ok ? { kind: "sent", providerRef: msgRef(res.providerRef) } : { kind: "result", status: res.unknown ? "desconhecido" : "falhou", error: res.error };
   } catch {
     return calling ? { kind: "result", status: "desconhecido", error: "erro_interno" } : { kind: "fail", code: "erro_interno_antes_de_enviar", message: "Erro inesperado antes do envio. Nada foi enviado" };
   }
@@ -415,8 +415,8 @@ export async function unbindCompany(db: DB, actorId: string, companyId: string, 
 /** Estado do contato para a empresa. Opt-out GLOBAL do número (de qualquer empresa) prevalece; senão vale o evento mais recente da empresa. Só estado: não revela quem pediu. */
 export async function consentState(x: DB, companyId: string, digits: string): Promise<{ state: ConsentState }> {
   const r = (await x.execute(sql`select
-      (select decision from whatsapp_consents where phone = ${digits} and scope = 'global' order by created_at desc, id desc limit 1) g,
-      (select decision from whatsapp_consents where company_id = ${companyId} and phone = ${digits} and scope = 'company' order by created_at desc, id desc limit 1) c`)) as unknown as { g: string | null; c: string | null }[];
+      (select decision from whatsapp_consents where ${phoneKeySql("phone")} = ${phoneKey(digits)} and scope = 'global' order by created_at desc, id desc limit 1) g,
+      (select decision from whatsapp_consents where company_id = ${companyId} and ${phoneKeySql("phone")} = ${phoneKey(digits)} and scope = 'company' order by created_at desc, id desc limit 1) c`)) as unknown as { g: string | null; c: string | null }[];
   if (r[0].g === "opt_out") return { state: "opt_out_global" };
   if (r[0].c === "opt_out") return { state: "opt_out_company" };
   if (r[0].c === "opt_in") return { state: "opt_in" };
@@ -444,8 +444,8 @@ export async function recordConsent(db: DB, actorId: string, companyId: string, 
   }
   await db.transaction(async (tx) => {
     const x = tx as unknown as DB;
-    await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-consent:" + (scope === "global" ? "all" : companyId) + ":" + digits}))`);
-    const [last] = (await x.execute(sql`select decision from whatsapp_consents where phone = ${digits} and scope = ${scope} ${scope === "company" ? sql`and company_id = ${companyId}` : sql``} order by created_at desc, id desc limit 1`)) as unknown as { decision: string }[];
+    await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-consent:" + (scope === "global" ? "all" : companyId) + ":" + phoneKey(digits)}))`);
+    const [last] = (await x.execute(sql`select decision from whatsapp_consents where ${phoneKeySql("phone")} = ${phoneKey(digits)} and scope = ${scope} ${scope === "company" ? sql`and company_id = ${companyId}` : sql``} order by created_at desc, id desc limit 1`)) as unknown as { decision: string }[];
     if (last?.decision === input.decision) throw new Invalid(`Este contato já está registrado assim (${input.decision === "opt_in" ? "consentiu" : "pediu para parar"}). Nada foi alterado`);
     await x.insert(whatsappConsents).values({ companyId, customerId, phone: digits, decision: input.decision, scope, evidenceSource: input.evidenceSource, evidenceRef: ref, actorId });
     await audit(x, companyId, actorId, input.decision === "opt_in" ? "whatsapp.consent.opt_in" : "whatsapp.consent.opt_out", { scope, source: input.evidenceSource }); // sem telefone
@@ -456,10 +456,10 @@ export async function recordConsent(db: DB, actorId: string, companyId: string, 
 export async function listConsents(db: DB, actorId: string, companyId: string, limit = 200) {
   await requirePerm(db, actorId, companyId, "whatsapp.consent");
   const rows = (await db.execute(sql`
-    select distinct on (c.phone) c.phone, c.decision, c.scope, c.evidence_source src, c.created_at at, cu.display_name customer, u.name actor,
-      (select g.decision from whatsapp_consents g where g.phone = c.phone and g.scope = 'global' order by g.created_at desc, g.id desc limit 1) global_d
+    select distinct on (${phoneKeySql("c.phone")}) c.phone, c.decision, c.scope, c.evidence_source src, c.created_at at, cu.display_name customer, u.name actor,
+      (select g.decision from whatsapp_consents g where ${phoneKeySql("g.phone")} = ${phoneKeySql("c.phone")} and g.scope = 'global' order by g.created_at desc, g.id desc limit 1) global_d
     from whatsapp_consents c left join customers cu on cu.company_id = c.company_id and cu.id = c.customer_id left join users u on u.id = c.actor_id
-    where c.company_id = ${companyId} and c.scope = 'company' order by c.phone, c.created_at desc, c.id desc`)) as unknown as { phone: string; decision: string; src: EvidenceSource; at: Date; customer: string | null; actor: string | null; global_d: string | null }[];
+    where c.company_id = ${companyId} and c.scope = 'company' order by ${phoneKeySql("c.phone")}, c.created_at desc, c.id desc`)) as unknown as { phone: string; decision: string; src: EvidenceSource; at: Date; customer: string | null; actor: string | null; global_d: string | null }[];
   return rows.map((r) => ({ ...r, at: new Date(r.at) })).sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, limit).map((r) => ({
     phone: maskPhone(r.phone), state: (r.global_d === "opt_out" ? "opt_out_global" : r.decision === "opt_out" ? "opt_out_company" : "opt_in") as ConsentState,
     source: r.src, at: r.at, customer: r.customer, actor: r.actor,

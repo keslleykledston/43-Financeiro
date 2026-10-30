@@ -76,3 +76,8 @@ O 1º teste (conexão pareada, número do dono) falhou com 500 da WAHA: `no LID 
 
 ## Rollback
 Desligar `WHATSAPP_MODULE_ENABLED`/`WHATSAPP_SEND_ENABLED` e `docker compose stop waha`. Migração 0046 é **aditiva** (4 tabelas novas, sem tocar nas existentes): reverter só o código; as tabelas ficam (histórico imutável). Detalhe em `docs/OPERACAO.md`.
+
+
+## Adendo W3c (2026-10-30): chaves estáveis
+- **Telefone:** a WAHA devolve celulares antigos SEM o 9º dígito. Toda comparação entre consentimento, fila, respostas e pedido de parar usa `phoneKey` (55 DD 9 XXXXXXXX ≡ 55 DD XXXXXXXX quando o 8-dígito começa em 6–9, mesma regra de `sameBrNumber`); o dado gravado não muda.
+- **Mensagem:** `provider_ref` e o `refHash` do aviso usam `msgRef` (só o ID hexadecimal final), porque a conversa aparece como `@c.us` no envio e `@lid` na confirmação.

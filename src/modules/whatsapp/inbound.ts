@@ -7,7 +7,7 @@ import { SESSION_NAME, type WahaEnv } from "@/modules/providers/waha";
 import { Invalid, requirePerm } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
 import { asksAll, classifyInbound, type InboundClass } from "./optout";
-import { maskPhone, parseBrPhone, refHash, sameBrNumber } from "./domain";
+import { maskPhone, msgRef, parseBrPhone, phoneKey, phoneKeySql, sameBrNumber } from "./domain";
 import { audit, clientOf, recordConsent, syncFromWaha, type Deps } from "./service";
 
 /**
@@ -104,7 +104,7 @@ export async function receiveWahaWebhook(db: DB, raw: Buffer, h: HookHeaders, en
     row = { ...row, peer: from, kind: media && !body ? "midia" : "texto", bodyEnc: body ? seal(body, BOX) : null };
   } else if (event === "message.ack") {
     const msgId = str(p.id, 160);
-    row = { ...row, refHash: msgId ? refHash(msgId) : null, ack: ackOf(p as { ack?: unknown; ackName?: unknown }), kind: "outro" };
+    row = { ...row, refHash: msgId ? msgRef(msgId) : null, ack: ackOf(p as { ack?: unknown; ackName?: unknown }), kind: "outro" };
   } else row = { ...row, kind: "outro" };
   const ins = await db.insert(whatsappInboundEvents).values(row).onConflictDoNothing().returning({ id: whatsappInboundEvents.id });
   if (ins.length) await processInboundEvent(db, ins[0].id, deps).catch(() => { /* fica pendente: o agendador tenta de novo */ });
@@ -125,7 +125,7 @@ async function resolvePhone(peer: string | null, session: string, deps?: Deps): 
 async function attribute(x: DB, sessionId: string, phone: string): Promise<{ companyId: string | null; customerId: string | null; boundCompanies: string[]; why: "conversa" | "contato" | "ambiguo" | "nenhum" }> {
   const bound = ((await x.execute(sql`select company_id::text id from whatsapp_session_companies where session_id = ${sessionId} and revoked_at is null order by created_at`)) as unknown as { id: string }[]).map((r) => r.id);
   if (!bound.length) return { companyId: null, customerId: null, boundCompanies: [], why: "nenhum" };
-  const talked = (await x.execute(sql`select company_id::text company, customer_id::text customer, max(coalesce(sent_at, finished_at, updated_at)) at from whatsapp_outbox where phone = ${phone} and session_id = ${sessionId} and status in ('enviado', 'desconhecido', 'enviando') and coalesce(sent_at, finished_at, updated_at) > now() - interval '14 days' group by 1, 2`)) as unknown as { company: string; customer: string }[];
+  const talked = (await x.execute(sql`select company_id::text company, customer_id::text customer, max(coalesce(sent_at, finished_at, updated_at)) at from whatsapp_outbox where ${phoneKeySql("phone")} = ${phoneKey(phone)} and session_id = ${sessionId} and status in ('enviado', 'desconhecido', 'enviando') and coalesce(sent_at, finished_at, updated_at) > now() - interval '14 days' group by 1, 2`)) as unknown as { company: string; customer: string }[];
   const companies = [...new Set(talked.map((t) => t.company))].filter((c) => bound.includes(c));
   if (companies.length === 1) { const cs = [...new Set(talked.filter((t) => t.company === companies[0]).map((t) => t.customer))]; return { companyId: companies[0], customerId: cs.length === 1 ? cs[0] : null, boundCompanies: bound, why: "conversa" }; }
   if (companies.length > 1) return { companyId: null, customerId: null, boundCompanies: bound, why: "ambiguo" };
@@ -138,10 +138,10 @@ async function attribute(x: DB, sessionId: string, phone: string): Promise<{ com
 
 /** Registra o pedido de parar como um evento de consentimento DO SISTEMA e suprime a fila. Repetir (já parado) não duplica. */
 async function applyOptOut(x: DB, systemUser: string, o: { companyId: string; phone: string; scope: "company" | "global"; eventKey: string }) {
-  const [last] = (await x.execute(sql`select decision from whatsapp_consents where phone = ${o.phone} and scope = ${o.scope} ${o.scope === "company" ? sql`and company_id = ${o.companyId}` : sql``} order by created_at desc, id desc limit 1`)) as unknown as { decision: string }[];
+  const [last] = (await x.execute(sql`select decision from whatsapp_consents where ${phoneKeySql("phone")} = ${phoneKey(o.phone)} and scope = ${o.scope} ${o.scope === "company" ? sql`and company_id = ${o.companyId}` : sql``} order by created_at desc, id desc limit 1`)) as unknown as { decision: string }[];
   if (last?.decision !== "opt_out") await x.insert(whatsappConsents).values({ companyId: o.companyId, phone: o.phone, decision: "opt_out", scope: o.scope, evidenceSource: "cliente_iniciou", evidenceRef: `resposta no WhatsApp (evento ${o.eventKey.slice(-8)})`, actorId: systemUser });
   // a fila de cobrança deste contato para: «na_fila» vira «suprimido» (empresa; ou todas as empresas se o pedido é global)
-  await x.execute(sql`update whatsapp_outbox set status = 'suprimido', reason = 'optout', finished_at = now(), updated_at = now() where phone = ${o.phone} and status = 'na_fila' ${o.scope === "company" ? sql`and company_id = ${o.companyId}` : sql``}`);
+  await x.execute(sql`update whatsapp_outbox set status = 'suprimido', reason = 'optout', finished_at = now(), updated_at = now() where ${phoneKeySql("phone")} = ${phoneKey(o.phone)} and status = 'na_fila' ${o.scope === "company" ? sql`and company_id = ${o.companyId}` : sql``}`);
 }
 
 /** Trata UM evento pendente (idempotente: só quem o «reivindica» processa). Chamado na hora do recebimento e, para o que ficou pendente, pelo agendador. */
@@ -166,7 +166,7 @@ export async function processInboundEvent(db: DB, eventId: string, deps?: Deps):
     // ----- mensagem recebida
     const phone = await resolvePhone(ev.peer, ev.providerSession, deps);
     if (!phone) { await done({ classification: "sem_numero", routing: "triagem", needsReview: true }); return; }
-    const flood = (await db.execute(sql`select count(*)::int n from whatsapp_inbound_events where phone = ${phone} and created_at > now() - interval '1 hour'`)) as unknown as { n: number }[];
+    const flood = (await db.execute(sql`select count(*)::int n from whatsapp_inbound_events where ${phoneKeySql("phone")} = ${phoneKey(phone)} and created_at > now() - interval '1 hour'`)) as unknown as { n: number }[];
     if (Number(flood[0].n) > FLOOD_PER_HOUR) { await done({ phone, phoneMasked: maskPhone(phone), classification: "ignorada", routing: "ignorada" }); return; } // enxurrada de um só número
     const text = ev.bodyEnc ? openBox(ev.bodyEnc, BOX) : "";
     const cls: InboundClass = ev.kind === "texto" ? classifyInbound(text) : "resposta";
@@ -184,7 +184,7 @@ export async function processInboundEvent(db: DB, eventId: string, deps?: Deps):
     if (!companyForRecord) { await done({ ...base, routing: "triagem", needsReview: true }); return; }
     await db.transaction(async (tx) => {
       const x = tx as unknown as DB;
-      await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-consent:" + (global ? "all" : companyForRecord) + ":" + phone}))`); // mesma trava do registro manual de consentimento
+      await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-consent:" + (global ? "all" : companyForRecord) + ":" + phoneKey(phone)}))`); // mesma trava do registro manual de consentimento
       // 1º fecha o EVENTO (só quem o encontra ainda pendente segue): processamento duplicado (inline + agendador) não repete consentimento nem auditoria
       const won = await x.update(whatsappInboundEvents).set({
         ...base, companyId: where.companyId, customerId: where.customerId, routing: where.companyId ? "atribuida" : "triagem", optoutApplied: global ? "global" : "company",
@@ -251,13 +251,13 @@ export async function optOutFromInbox(db: DB, actorId: string, companyId: string
   if (!r.phone) throw new Invalid("Esta mensagem não tem número resolvido");
   try { await recordConsent(db, actorId, companyId, { phone: r.phone, decision: "opt_out", scope, evidenceSource: "cliente_iniciou", evidenceRef: "resposta no WhatsApp (caixa de entrada)" }); }
   catch (e) { if (!(e instanceof Invalid) || !/já está registrado/.test(e.message)) throw e; }
-  await db.execute(sql`update whatsapp_outbox set status = 'suprimido', reason = 'optout', finished_at = now(), updated_at = now() where phone = ${r.phone} and status = 'na_fila' ${scope === "company" ? sql`and company_id = ${companyId}` : sql``}`);
+  await db.execute(sql`update whatsapp_outbox set status = 'suprimido', reason = 'optout', finished_at = now(), updated_at = now() where ${phoneKeySql("phone")} = ${phoneKey(r.phone)} and status = 'na_fila' ${scope === "company" ? sql`and company_id = ${companyId}` : sql``}`);
   await db.update(whatsappInboundEvents).set({ optoutApplied: scope, handling: "resolvido", needsReview: false, updatedAt: new Date() }).where(and(eq(whatsappInboundEvents.id, r.id), eq(whatsappInboundEvents.companyId, companyId)));
 }
 
 /** Há resposta de cliente NÃO resolvida (ou contestação) deste telefone nesta empresa? Suspende a cobrança até resolver. */
 export async function hasOpenReply(x: DB, companyId: string, phone: string): Promise<boolean> {
-  const r = (await x.execute(sql`select 1 from whatsapp_inbound_events where company_id = ${companyId} and phone = ${phone} and event_type = 'message' and routing in ('atribuida', 'atribuida_manual') and (dispute or (handling <> 'resolvido' and classification in ('resposta', 'opt_out_ambiguo'))) limit 1`)) as unknown as unknown[];
+  const r = (await x.execute(sql`select 1 from whatsapp_inbound_events where company_id = ${companyId} and ${phoneKeySql("phone")} = ${phoneKey(phone)} and event_type = 'message' and routing in ('atribuida', 'atribuida_manual') and (dispute or (handling <> 'resolvido' and classification in ('resposta', 'opt_out_ambiguo'))) limit 1`)) as unknown as unknown[];
   return r.length > 0;
 }
 
