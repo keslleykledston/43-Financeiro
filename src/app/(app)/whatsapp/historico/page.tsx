@@ -39,7 +39,7 @@ export default async function Historico({ searchParams }: { searchParams: Promis
             <tbody>{rows.map((r) => (
               <tr key={r.id} className="border-t align-top">
                 <td className="py-2 pr-4"><div>{r.customer}</div><div className="text-xs text-muted-foreground">{r.phone}</div></td>
-                <td className="py-2 pr-4"><div>{formatBRL(r.amountCents)}</div><div className="text-xs text-muted-foreground">{KIND_LABEL[r.milestone as QueueKind]} · venc. {r.due.slice(8, 10)}/{r.due.slice(5, 7)}</div></td>
+                <td className="py-2 pr-4"><div>{formatBRL(r.amountCents)}</div><div className="text-xs text-muted-foreground">{KIND_LABEL[r.milestone as QueueKind]} · venc. {r.due.slice(8, 10)}/{r.due.slice(5, 7)}{r.origin === "regua" && <> · <strong>régua automática</strong></>}</div></td>
                 <td className="py-2 pr-4"><StatusPill tone={TONE[r.status] ?? "neutral"}>{OUTBOX_STATUS_LABEL[r.status] ?? r.status}</StatusPill>
                   {r.reason && <div className="mt-1 text-xs text-muted-foreground">{REASON_LABEL[r.reason] ?? r.reason}</div>}
                   {r.delivery && <div className="mt-1 text-xs text-muted-foreground">{r.delivery === "lido" ? "Lida" : "Entregue"} {fmt(r.readAt ?? r.deliveredAt)}</div>}</td>

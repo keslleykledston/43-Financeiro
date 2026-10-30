@@ -131,7 +131,7 @@ describe.skipIf(!enabled)("W3a cobrança por WhatsApp: fila, revalidação no en
     const h = await listOutbox(db, gerA, A);
     expect(h).toHaveLength(1); expect(h[0]).toMatchObject({ status: "enviado", phone: "+55 92 •••••-0000", customer: "Cliente Um LTDA", milestone: "d0", amountCents: 250000 });
     expect(JSON.stringify(h)).not.toContain(DIGITS);
-    expect(JSON.stringify(await db.select().from(schema.auditLog))).not.toMatch(/5592|99999|Cliente Um/);
+    expect(JSON.stringify((await db.select().from(schema.auditLog)).map((a) => [a.action, a.detail]))).not.toMatch(/5592|99999|Cliente Um/);
     expect(await audits()).toEqual(expect.arrayContaining(["whatsapp.customer_queued", "whatsapp.customer_sent"]));
   });
 

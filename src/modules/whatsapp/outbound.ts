@@ -12,7 +12,7 @@ import { holidays } from "@/lib/db/schema";
 import { wahaConfigured } from "@/modules/providers/waha";
 import { CAPS, maskPhone, parseBrPhone, refHash, type Check, type ConsentState } from "./domain";
 import { hasOpenReply } from "./inbound";
-import { audit, bound, clean, clientOf, consentState, deliverViaWaha, envOf, manausDay, moduleOn, refreshSession, sendOn, usedToday, type Deps } from "./service";
+import { audit, automationOn, bound, clean, clientOf, consentState, deliverViaWaha, envOf, manausDay, moduleOn, refreshSession, sendOn, usedToday, type Deps } from "./service";
 import { createHash } from "node:crypto";
 
 /**
@@ -29,22 +29,22 @@ export const REASON_LABEL: Record<string, string> = {
   pago_ou_cancelada: "Cobrança paga, cancelada ou não aprovada", sem_consentimento: "Contato sem consentimento", optout: "Contato pediu para parar", modelo_indisponivel: "Modelo desativado ou inválido", sem_telefone: "Sem telefone de celular do contato financeiro",
   aviso_recente: "Já houve aviso a este cliente nos últimos 7 dias", cobranca_alterada: "Cobrança paga ou alterada (baixa, lote reaberto/cancelado)", empresa_desligada: "Cobrança por WhatsApp desligada para a empresa", bloqueado_antes_de_enviar: "Bloqueado no último instante", conexao_nao_conectada: "Conexão não estava conectada",
   conexao_sem_resposta: "WAHA sem resposta", numero_fora_do_whatsapp: "Número não está no WhatsApp", numero_sem_id_canonico: "WhatsApp não devolveu o identificador", numero_divergente: "WhatsApp devolveu outro número", sem_confirmacao: "Sem confirmação da WAHA",
-  erro_interno: "Erro interno durante o envio", erro_interno_antes_de_enviar: "Erro interno antes do envio", reserva_abandonada: "Envio interrompido (servidor caiu)", cancelado_pelo_operador: "Cancelado pelo operador", confirmado_enviado: "Confirmado como enviado (conferência humana)", confirmado_nao_enviado: "Confirmado como NÃO enviado (conferência humana)",
+  erro_interno: "Erro interno durante o envio", erro_interno_antes_de_enviar: "Erro interno antes do envio", reserva_abandonada: "Envio interrompido (servidor caiu)", cancelado_pelo_operador: "Cancelado pelo operador", fora_do_dia: "Régua: o dia do marco passou sem sair", regua_desligada: "Régua desligada pela diretoria", confirmado_enviado: "Confirmado como enviado (conferência humana)", confirmado_nao_enviado: "Confirmado como NÃO enviado (conferência humana)",
 };
 const br = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
 
 // ---------- configuração por empresa ----------
-export type CompanyWaSettings = { sendEnabled: boolean; automationEnabled: boolean; dailyCap: number; reference: string | null; authorizedAt: Date | null };
+export type CompanyWaSettings = { sendEnabled: boolean; automationEnabled: boolean; automationKinds: string[]; dailyCap: number; reference: string | null; authorizedAt: Date | null };
 export async function getCompanySettings(db: DB, actorId: string, companyId: string): Promise<CompanyWaSettings> {
   await requirePerm(db, actorId, companyId, "whatsapp.read");
   return loadCompanySettings(db, companyId);
 }
 async function loadCompanySettings(x: DB, companyId: string): Promise<CompanyWaSettings> {
   const [r] = await x.select().from(whatsappCompanySettings).where(eq(whatsappCompanySettings.companyId, companyId));
-  return r ? { sendEnabled: r.sendEnabled, automationEnabled: r.automationEnabled, dailyCap: r.dailyCap, reference: r.reference, authorizedAt: r.authorizedAt } : { sendEnabled: false, automationEnabled: false, dailyCap: CAPS.companyDaily, reference: null, authorizedAt: null };
+  return r ? { sendEnabled: r.sendEnabled, automationEnabled: r.automationEnabled, automationKinds: r.automationKinds ?? [], dailyCap: r.dailyCap, reference: r.reference, authorizedAt: r.authorizedAt } : { sendEnabled: false, automationEnabled: false, automationKinds: [], dailyCap: CAPS.companyDaily, reference: null, authorizedAt: null };
 }
 
-/** Liga/desliga o envio de COBRANÇA a clientes desta empresa. Ligar exige diretoria, a referência da autorização escrita e a frase digitada. Desligar é imediato. A automação NÃO é tocada (entrega 4). */
+/** Liga/desliga o envio de COBRANÇA a clientes desta empresa. Ligar exige diretoria, a referência da autorização escrita e a frase digitada. Desligar é imediato. Desligar o envio desliga também a régua automática (ela depende dele). */
 export async function saveCompanySettings(db: DB, actorId: string, companyId: string, input: { enable: boolean; reference?: string; dailyCap?: unknown; phrase?: string }) {
   await requirePerm(db, actorId, companyId, "whatsapp.authorize");
   let ref: string | null = null, cap: number = CAPS.companyDaily;
@@ -63,7 +63,7 @@ export async function saveCompanySettings(db: DB, actorId: string, companyId: st
       await x.insert(whatsappCompanySettings).values({ companyId, sendEnabled: true, dailyCap: cap, reference: ref, authorizedBy: actorId, authorizedAt: now })
         .onConflictDoUpdate({ target: whatsappCompanySettings.companyId, set: { sendEnabled: true, dailyCap: cap, reference: ref, authorizedBy: actorId, authorizedAt: now, updatedAt: now } });
     } else {
-      await x.update(whatsappCompanySettings).set({ sendEnabled: false, updatedAt: now }).where(eq(whatsappCompanySettings.companyId, companyId));
+      await x.update(whatsappCompanySettings).set({ sendEnabled: false, automationEnabled: false, updatedAt: now }).where(eq(whatsappCompanySettings.companyId, companyId));
       // o que estava aprovado na fila NÃO volta a sair se a empresa for religada depois: suprime agora
       await x.execute(sql`update whatsapp_outbox set status = 'suprimido', reason = 'empresa_desligada', finished_at = now(), updated_at = now() where company_id = ${companyId} and status = 'na_fila'`);
     }
@@ -184,7 +184,7 @@ export async function evaluateCustomerSend(db: DB, actorId: string, companyId: s
 
 // ---------- colocar na fila ----------
 const IDEM = /^[A-Za-z0-9_-]{8,64}$/;
-export async function queueCustomerMessage(db: DB, actorId: string, companyId: string, input: { chargeId: string; templateVersionId: string; sessionId: string; contactId?: string; phone?: string; confirm: boolean; key: string }, deps?: Deps) {
+export async function queueCustomerMessage(db: DB, actorId: string, companyId: string, input: { chargeId: string; templateVersionId: string; sessionId: string; contactId?: string; phone?: string; confirm: boolean; key: string; origin?: "manual" | "regua" }, deps?: Deps) {
   await requirePerm(db, actorId, companyId, "whatsapp.send");
   if (!input.confirm) throw new Invalid("Confirme que revisou a mensagem e que o cliente aceitou receber");
   if (!IDEM.test(input.key ?? "")) throw new Invalid("Formulário vencido. Recarregue a página e tente de novo");
@@ -201,8 +201,8 @@ export async function queueCustomerMessage(db: DB, actorId: string, companyId: s
     return await db.transaction(async (tx) => {
       const x = tx as unknown as DB;
       await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-queue:" + companyId}))`);
-      const [row] = await x.insert(whatsappOutbox).values({ companyId, sessionId: c.session.id, chargeId: c.chargeId, customerId: c.customerId, templateVersionId: c.templateVersionId, milestone: c.milestone, phone: c.phone, phoneMasked: c.phoneMasked, bodyEnc: seal(c.text, BOX(companyId)), bodySha: c.sha, idempotencyKey: input.key, requestedBy: actorId }).returning({ id: whatsappOutbox.id });
-      await audit(x, companyId, actorId, "whatsapp.customer_queued", { outboxId: row.id, milestone: c.milestone });
+      const [row] = await x.insert(whatsappOutbox).values({ companyId, sessionId: c.session.id, chargeId: c.chargeId, customerId: c.customerId, templateVersionId: c.templateVersionId, milestone: c.milestone, phone: c.phone, phoneMasked: c.phoneMasked, bodyEnc: seal(c.text, BOX(companyId)), bodySha: c.sha, idempotencyKey: input.key, requestedBy: actorId, origin: input.origin === "regua" ? "regua" : "manual" }).returning({ id: whatsappOutbox.id });
+      await audit(x, companyId, actorId, "whatsapp.customer_queued", { outboxId: row.id, milestone: c.milestone, origin: input.origin === "regua" ? "regua" : "manual" });
       return { outboxId: row.id };
     });
   } catch (e) {
@@ -230,6 +230,9 @@ export async function dispatchOutbox(db: DB, actorId: string, companyId: string,
   if (row.status !== "na_fila") throw new Invalid(`Esta mensagem já foi processada (${OUTBOX_STATUS_LABEL[row.status] ?? row.status}). Nada foi enviado`);
   const env = envOf(deps);
   if (moduleOn(env) && wahaConfigured(env)) { try { await refreshSession(db, actorId, companyId, row.sessionId, deps); } catch { /* sem vínculo: a lista explica */ } } // estado fresco da conexão antes de decidir
+  // mensagem de ORIGEM «régua» só sai com a régua ligada (chave do servidor + empresa + este marco), mesmo se alguém clicar em «Enviar» no histórico
+  const autoOff = async (x: DB) => { if (row.origin !== "regua") return false; const c = await loadCompanySettings(x, companyId); return !automationOn(env) || !c.automationEnabled || !c.automationKinds.includes(row.milestone); };
+  if (await autoOff(db)) { await suppress(db, companyId, actorId, row.id, "regua_desligada"); throw new Invalid("Mensagem suprimida: a régua automática está desligada. Nada foi enviado"); }
   const ev = await evaluateCustomerSend(db, actorId, companyId, { chargeId: row.chargeId, templateVersionId: row.templateVersionId, sessionId: row.sessionId, phone: row.phone }, deps, { outboxId: row.id, now: deps?.now });
   if (ev.hard) { await suppress(db, companyId, actorId, row.id, ev.hard.code); throw new Invalid(`Mensagem suprimida: ${ev.hard.label}. Nada foi enviado`); }
   const soft = ev.checks.filter((c) => !c.ok);
@@ -270,6 +273,7 @@ export async function dispatchOutbox(db: DB, actorId: string, companyId: string,
     const consent = await consentState(db, companyId, row.phone);
     const stt = await getSettings(db, actorId, companyId);
     if (await hasOpenReply(db, companyId, row.phone)) return "bloqueado_antes_de_enviar";
+    if (await autoOff(db)) return "bloqueado_antes_de_enviar";                                                  // régua desligada no meio do caminho
     return !sendOn(env) || s?.p !== false || s?.st !== "CONNECTED" || !b || !cs.sendEnabled || stt.paused || !ch || ch.cs !== "aprovada" || ch.bs !== "aprovado" || openCents(ch) <= 0 || consent.state !== "opt_in" ? "bloqueado_antes_de_enviar" : null;
   };
   const out = await deliverViaWaha(db, { session: ev.ctx.session, digits: row.phone, text, deps, recheckBefore: recheck, recheckAfterCheck: recheck });
@@ -304,11 +308,11 @@ export async function resolveUnknown(db: DB, actorId: string, companyId: string,
 // ---------- histórico ----------
 export async function listOutbox(db: DB, actorId: string, companyId: string, o: { status?: string; limit?: number } = {}) {
   await requirePerm(db, actorId, companyId, "whatsapp.history");
-  const rows = (await db.execute(sql`select o.id::text id, o.status, o.reason, o.milestone, o.phone_masked phone, o.delivery, o.created_at, o.sent_at, o.finished_at, o.delivered_at, o.read_at, cu.display_name customer, c.due_date::text due, c.amount::text amount
+  const rows = (await db.execute(sql`select o.id::text id, o.status, o.origin, o.reason, o.milestone, o.phone_masked phone, o.delivery, o.created_at, o.sent_at, o.finished_at, o.delivered_at, o.read_at, cu.display_name customer, c.due_date::text due, c.amount::text amount
     from whatsapp_outbox o join customers cu on cu.company_id = o.company_id and cu.id = o.customer_id join charges c on c.company_id = o.company_id and c.id = o.charge_id
-    where o.company_id = ${companyId} ${o.status ? sql`and o.status = ${o.status}` : sql``} order by o.created_at desc limit ${Math.min(o.limit ?? 50, 200)}`)) as unknown as { id: string; status: string; reason: string | null; milestone: string; phone: string; delivery: string | null; created_at: Date; sent_at: Date | null; finished_at: Date | null; delivered_at: Date | null; read_at: Date | null; customer: string; due: string; amount: string }[];
+    where o.company_id = ${companyId} ${o.status ? sql`and o.status = ${o.status}` : sql``} order by o.created_at desc limit ${Math.min(o.limit ?? 50, 200)}`)) as unknown as { id: string; status: string; origin: string; reason: string | null; milestone: string; phone: string; delivery: string | null; created_at: Date; sent_at: Date | null; finished_at: Date | null; delivered_at: Date | null; read_at: Date | null; customer: string; due: string; amount: string }[];
   const d = (v: Date | null) => (v ? new Date(v) : null);
-  return rows.map((r) => ({ id: r.id, status: r.status, reason: r.reason, milestone: r.milestone, phone: r.phone, delivery: r.delivery, customer: r.customer, due: r.due, amountCents: centsFromNumeric(r.amount), createdAt: new Date(r.created_at), sentAt: d(r.sent_at), finishedAt: d(r.finished_at), deliveredAt: d(r.delivered_at), readAt: d(r.read_at) }));
+  return rows.map((r) => ({ id: r.id, status: r.status, origin: r.origin, reason: r.reason, milestone: r.milestone, phone: r.phone, delivery: r.delivery, customer: r.customer, due: r.due, amountCents: centsFromNumeric(r.amount), createdAt: new Date(r.created_at), sentAt: d(r.sent_at), finishedAt: d(r.finished_at), deliveredAt: d(r.delivered_at), readAt: d(r.read_at) }));
 }
 /** Texto enviado (decifrado). Só quem pode ver o histórico, e só da própria empresa. */
 export async function outboxBody(db: DB, actorId: string, companyId: string, outboxId: string) {

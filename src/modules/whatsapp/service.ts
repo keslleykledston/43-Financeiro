@@ -16,6 +16,8 @@ import { BLOCK_REASON_LABEL, CAPS, EVIDENCE_SOURCES, GLOBAL_OPT_IN_SOURCES, chat
  */
 export const moduleOn = (env: WahaEnv = process.env) => env.WHATSAPP_MODULE_ENABLED === "true";
 export const sendOn = (env: WahaEnv = process.env) => env.WHATSAPP_SEND_ENABLED === "true";
+/** W4: a régua AUTOMÁTICA tem a sua chave no servidor (desligada por padrão), além do envio e do módulo. */
+export const automationOn = (env: WahaEnv = process.env) => env.WHATSAPP_AUTOMATION_ENABLED === "true" && sendOn(env) && moduleOn(env);
 export type Deps = { waha?: WahaClient; env?: WahaEnv; now?: Date };
 export const envOf = (d?: Deps) => d?.env ?? process.env;
 export const clientOf = (d?: Deps) => d?.waha ?? createWahaClient(envOf(d));

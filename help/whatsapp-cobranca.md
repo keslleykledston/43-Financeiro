@@ -3,7 +3,7 @@
 **Quem acessa:** diretoria libera a empresa e confere mensagens «sem confirmação». Diretoria e gerência colocam na fila, enviam, cancelam e veem o histórico. Os demais papéis não veem estas telas.
 **Onde:** em **Contas a receber → (cobrança) → Enviar por WhatsApp**; **WhatsApp → Histórico**; **WhatsApp → Configuração**.
 
-> **Nada é automático.** Cada mensagem é escolhida, revisada e enviada por uma pessoa, uma de cada vez. A régua automática ainda não existe e continua **desligada**. A WAHA é um canal **não oficial**: o número pode ser restringido e os limites do sistema **não eliminam esse risco**.
+> **Nada é automático.** Cada mensagem é escolhida, revisada e enviada por uma pessoa, uma de cada vez. A régua automática existe em **WhatsApp → Régua e painel** (veja o artigo «WhatsApp: régua automática e painel»), mas nasce **desligada** e só a diretoria a liga. A WAHA é um canal **não oficial**: o número pode ser restringido e os limites do sistema **não eliminam esse risco**.
 
 ## Antes do primeiro envio (uma vez por empresa)
 1. **Conexão** conectada e liberada (WhatsApp → Conexões).

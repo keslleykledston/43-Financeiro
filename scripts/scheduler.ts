@@ -12,6 +12,7 @@ async function main() {
   const { syncAllAuto } = await import("../src/modules/issuance/sync");
   const { processWebhookEvents } = await import("../src/modules/issuance/webhooks");
   const { processPendingInbound } = await import("../src/modules/whatsapp/inbound");
+  const { runWhatsappAutomation } = await import("../src/modules/whatsapp/regua");
   const syncEvery = Math.max(300, Number(process.env.CORA_SYNC_INTERVAL_SECONDS ?? 600)) * 1000; // baixa automática: consulta a Cora a cada 10 min (mínimo 5)
   let lastSync = 0;
   const every = Math.max(15, Number(process.env.SCHEDULER_INTERVAL_SECONDS ?? 60)) * 1000;
@@ -23,6 +24,7 @@ async function main() {
     try { const n = await applyDueAmendments(db, null); if (n > 0) log({ event: "scheduler.amendments_applied", count: n }); } catch (e) { log({ event: "scheduler.amendments_error", kind: (e as Error).name }); }
     try { const w = await processWebhookEvents(db); if (w.processed + w.ignored + w.errors > 0) log({ event: "scheduler.cora_webhooks", ...w }); } catch (e) { log({ event: "scheduler.cora_webhooks_error", kind: (e as Error).name }); }
     try { const n = await processPendingInbound(db); if (n > 0) log({ event: "scheduler.whatsapp_inbound", pending: n }); } catch (e) { log({ event: "scheduler.whatsapp_inbound_error", kind: (e as Error).name }); } // respostas do WhatsApp que ficaram pendentes (ex.: WAHA fora do ar na hora)
+    try { const w = await runWhatsappAutomation(db); const t = w.reduce((a, c) => ({ queued: a.queued + c.queued, sent: a.sent + c.sent, waiting: a.waiting + c.waiting, failed: a.failed + c.failed, stale: a.stale + c.stale }), { queued: 0, sent: 0, waiting: 0, failed: 0, stale: 0 }); if (t.queued + t.sent + t.failed + t.stale > 0) log({ event: "scheduler.whatsapp_regua", companies: w.length, ...t }); } catch (e) { log({ event: "scheduler.whatsapp_regua_error", kind: (e as Error).name }); } // régua automática (desligada por padrão: chave do servidor + empresa + régua)
     if (Date.now() - lastSync >= syncEvery) {
       lastSync = Date.now();
       try { const s = await syncAllAuto(db); if (s.companies > 0) log({ event: "scheduler.cora_sync", ...s }); } catch (e) { log({ event: "scheduler.cora_sync_error", kind: (e as Error).name }); }

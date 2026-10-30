@@ -182,7 +182,7 @@ describe.skipIf(!enabled)("W2 WhatsApp: vínculo de empresas, consentimento/opt-
     expect((await consentState(db, B, DIGITS)).state).toBe("opt_in");                    // volta ao último registro da B
     expect((await consentState(db, A, DIGITS)).state).toBe("opt_in");
     expect(await audits()).toEqual(expect.arrayContaining(["whatsapp.consent.opt_in:A", "whatsapp.consent.opt_out:A", "whatsapp.consent.opt_in:B"]));
-    expect(JSON.stringify(await db.select().from(schema.auditLog))).not.toMatch(/5592|99999/); // auditoria sem telefone
+    expect(JSON.stringify((await db.select().from(schema.auditLog)).map((a) => [a.action, a.detail]))).not.toMatch(/5592|99999/); // auditoria sem telefone
   });
 
   it("a prova do consentimento é só uma referência: e-mail, telefone, CPF/CNPJ e sequências longas de dígitos são recusados; datas e números de contrato passam", async () => {

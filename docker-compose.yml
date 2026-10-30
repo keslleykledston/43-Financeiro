@@ -20,7 +20,7 @@ x-app-env: &app-env
   FISCAL_LIVE_ENABLED: "false"
   WHATSAPP_LIVE_ENABLED: "false"   # chave GERAL antiga da fila simulada: continua desligada (ligada, recusa TODA emissão real)
   # W1 — WhatsApp (WAHA, NÃO oficial). MODULE = gerenciar conexões/QR (não envia nada). SEND = envio manual de TESTE (desligada: liga só por ordem do dono, com autorização registrada na tela).
-  # AUTOMATION = réguas automáticas (não existe ainda; fica desligada).
+  # AUTOMATION = régua automática (W4: implementada, mas DESLIGADA; ligar só por decisão operacional do dono, e cada empresa/régua ainda precisa ser ligada pela diretoria).
   WAHA_BASE_INTERNAL_URL: "http://waha:3000"
   WHATSAPP_MODULE_ENABLED: "true"
   WHATSAPP_SEND_ENABLED: "true"   # LIGADA em 2026-10-29 por ordem do dono (canário W1). Sozinha não envia nada: cada empresa precisa de autorização ativa (números exatos + limite), conexão liberada e conectada, janela e limites; só envio manual de teste.

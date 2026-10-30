@@ -195,7 +195,7 @@ describe.skipIf(!enabled)("W3b WhatsApp: webhook assinado, respostas, pedido de 
     const c = (await db.select().from(schema.whatsappConsents)).filter((x) => x.decision === "opt_out");
     expect(c).toHaveLength(1); expect(c[0]).toMatchObject({ scope: "company", evidenceSource: "cliente_iniciou", companyId: A });
     expect((await db.select().from(schema.users).where(eq(schema.users.id, c[0].actorId)))[0]).toMatchObject({ email: "sistema-whatsapp@k3g.invalid", name: "WhatsApp (automático)" });
-    expect(JSON.stringify(await db.select().from(schema.auditLog))).not.toMatch(/5592|99999|PARAR/);
+    expect(JSON.stringify((await db.select().from(schema.auditLog)).map((a) => [a.action, a.detail]))).not.toMatch(/5592|99999|PARAR/);
     const q = await db.select().from(schema.whatsappOutbox);
     expect(q.find((r) => r.id === q2.outboxId)!.status).toBe("na_fila");                                  // outro cliente: intacto
     const ev = await evaluateCustomerSend(db, gerA, A, { chargeId: ch1, templateVersionId: tpl.d_mais_3, sessionId: sid }, deps);

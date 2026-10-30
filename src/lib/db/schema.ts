@@ -1220,8 +1220,16 @@ export const whatsappCompanySettings = pgTable("whatsapp_company_settings", {
   reference: text("reference"), // onde está a autorização escrita da empresa para cobrar clientes por WhatsApp
   authorizedBy: uuid("authorized_by").references(() => users.id),
   authorizedAt: timestamp("authorized_at", { withTimezone: true }),
+  // W4 — régua AUTOMÁTICA: ativação SEPARADA da cobrança manual (por empresa e por régua). Nasce desligada; ligar exige diretoria, referência escrita e frase. Quem liga fica registrado: a régua roda
+  // em nome dessa pessoa e PARA sozinha se ela perder a permissão. `automation_enabled` só vale com `send_enabled`.
+  automationKinds: text("automation_kinds").array().notNull().default(sql`'{}'::text[]`),
+  automationReference: text("automation_reference"),
+  automationAuthorizedBy: uuid("automation_authorized_by").references(() => users.id),
+  automationAuthorizedAt: timestamp("automation_authorized_at", { withTimezone: true }),
 }, (t) => [
   uniqueIndex("whatsapp_company_settings_company_uq").on(t.companyId),
+  check("whatsapp_company_settings_auto_chk", sql`not ${t.automationEnabled} or (${t.sendEnabled} and cardinality(${t.automationKinds}) > 0 and ${t.automationReference} is not null and char_length(${t.automationReference}) >= 5 and ${t.automationAuthorizedBy} is not null)`),
+  check("whatsapp_company_settings_kinds_chk", sql`${t.automationKinds} <@ array['d_menos_3', 'd0', 'd_mais_3', 'd_mais_7']::text[]`),
   check("whatsapp_company_settings_cap_chk", sql`${t.dailyCap} between 1 and 10`),
   check("whatsapp_company_settings_auth_chk", sql`not (${t.sendEnabled} or ${t.automationEnabled}) or (${t.reference} is not null and char_length(${t.reference}) >= 5 and ${t.authorizedBy} is not null and ${t.authorizedAt} is not null)`),
 ]);
@@ -1250,6 +1258,7 @@ export const whatsappOutbox = pgTable("whatsapp_outbox", {
   sentAt: timestamp("sent_at", { withTimezone: true }),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
   requestedBy: uuid("requested_by").notNull().references(() => users.id),
+  origin: text("origin").notNull().default("manual"), // manual (operador) | regua (automática, W4)
 }, (t) => [
   foreignKey({ columns: [t.companyId, t.chargeId], foreignColumns: [charges.companyId, charges.id] }),
   foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
@@ -1264,6 +1273,8 @@ export const whatsappOutbox = pgTable("whatsapp_outbox", {
   check("whatsapp_outbox_milestone_chk", sql`${t.milestone} in ('emissao', 'd_menos_3', 'd0', 'd_mais_3', 'd_mais_7')`),
   check("whatsapp_outbox_idem_chk", sql`${t.idempotencyKey} ~ '^[A-Za-z0-9_-]{8,64}$'`),
   check("whatsapp_outbox_delivery_chk", sql`${t.delivery} is null or ${t.delivery} in ('entregue', 'lido')`),
+  check("whatsapp_outbox_origin_chk", sql`${t.origin} in ('manual', 'regua')`),
+  index("whatsapp_outbox_origin_idx").on(t.companyId, t.origin, t.status),
   check("whatsapp_outbox_finished_chk", sql`(${t.status} in ('enviado', 'desconhecido', 'falhou', 'suprimido', 'cancelado')) = (${t.finishedAt} is not null)`),
 ]);
 

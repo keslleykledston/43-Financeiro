@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
 import { assignTriage, discardTriage, markDispute, optOutFromInbox, setHandling } from "@/modules/whatsapp/inbound";
 import { cancelOutbox, dispatchOutbox, queueCustomerMessage, resolveUnknown, saveCompanySettings } from "@/modules/whatsapp/outbound";
+import { saveAutomation } from "@/modules/whatsapp/regua";
 import { ensureWhatsappDefaults } from "@/modules/messaging/service";
 import { bindCompany, createSession, disconnectSession, recordConsent, revokeAuthorization, saveAuthorization, sendTest, setPaused, settleStaleSends, startSession, unbindCompany } from "@/modules/whatsapp/service";
 
@@ -163,4 +164,19 @@ export async function triageAction(fd: FormData) {
     else await assignTriage(db, c.userId, id, text(fd, "companyId", 40));
   } catch (e) { err = known(e); }
   revalidatePath("/whatsapp/entrada"); inboxBack(err, "ok");
+}
+
+// ---------- W4: régua automática ----------
+export async function saveAutomationAction(_: FormState, fd: FormData): Promise<FormState> {
+  try {
+    const c = await ctx();
+    await saveAutomation(db, c.userId, c.companyId, { enable: fd.get("enable") === "1", kinds: fd.getAll("kinds").map((k) => String(k).slice(0, 20)), reference: text(fd, "reference", 300), phrase: text(fd, "phrase", 80) });
+  } catch (e) { return { error: known(e) }; }
+  revalidatePath("/whatsapp/regua");
+  redirect("/whatsapp/regua?ok=salvo");
+}
+export async function disableAutomationAction() {
+  let err = "";
+  try { const c = await ctx(); await saveAutomation(db, c.userId, c.companyId, { enable: false }); } catch (e) { err = known(e); }
+  revalidatePath("/whatsapp/regua"); redirect(`/whatsapp/regua${err ? `?erro=${encodeURIComponent(err)}` : "?ok=desligada"}`);
 }
