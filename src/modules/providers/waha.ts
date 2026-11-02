@@ -47,6 +47,8 @@ export interface WahaClient {
   startSession(name: string): Promise<WahaSession>;
   stopSession(name: string): Promise<void>;
   logoutSession(name: string): Promise<void>;
+  /** Apaga a sessão na WAHA (remover conexão). Sessão que já não existe (404) conta como apagada. */
+  deleteSession(name: string): Promise<void>;
   /** PNG do QR (só com a sessão em SCAN_QR_CODE). Nunca em log. */
   qr(name: string): Promise<Buffer>;
   /**
@@ -122,6 +124,7 @@ export function createWahaClient(env: WahaEnv = process.env, fetchImpl: Fetch = 
     async startSession(name) { return parseSession(asJson(ok(await call("POST", `/api/sessions/${must(name)}/start`)))); },
     async stopSession(name) { ok(await call("POST", `/api/sessions/${must(name)}/stop`)); },
     async logoutSession(name) { ok(await call("POST", `/api/sessions/${must(name)}/logout`)); },
+    async deleteSession(name) { const r = await call("DELETE", `/api/sessions/${must(name)}`); if (r.status !== 404) ok(r); },
     async qr(name) {
       const r = ok(await call("GET", `/api/${must(name)}/auth/qr`, undefined, "image/png", MAX_QR));
       if (!r.type.startsWith("image/png")) throw new WahaError("http", 502, "qr_formato_inesperado");

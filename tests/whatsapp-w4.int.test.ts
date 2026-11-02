@@ -12,7 +12,7 @@ import { createContract, decideVersion, getContract } from "@/modules/contracts/
 import { approveBatch, generateBatch, getBatch } from "@/modules/billing/batches";
 import { ensureWhatsappDefaults, saveSettings } from "@/modules/messaging/service";
 import { FakeWaha } from "./helpers/fake-waha";
-import { bindCompany, createSession, recordConsent, refreshSession, setPaused, type Deps } from "@/modules/whatsapp/service";
+import { bindCompany, createSession, recordConsent, refreshSession, removeSession, setPaused, type Deps } from "@/modules/whatsapp/service";
 import { SEND_PHRASE, dispatchOutbox, queueCustomerMessage, saveCompanySettings, whatsappTemplateOptions } from "@/modules/whatsapp/outbound";
 import { AUTO_PHRASE, getAutomation, reguaOverview, runWhatsappAutomation, saveAutomation, simulateRegua } from "@/modules/whatsapp/regua";
 import { processInboundEvent } from "@/modules/whatsapp/inbound";
@@ -214,6 +214,32 @@ describe.skipIf(!enabled)("W4 WhatsApp: régua automática (DB de teste, WAHA fa
     expect(ov.status).toMatchObject({ serverOn: true, automationEnabled: true, actorOk: true, connected: true });
     expect(ov.optOuts).toBe(1); expect(ov.paidAfterNotice.charges).toBe(1); expect(ov.paidAfterNotice.cents).toBeGreaterThan(0);
     await expect(reguaOverview(db, asstA, A, 30, deps)).rejects.toBeInstanceOf(Forbidden);
+  });
+
+  it("simulação de OUTRO dia avalia o histórico daquele dia (7 dias, janela e limite), não o de hoje; o dia de hoje segue o relógio", async () => {
+    await arm(["d0"]);
+    await run();
+    const sent = (await outbox()).filter((o) => o.status === "enviado");
+    expect(sent).toHaveLength(2);
+    await db.execute(sql`alter table whatsapp_outbox disable trigger whatsapp_outbox_guard_trg`);
+    await db.execute(sql`update whatsapp_outbox set sent_at = ${new Date(NOW.getTime() - 2 * 86400000).toISOString()}::timestamptz`); // avisos de 2 dias antes do vencimento (só no teste: a guarda impede em produção)
+    await db.execute(sql`alter table whatsapp_outbox enable trigger whatsapp_outbox_guard_trg`);
+    const same = await simulateRegua(db, gerA, A, { day: DUE, kinds: ["d0"] }, { ...deps, now: NOW });
+    expect(same.rows.find((r) => r.customer.startsWith("Cliente Um"))).toMatchObject({ outcome: "ja_tratada" }); // régua já tratou o marco
+    const later = await simulateRegua(db, gerA, A, { day: new Date(NOW.getTime() + 7 * 86400000).toISOString().slice(0, 10), kinds: ["d_mais_7"] }, { ...deps, now: NOW });
+    expect(later.rows.length).toBeGreaterThan(0);
+    for (const r of later.rows) expect(r.why ?? "").not.toMatch(/últimos 7 dias/);                                   // 9 dias depois do aviso: não bloqueia
+    const near = await simulateRegua(db, gerA, A, { day: new Date(NOW.getTime() + 3 * 86400000).toISOString().slice(0, 10), kinds: ["d_mais_3"] }, { ...deps, now: NOW });
+    expect(near.rows.length).toBeGreaterThan(0);
+    for (const r of near.rows) expect(r.why ?? "").toMatch(/últimos 7 dias/);                                        // 5 dias depois do aviso: bloqueia
+    expect(waha.sent).toHaveLength(2);                                                                                 // simular nunca envia
+  });
+
+  it("remover conexão recusa enquanto houver mensagem na fila por ela", async () => {
+    const q = await queueCustomerMessage(db, gerA, A, { chargeId: ch1, templateVersionId: tpl.d0, sessionId: sid, confirm: true, key: k() }, { ...deps, now: NOW });
+    await db.execute(sql`update whatsapp_sessions set status = 'DISCONNECTED'`);
+    await expect(removeSession(db, dirA, A, sid, true, deps)).rejects.toThrow(/fila/);
+    await db.execute(sql`delete from whatsapp_outbox where id = ${q.outboxId}::uuid`).catch(() => null);
   });
 
   it("isolamento: a régua da empresa A não toca na B; a origem é imutável e o histórico não se apaga", async () => {

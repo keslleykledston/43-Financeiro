@@ -91,6 +91,8 @@ export async function simulateRegua(db: DB, actorId: string, companyId: string, 
   const auto = await getAutomation(db, actorId, companyId, deps);
   const kinds = input.kinds?.length ? input.kinds.filter(isKind) : [...AUTO_KINDS];
   const cands = await candidates(db, companyId, day, kinds);
+  // dia escolhido ≠ hoje: janela, limite diário e «1 aviso a cada 7 dias» são avaliados NAQUELE dia (ao meio-dia de Manaus), não pelo histórico de hoje
+  const at = day === manausDay(deps?.now) ? (deps?.now ?? new Date()) : new Date(`${day}T12:00:00-04:00`);
   const sid = await connectedSession(db, companyId);
   const tpls = await whatsappTemplateOptions(db, actorId, companyId);
   const done = new Set(((await db.execute(sql`select idempotency_key k from whatsapp_outbox where company_id = ${companyId} and idempotency_key like 'regua-%'`)) as unknown as { k: string }[]).map((r) => r.k));
@@ -101,7 +103,7 @@ export async function simulateRegua(db: DB, actorId: string, companyId: string, 
     const tpl = tpls.find((t) => t.kind === c.kind && t.usable);
     if (!tpl) { rows.push({ ...base, outcome: "nunca", why: "Sem modelo de WhatsApp ativo para este marco" }); continue; }
     if (!sid) { rows.push({ ...base, outcome: "espera", why: "Nenhuma conexão conectada e liberada para esta empresa" }); continue; }
-    const ev = await evaluateCustomerSend(db, actorId, companyId, { chargeId: c.chargeId, templateVersionId: tpl.versionId, sessionId: sid }, deps, { now: deps?.now });
+    const ev = await evaluateCustomerSend(db, actorId, companyId, { chargeId: c.chargeId, templateVersionId: tpl.versionId, sessionId: sid }, deps, { now: at, asOf: at });
     if (ev.canSend) rows.push({ ...base, outcome: "sairia", why: null });
     else if (ev.hard) rows.push({ ...base, outcome: "nunca", why: ev.hard.label });
     else { const f = ev.checks.find((k) => !k.ok); rows.push({ ...base, outcome: "espera", why: f?.detail ?? f?.label ?? null }); }

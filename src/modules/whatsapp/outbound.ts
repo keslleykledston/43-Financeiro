@@ -107,7 +107,7 @@ export type Eligibility = { checks: Check[]; canSend: boolean; hard: { code: str
  * Tudo que decide se UMA cobrança pode sair AGORA por WhatsApp. `hard` = a mensagem nunca mais deve sair (cobrança paga, sem consentimento, opt-out, modelo desativado...): o envio a suprime.
  * Os demais bloqueios (janela, limites, conexão, chaves) são temporários: a mensagem espera na fila.
  */
-export async function evaluateCustomerSend(db: DB, actorId: string, companyId: string, input: { chargeId: string; templateVersionId: string; sessionId: string; contactId?: string; phone?: string }, deps?: Deps, opts: { outboxId?: string; now?: Date } = {}): Promise<Eligibility> {
+export async function evaluateCustomerSend(db: DB, actorId: string, companyId: string, input: { chargeId: string; templateVersionId: string; sessionId: string; contactId?: string; phone?: string }, deps?: Deps, opts: { outboxId?: string; now?: Date; asOf?: Date } = {}): Promise<Eligibility> {
   await requirePerm(db, actorId, companyId, "whatsapp.send");
   const env = envOf(deps);
   const checks: Check[] = [];
@@ -172,7 +172,7 @@ export async function evaluateCustomerSend(db: DB, actorId: string, companyId: s
     add("cap_session", u.session < CAPS.sessionDaily, "Limite diário da conexão", u.session < CAPS.sessionDaily ? undefined : `Limite de ${CAPS.sessionDaily} por dia atingido (soma das empresas)`);
   }
   if (ch) {
-    const recent = (await db.execute(sql`select 1 from whatsapp_outbox where company_id = ${companyId} and customer_id = ${ch.customer_id}::uuid and status in ('enviando', 'enviado', 'desconhecido') and coalesce(sent_at, finished_at, updated_at) > now() - interval '7 days' ${opts.outboxId ? sql`and id <> ${opts.outboxId}::uuid` : sql``} limit 1`)) as unknown as unknown[];
+    const recent = (await db.execute(sql`select 1 from whatsapp_outbox where company_id = ${companyId} and customer_id = ${ch.customer_id}::uuid and status in ('enviando', 'enviado', 'desconhecido') and coalesce(sent_at, finished_at, updated_at) > ${opts.asOf ? sql`${opts.asOf.toISOString()}::timestamptz` : sql`now()`} - interval '7 days' ${opts.asOf ? sql`and coalesce(sent_at, finished_at, updated_at) <= ${opts.asOf.toISOString()}::timestamptz` : sql``} ${opts.outboxId ? sql`and id <> ${opts.outboxId}::uuid` : sql``} limit 1`)) as unknown as unknown[];
     add("recent", recent.length === 0, "No máximo 1 aviso por cliente a cada 7 dias", recent.length === 0 ? undefined : "Já houve aviso a este cliente nos últimos 7 dias", "aviso_recente");
   }
   const canSend = checks.every((c) => c.ok);
@@ -183,6 +183,11 @@ export async function evaluateCustomerSend(db: DB, actorId: string, companyId: s
 }
 
 // ---------- colocar na fila ----------
+/** A conexão ainda existe (não removida), NÃO está pausada (remover conexão pausa primeiro) e está vinculada à empresa. Conferido SOB as travas de enfileirar/enviar. */
+async function sessionUsable(x: DB, companyId: string, sessionId: string) {
+  const r = (await x.execute(sql`select 1 from whatsapp_sessions s join whatsapp_session_companies b on b.session_id = s.id and b.company_id = ${companyId}::uuid and b.revoked_at is null where s.id = ${sessionId}::uuid and s.status <> 'REVOKED' and s.paused = false`)) as unknown as unknown[];
+  return r.length > 0;
+}
 const IDEM = /^[A-Za-z0-9_-]{8,64}$/;
 export async function queueCustomerMessage(db: DB, actorId: string, companyId: string, input: { chargeId: string; templateVersionId: string; sessionId: string; contactId?: string; phone?: string; confirm: boolean; key: string; origin?: "manual" | "regua" }, deps?: Deps) {
   await requirePerm(db, actorId, companyId, "whatsapp.send");
@@ -201,6 +206,7 @@ export async function queueCustomerMessage(db: DB, actorId: string, companyId: s
     return await db.transaction(async (tx) => {
       const x = tx as unknown as DB;
       await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-queue:" + companyId}))`);
+      if (!(await sessionUsable(x, companyId, c.session.id))) throw new Invalid("A conexão foi pausada, removida ou desvinculada. Nada foi colocado na fila"); // remover conexão usa a mesma trava
       const [row] = await x.insert(whatsappOutbox).values({ companyId, sessionId: c.session.id, chargeId: c.chargeId, customerId: c.customerId, templateVersionId: c.templateVersionId, milestone: c.milestone, phone: c.phone, phoneMasked: c.phoneMasked, bodyEnc: seal(c.text, BOX(companyId)), bodySha: c.sha, idempotencyKey: input.key, requestedBy: actorId, origin: input.origin === "regua" ? "regua" : "manual" }).returning({ id: whatsappOutbox.id });
       await audit(x, companyId, actorId, "whatsapp.customer_queued", { outboxId: row.id, milestone: c.milestone, origin: input.origin === "regua" ? "regua" : "manual" });
       return { outboxId: row.id };
@@ -245,6 +251,7 @@ export async function dispatchOutbox(db: DB, actorId: string, companyId: string,
     const x = tx as unknown as DB;
     await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-send:" + row.sessionId}))`);
     await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-send-co:" + companyId}))`);
+    if (!(await sessionUsable(x, companyId, row.sessionId))) throw new Invalid("A conexão foi pausada, removida ou desvinculada. A mensagem continua na fila"); // remover conexão usa a trava whatsapp-send
     const cs = await loadCompanySettings(x, companyId);
     const u = await usedToday(x, companyId, row.sessionId, manausDay(), row.id);
     if (u.company + 1 > Math.min(cs.dailyCap, CAPS.companyDaily) || u.session + 1 > CAPS.sessionDaily) throw new Invalid("Limite diário de envios atingido. A mensagem continua na fila");

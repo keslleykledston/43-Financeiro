@@ -21,6 +21,7 @@ export class FakeWaha implements WahaClient {
   async startSession(name: string) { this.calls.push("start"); this.guard(); const s = this.sessions.get(name)!; s.status = "SCAN_QR_CODE"; return s; }
   async stopSession(name: string) { this.calls.push("stop"); this.guard(); const s = this.sessions.get(name); if (s) { s.status = "STOPPED"; s.meId = null; } }
   async logoutSession(name: string) { this.calls.push("logout"); this.guard(); const s = this.sessions.get(name); if (!s || s.status !== "WORKING") throw new WahaError("http", 422, "http_422"); s.meId = null; }
+  async deleteSession(name: string) { this.calls.push("delete"); this.guard(); this.sessions.delete(name); }
   async qr(name: string) { this.calls.push("qr"); this.guard(); if (this.sessions.get(name)?.status !== "SCAN_QR_CODE") throw new WahaError("http", 422, "http_422"); return Buffer.from("PNGfake"); }
   lids = new Map<string, string>(); // lid -> telefone
   onCheck: (() => Promise<void>) | null = null; // gancho do teste: roda no instante da consulta (simula algo mudando no meio do envio)

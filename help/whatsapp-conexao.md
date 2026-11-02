@@ -34,6 +34,7 @@ Um número, **um QR só**: a diretoria pode **vincular outra empresa** do grupo 
 - **Pausar envios** bloqueia qualquer envio por aquela conexão, na hora.
 - **Liberar envios** só funciona com a conexão **Conectada**; as outras travas continuam valendo.
 - **Desconectar número** (com confirmação) faz logout do aparelho e pausa a conexão. O **histórico fica**; nada é apagado.
+- **Remover conexão** (com confirmação) apaga a conexão na WAHA e a tira da lista. Serve para tentativa que falhou ou conexão que não será mais usada. Só aparece com a conexão **fora de «Conectada»** (conectada: desconecte antes) e é recusada se houver mensagem **na fila** ou sendo enviada por ela, ou se **outra empresa** ainda a usa. Se a WAHA não confirmar (ou algo cair no meio), a conexão fica **pausada e visível**: é só repetir «Remover conexão». O **histórico de envios, respostas e auditoria fica**.
 
 ## Enviar uma mensagem de teste
 O teste existe para provar que a conexão funciona, **com texto fixo e sem dado de cliente**.

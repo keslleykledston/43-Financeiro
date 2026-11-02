@@ -49,6 +49,7 @@ createServer((req, res) => {
       return json(res, 201, view(body.name, s));
     }
     if ((r = /^\/api\/sessions\/([^/]+)$/.exec(p)) && m === "GET") { const s = sessions.get(r[1]); return s ? json(res, 200, view(r[1], s)) : json(res, 404, { message: `Session '${r[1]}' does not exist`, statusCode: 404 }); }
+    if ((r = /^\/api\/sessions\/([^/]+)$/.exec(p)) && m === "DELETE") { if (!sessions.has(r[1])) return json(res, 404, { statusCode: 404 }); sessions.delete(r[1]); return json(res, 200, {}); }
     if ((r = /^\/api\/sessions\/([^/]+)\/(start|stop|logout)$/.exec(p)) && m === "POST") {
       const s = sessions.get(r[1]); if (!s) return json(res, 404, { statusCode: 404 });
       if (r[2] === "start") { s.status = "STARTING"; setTimeout(() => { if (s.status === "STARTING") s.status = "SCAN_QR_CODE"; }, 400); }

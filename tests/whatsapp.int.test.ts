@@ -11,7 +11,7 @@ import { Forbidden, Invalid } from "@/modules/identity/service";
 import { saveSettings } from "@/modules/messaging/service";
 import { FakeWaha } from "./helpers/fake-waha";
 import {
-  createSession, disconnectSession, evaluateTestSend, getAuthorization, getQr, listSendLog, listSessions, refreshSession, revokeAuthorization, saveAuthorization, sendTest, setPaused, settleStaleSends, startSession, type Deps,
+  bindCompany, createSession, disconnectSession, removeSession, unbindCompany, evaluateTestSend, getAuthorization, getQr, listSendLog, listSessions, refreshSession, revokeAuthorization, saveAuthorization, sendTest, setPaused, settleStaleSends, startSession, type Deps,
 } from "@/modules/whatsapp/service";
 
 const enabled = !!process.env.POSTGRES_USER;
@@ -153,6 +153,38 @@ describe.skipIf(!enabled)("W1 WhatsApp: conexões, QR, isolamento por empresa, a
     expect(await audits()).toContain("whatsapp.session.disconnected");
     await expect(disconnectSession(db, dirA, A, id, true, deps)).resolves.toBeUndefined(); // logout recusado (já sem login) é aceito
     expect(await db.select().from(schema.whatsappSessions)).toHaveLength(1); // nada apagado
+  });
+
+  it("remover conexão: só quem gerencia, com confirmação; recusa conectada, com fila ou usada por outra empresa; apaga na WAHA, marca removida, desvincula e MANTÉM o histórico; libera a vaga", async () => {
+    const id = await newSession(); const prov = await providerName(id);
+    await expect(removeSession(db, gerA, A, id, true, deps)).rejects.toBeInstanceOf(Forbidden);
+    await expect(removeSession(db, dirB, A, id, true, deps)).rejects.toBeInstanceOf(Forbidden);
+    await expect(removeSession(db, dirA, A, id, false, deps)).rejects.toThrow(/Confirme/);
+    waha.connect(prov); await refreshSession(db, dirA, A, id, deps);
+    await expect(removeSession(db, dirA, A, id, true, deps)).rejects.toThrow(/Desconectar número/);          // conectada: desconecta antes
+    await disconnectSession(db, dirA, A, id, true, deps);
+    await db.insert(schema.memberships).values({ userId: dirA, companyId: B, role: "diretoria" });
+    await bindCompany(db, dirA, A, id, { targetCompanyId: B, senderIdentity: "Financeiro B", confirm: true });
+    await expect(removeSession(db, dirA, A, id, true, deps)).rejects.toThrow(/Outra empresa/);               // usada por outra empresa
+    await unbindCompany(db, dirA, B, id, true);
+    waha.down = true;
+    await expect(removeSession(db, dirA, A, id, true, deps)).rejects.toThrow(/WAHA não confirmou/);          // WAHA fora: nada some, fica pausada
+    expect((await db.select().from(schema.whatsappSessions))[0]).toMatchObject({ status: "DISCONNECTED", paused: true });
+    expect(await listSessions(db, dirA, A)).toHaveLength(1);                                                  // continua na lista (visível), pausada: é só repetir
+    await expect(removeSession(db, dirA, A, id, true, { waha, env: { ...ENV_ON, WHATSAPP_MODULE_ENABLED: "false" } })).rejects.toThrow(/WAHA não está acessível/); // sem confirmar na WAHA, nada é removido
+    expect((await db.select().from(schema.whatsappSessions))[0].status).toBe("DISCONNECTED");
+    waha.down = false;
+    await removeSession(db, dirA, A, id, true, deps);
+    expect(waha.calls).toContain("delete"); expect(waha.sessions.has(prov)).toBe(false);
+    expect((await db.select().from(schema.whatsappSessions))[0]).toMatchObject({ status: "REVOKED", paused: true });
+    expect((await db.select().from(schema.whatsappSessionCompanies)).every((b) => b.revokedAt !== null)).toBe(true);
+    expect(await audits()).toEqual(expect.arrayContaining(["whatsapp.session.removal_started", "whatsapp.session.removed"]));
+    expect(await listSessions(db, dirA, A)).toHaveLength(0);
+    await expect(refreshSession(db, dirA, A, id, deps)).rejects.toThrow(/não encontrada/);                    // some das telas e ações
+    expect(await db.select().from(schema.whatsappSessions)).toHaveLength(1);                                  // o registro fica (histórico)
+    await expect(startSession(db, dirA, A, id, deps)).rejects.toThrow(/não encontrada/);                      // removida: não inicia nem recria na WAHA
+    expect(waha.sessions.has(prov)).toBe(false);
+    expect(await newSession(dirA, A, "Nova")).toBeTruthy();                                                    // a vaga foi liberada
   });
 
   it("autorização: só diretoria; valida números/limite; nova substitui a antiga; só revogar, nunca editar ou apagar (banco)", async () => {

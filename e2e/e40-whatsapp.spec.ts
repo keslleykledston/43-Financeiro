@@ -12,6 +12,7 @@ test("W1 — WhatsApp: conectar por QR, liberar, registrar autorização, confer
     await page.getByLabel("Início").fill("00:00");
     await page.getByLabel("Fim").fill("23:59");
     for (const d of ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]) await page.getByLabel(d, { exact: true }).check();
+    await page.getByLabel(/Não enviar em feriados/).uncheck(); // o teste não pode depender do calendário (feriado nacional fecharia a janela)
     await page.getByRole("button", { name: "Salvar configuração" }).click();
     await expect(page.getByText("Configuração salva")).toBeVisible();
   });

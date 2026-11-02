@@ -22,7 +22,7 @@
 - O sistema **não responde** a clientes e **não conversa**: respostas vão para a Caixa de entrada e **suspendem** a cobrança daquele cliente até alguém resolver.
 
 ## Simulação (não envia nada)
-A tela mostra, para o dia escolhido, cada cobrança que cairia em D-3, D0, D+3 ou D+7 e o resultado: **Sairia**, **Esperaria** (janela, limite ou conexão), **Não sairia** (sem consentimento, pediu para parar, paga, aviso recente…) ou **Já tratada**. Use antes de ligar e depois, para conferir.
+A tela mostra, para o dia escolhido, cada cobrança que cairia em D-3, D0, D+3 ou D+7 e o resultado: **Sairia**, **Esperaria** (janela, limite ou conexão), **Não sairia** (sem consentimento, pediu para parar, paga, aviso recente…) ou **Já tratada**. Use antes de ligar e depois, para conferir. Para um dia **futuro**, a simulação avalia janela, limite diário e a regra de **1 aviso a cada 7 dias** como seriam **naquele dia** (ao meio-dia de Manaus), não pelo histórico de hoje; o que for enviado entre hoje e lá pode mudar o resultado.
 
 ## Painel dos últimos 30 dias
 Enviadas, entregues, lidas, na fila, falhas, sem confirmação, suprimidas (com o motivo), pedidos de parar, respostas, contestações e mensagens criadas pela régua. Também mostra **cobranças pagas até 7 dias depois de um aviso enviado**. Isso é apenas **coincidência de datas**: o painel **não afirma** que o aviso causou o pagamento.

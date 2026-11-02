@@ -10,10 +10,10 @@ import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass } from "@/components/k3g/button";
 import { CreateForm } from "./create-form";
 import { SessionLive } from "./session-live";
-import { bindCompanyAction, disconnectSessionAction, pauseSessionAction, resumeSessionAction, startSessionAction, unbindCompanyAction } from "./actions";
+import { bindCompanyAction, disconnectSessionAction, pauseSessionAction, removeSessionAction, resumeSessionAction, startSessionAction, unbindCompanyAction } from "./actions";
 
 const TONE: Record<SessionStatus, StatusTone> = { CREATED: "neutral", STARTING: "info", QR_REQUIRED: "warning", CONNECTED: "positive", DISCONNECTED: "neutral", DEGRADED: "negative", REVOKED: "neutral" };
-const OK_MSG: Record<string, string> = { iniciada: "Conexão iniciada.", pausada: "Conexão pausada: nenhum envio sai por ela.", liberada: "Conexão liberada para envios (continuam valendo todas as travas).", desconectada: "Número desconectado.", vinculada: "Empresa vinculada à conexão. Ela precisa registrar a própria autorização de envio e os consentimentos.", desvinculada: "Esta empresa deixou de usar a conexão." };
+const OK_MSG: Record<string, string> = { iniciada: "Conexão iniciada.", pausada: "Conexão pausada: nenhum envio sai por ela.", liberada: "Conexão liberada para envios (continuam valendo todas as travas).", desconectada: "Número desconectado.", removida: "Conexão removida. O histórico foi mantido.", vinculada: "Empresa vinculada à conexão. Ela precisa registrar a própria autorização de envio e os consentimentos.", desvinculada: "Esta empresa deixou de usar a conexão." };
 
 export default async function WhatsApp({ searchParams }: { searchParams: Promise<{ erro?: string; ok?: string }> }) {
   const [sp, ctx] = await Promise.all([searchParams, requireContext()]);
@@ -95,6 +95,13 @@ export default async function WhatsApp({ searchParams }: { searchParams: Promise
                   <label className="flex items-center gap-1.5 text-xs text-muted-foreground"><input type="checkbox" name="confirm" required className="size-3.5 accent-primary" />Confirmo</label>
                   <button className={buttonClass("danger", "sm")}>Desconectar número</button>
                 </form>
+                {s.status !== "CONNECTED" && (
+                  <form action={removeSessionAction} className="flex flex-wrap items-center gap-2">
+                    <input type="hidden" name="id" value={s.id} />
+                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground"><input type="checkbox" name="confirm" required className="size-3.5 accent-primary" />Confirmo</label>
+                    <button className={buttonClass("outline", "sm")}>Remover conexão</button>
+                  </form>
+                )}
               </div>
             )}
           </SectionCard>

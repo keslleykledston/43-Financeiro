@@ -85,7 +85,7 @@ export async function syncFromWaha(db: DB, sessionId: string, name: string, op: 
   try {
     const r = await op(clientOf(deps));
     const status: SessionStatus = r ? mapWahaStatus(r.status) : "DISCONNECTED";
-    await db.update(whatsappSessions).set({ status, phoneMasked: r ? maskMe(r.meId) ?? sql`${whatsappSessions.phoneMasked}` : sql`${whatsappSessions.phoneMasked}`, engine: r?.engine ?? sql`${whatsappSessions.engine}`, lastSeenAt: new Date(), lastError: r ? null : "sessao_ausente_na_waha", updatedAt: new Date() }).where(eq(whatsappSessions.id, sessionId));
+    await db.update(whatsappSessions).set({ status, phoneMasked: r ? maskMe(r.meId) ?? sql`${whatsappSessions.phoneMasked}` : sql`${whatsappSessions.phoneMasked}`, engine: r?.engine ?? sql`${whatsappSessions.engine}`, lastSeenAt: new Date(), lastError: r ? null : "sessao_ausente_na_waha", updatedAt: new Date() }).where(and(eq(whatsappSessions.id, sessionId), sql`${whatsappSessions.status} <> 'REVOKED'`)); // conexão removida nunca volta a «viva» por uma leitura atrasada
     return { status, wahaDown: false };
   } catch (e) {
     const code = e instanceof WahaError ? e.code : "erro_desconhecido";
@@ -106,7 +106,14 @@ export async function startSession(db: DB, actorId: string, companyId: string, s
   await requirePerm(db, actorId, companyId, "whatsapp.manage");
   if (!moduleOn(envOf(deps))) throw new Invalid("O módulo WhatsApp está desligado no servidor");
   const { s } = await bound(db, companyId, sessionId);
-  const r = await syncFromWaha(db, s.id, s.providerSession, async (w) => ((await w.getSession(s.providerSession)) ? w.startSession(s.providerSession) : w.createSession(s.providerSession)), deps);
+  // serializado com «Remover conexão» (mesma trava de vínculo): um iniciar não cria a sessão na WAHA depois de ela ter sido apagada, e depois de removida nem começa
+  const r = await db.transaction(async (tx) => {
+    const x = tx as unknown as DB;
+    await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-bind:" + s.id}))`);
+    const cur = (await x.execute(sql`select status from whatsapp_sessions where id = ${s.id}`)) as unknown as { status: string }[];
+    if (!cur.length || cur[0].status === "REVOKED") throw new Invalid("Conexão não encontrada");
+    return syncFromWaha(db, s.id, s.providerSession, async (w) => ((await w.getSession(s.providerSession)) ? w.startSession(s.providerSession) : w.createSession(s.providerSession)), deps);
+  });
   await audit(db, companyId, actorId, "whatsapp.session.started", { sessionId: s.id, status: r.status });
   if (r.wahaDown) throw new Invalid("A WAHA não respondeu. Confira se o serviço está no ar e tente de novo");
 }
@@ -145,6 +152,48 @@ export async function disconnectSession(db: DB, actorId: string, companyId: stri
   await db.update(whatsappSessions).set({ status: failed ? "DEGRADED" : "DISCONNECTED", lastError: failed || null, updatedAt: new Date() }).where(eq(whatsappSessions.id, s.id));
   await audit(db, companyId, actorId, "whatsapp.session.disconnected", { sessionId: s.id, ok: !failed });
   if (failed) throw new Invalid("A WAHA não confirmou a desconexão. A conexão ficou pausada; confira o aparelho e tente de novo");
+}
+
+/**
+ * Remove a conexão (ex.: tentativa que falhou e ficou parada): apaga a sessão na WAHA, marca como removida e desvincula a empresa. O histórico (envios, respostas, auditoria) fica.
+ * Só com a conexão NÃO conectada, sem envio em andamento/na fila por ela e vinculada a esta empresa apenas (outra empresa usando: desvincular antes). Exige a WAHA acessível.
+ * Duas fases: (1) sob as mesmas travas de enfileirar, enviar e vincular, confere tudo e PAUSA a conexão (enfileirar e enviar recusam conexão pausada sob a própria trava: depois do commit nada novo entra);
+ * (2) numa transação que SEGURA a trava de vínculo (ninguém vincula outra empresa nesse meio-tempo), apaga na WAHA e, só com ela confirmando (404 = já não existe), marca «removida» e revoga o vínculo; queda no meio = rollback. Falha ou queda no meio deixa a conexão PAUSADA e visível: é só repetir «Remover conexão»
+ * (idempotente). Nunca fica «removida» aqui com a sessão viva lá.
+ */
+export async function removeSession(db: DB, actorId: string, companyId: string, sessionId: string, confirm: boolean, deps?: Deps) {
+  await requirePerm(db, actorId, companyId, "whatsapp.manage");
+  if (!confirm) throw new Invalid("Confirme que deseja remover esta conexão");
+  const { s } = await bound(db, companyId, sessionId);
+  if (s.status === "CONNECTED") throw new Invalid("A conexão está conectada. Use «Desconectar número» antes de remover");
+  const env = envOf(deps);
+  if (!moduleOn(env) || !wahaConfigured(env)) throw new Invalid("A WAHA não está acessível neste servidor: a conexão não pode ser removida agora (ela continuaria existindo lá)");
+  await db.transaction(async (tx) => {
+    const x = tx as unknown as DB;
+    await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-send:" + s.id}))`);
+    await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-bind:" + s.id}))`);
+    await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-queue:" + companyId}))`);
+    const cur = (await x.execute(sql`select status from whatsapp_sessions where id = ${s.id} for update`)) as unknown as { status: string }[];
+    if (!cur.length || cur[0].status === "REVOKED") throw new Invalid("Conexão não encontrada");
+    if (cur[0].status === "CONNECTED") throw new Invalid("A conexão está conectada. Use «Desconectar número» antes de remover");
+    const live = (await x.execute(sql`select count(*)::int n from whatsapp_session_companies where session_id = ${s.id} and revoked_at is null`)) as unknown as { n: number }[];
+    if (Number(live[0].n) > 1) throw new Invalid("Outra empresa também usa esta conexão. Desvincule-a antes de remover");
+    const pend = (await x.execute(sql`select count(*)::int n from whatsapp_outbox where session_id = ${s.id} and status in ('na_fila', 'enviando')`)) as unknown as { n: number }[];
+    if (Number(pend[0].n) > 0) throw new Invalid("Há mensagens na fila ou sendo enviadas por esta conexão. Cancele ou aguarde antes de remover");
+    await x.update(whatsappSessions).set({ paused: true, updatedAt: new Date() }).where(eq(whatsappSessions.id, s.id));
+    await audit(x, companyId, actorId, "whatsapp.session.removal_started", { sessionId: s.id });
+  });
+  await db.transaction(async (tx) => { // fase 2 SEGURANDO a trava de vínculo: ninguém vincula outra empresa enquanto a WAHA apaga; se algo cair, o rollback deixa tudo como estava (pausada e visível)
+    const x = tx as unknown as DB;
+    await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-bind:" + s.id}))`);
+    const live = (await x.execute(sql`select count(*)::int n from whatsapp_session_companies where session_id = ${s.id} and revoked_at is null`)) as unknown as { n: number }[];
+    if (Number(live[0].n) > 1) throw new Invalid("Outra empresa também usa esta conexão. Desvincule-a antes de remover");
+    try { await clientOf(deps).deleteSession(s.providerSession); }
+    catch { throw new Invalid("A WAHA não confirmou a remoção. A conexão ficou pausada e visível; tente de novo"); }
+    await x.update(whatsappSessionCompanies).set({ revokedAt: new Date(), revokedBy: actorId, updatedAt: new Date() }).where(and(eq(whatsappSessionCompanies.sessionId, s.id), isNull(whatsappSessionCompanies.revokedAt)));
+    await x.update(whatsappSessions).set({ status: "REVOKED", paused: true, lastError: null, updatedAt: new Date() }).where(eq(whatsappSessions.id, s.id));
+    await audit(x, companyId, actorId, "whatsapp.session.removed", { sessionId: s.id });
+  });
 }
 
 // ---------- Autorização de envio real (por empresa) ----------
@@ -390,6 +439,8 @@ export async function bindCompany(db: DB, actorId: string, companyId: string, se
     const x = tx as unknown as DB;
     await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"whatsapp-bind:" + s.id}))`);
     const [{ n, has }] = (await x.execute(sql`select count(*)::int n, bool_or(company_id = ${input.targetCompanyId}::uuid) has from whatsapp_session_companies where session_id = ${s.id} and revoked_at is null`)) as unknown as { n: number; has: boolean | null }[];
+    const st = (await x.execute(sql`select status from whatsapp_sessions where id = ${s.id}`)) as unknown as { status: string }[];
+    if (!st.length || st[0].status === "REVOKED") throw new Invalid("Conexão não encontrada");
     if (has) throw new Invalid("Esta empresa já usa a conexão");
     if (n >= MAX_COMPANIES_PER_SESSION) throw new Invalid(`A conexão já é usada por ${MAX_COMPANIES_PER_SESSION} empresas`);
     await x.insert(whatsappSessionCompanies).values({ sessionId: s.id, companyId: input.targetCompanyId, senderIdentity: identity, authorizedBy: actorId });

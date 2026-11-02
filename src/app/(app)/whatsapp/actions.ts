@@ -8,7 +8,7 @@ import { assignTriage, discardTriage, markDispute, optOutFromInbox, setHandling 
 import { cancelOutbox, dispatchOutbox, queueCustomerMessage, resolveUnknown, saveCompanySettings } from "@/modules/whatsapp/outbound";
 import { saveAutomation } from "@/modules/whatsapp/regua";
 import { ensureWhatsappDefaults } from "@/modules/messaging/service";
-import { bindCompany, createSession, disconnectSession, recordConsent, revokeAuthorization, saveAuthorization, sendTest, setPaused, settleStaleSends, startSession, unbindCompany } from "@/modules/whatsapp/service";
+import { bindCompany, createSession, disconnectSession, recordConsent, removeSession, revokeAuthorization, saveAuthorization, sendTest, setPaused, settleStaleSends, startSession, unbindCompany } from "@/modules/whatsapp/service";
 
 export type FormState = { error?: string; saved?: string; sessionId?: string } | undefined;
 
@@ -45,6 +45,11 @@ export async function disconnectSessionAction(fd: FormData) {
   let err = "";
   try { const c = await ctx(); await disconnectSession(db, c.userId, c.companyId, text(fd, "id", 40), fd.get("confirm") === "on"); } catch (e) { err = known(e); }
   revalidatePath("/whatsapp"); back(err, "desconectada");
+}
+export async function removeSessionAction(fd: FormData) {
+  let err = "";
+  try { const c = await ctx(); await removeSession(db, c.userId, c.companyId, text(fd, "id", 40), fd.get("confirm") === "on"); } catch (e) { err = known(e); }
+  revalidatePath("/whatsapp"); back(err, "removida");
 }
 
 export async function saveAuthorizationAction(_: FormState, fd: FormData): Promise<FormState> {

@@ -80,3 +80,5 @@
 
 ## 2026-10-30 — chave da régua LIGADA
 Por ordem do dono ("ligue"): `WHATSAPP_AUTOMATION_ENABLED="true"` no compose (web+scheduler reiniciados; backup k3gfinance-20261030T143251Z). Nenhuma empresa armada; 0 mensagens `origin='regua'`. Falta a diretoria armar K3G TESTE na tela (/whatsapp/regua: referência + frase + UMA régua, sugerido D0). Agem só a partir do dia seguinte. Desligar: voltar a "false" + `docker compose up -d web scheduler`.
+
+**WhatsApp W5 (2026-11-02, sem migração, item 6 do dono):** «Remover conexão» + simulação de dia futuro correta; teste real da régua D0 em K3G TESTE: cobrança fictícia R$ 5,00 (cliente «Keslley Kledston - Teste», contrato «Teste da régua WhatsApp», lote 01/11, venc. 03/11), régua armada só com D0 em 02/11 17:30 UTC → deve sair em 03/11. Conferir painel (entregue/lido) e responder PARAR. Conexão órfã c34d8a4d (DEGRADED, pausada) é a candidata a remoção.
