@@ -9,7 +9,7 @@ import { removeCoraCredentials, saveCoraCredentials } from "@/modules/providers/
 import { disableCoraWebhook, enableCoraWebhook } from "@/modules/issuance/webhooks";
 import { removeEmailAccount, saveEmailAccount } from "@/modules/providers/email-config";
 import { authorizeEmailLive, revokeEmailLive } from "@/modules/providers/email-auth";
-import { sendTestEmail } from "@/modules/providers/email-live";
+import { sendTestEmail, testEmailAccount } from "@/modules/providers/email-live";
 import { applySync, previewSync, resolveConflict, saveConnection } from "@/modules/integrations/crm/sync";
 
 type Sample = Awaited<ReturnType<typeof previewSync>>;
@@ -122,7 +122,8 @@ export async function saveEmailAction(_: EmailState, fd: FormData): Promise<Emai
       fromName: bounded(fd, "fromName", 200), replyTo: bounded(fd, "replyTo", 300), user: bounded(fd, "user", 300), password: bounded(fd, "password", 600),
     });
     revalidatePath("/integracoes");
-    return { saved: r.replaced ? "Conta de e-mail atualizada (usuário e senha em branco mantêm os atuais)." : "Conta de e-mail guardada (usuário e senha cifrados). Nenhum e-mail é enviado." };
+    // devolve também o que NÃO é segredo: o formulário continua preenchido enquanto a página recarrega os dados guardados
+    return { saved: r.replaced ? "Conta de e-mail atualizada (usuário e senha em branco mantêm os atuais). Use «Testar conexão» abaixo para conferir." : "Conta de e-mail guardada (usuário e senha cifrados). Nenhum e-mail foi enviado: use «Testar conexão» abaixo para conferir.", values: Object.fromEntries(["host", "port", "security", "fromEmail", "fromName", "replyTo"].map((k) => [k, String(fd.get(k) ?? "").slice(0, 300)])) };
   } catch (e) {
     // devolve só o que NÃO é segredo (usuário e senha são sempre limpos), para a pessoa não redigitar o resto
     if (e instanceof Invalid || e instanceof Forbidden) return { error: e.message, values: Object.fromEntries(["host", "port", "security", "fromEmail", "fromName", "replyTo"].map((k) => [k, String(fd.get(k) ?? "").slice(0, 300)])) };
@@ -163,5 +164,19 @@ export async function testEmailAction(_: LiveState, fd: FormData): Promise<LiveS
     if (e instanceof Invalid || e instanceof Forbidden) return { error: e.message };
     console.error("email: falha inesperada no teste", e instanceof Error ? e.name : "erro");
     return { error: "Não foi possível enviar agora. Tente de novo; se persistir, avise o suporte." };
+  }
+}
+
+/** «Testar conexão»: confere o login no SMTP (sem enviar) e, com a chave do servidor ligada, envia um e-mail de teste. */
+export async function testSmtpAction(_: LiveState, fd: FormData): Promise<LiveState> {
+  try {
+    const c = await ctx();
+    const r = await testEmailAccount(db, c.userId, c.companyId, bounded(fd, "to", 300));
+    revalidatePath("/integracoes");
+    return { saved: r.sent ? `Conexão OK: o servidor aceitou o login. E-mail de teste enviado para ${r.to}. Confira a caixa de entrada (e o spam).` : "Conexão OK: o servidor aceitou o login. O e-mail de teste NÃO foi enviado porque o envio real está desligado no servidor (EMAIL_EXTERNAL_ENABLED)." };
+  } catch (e) {
+    if (e instanceof Invalid || e instanceof Forbidden) return { error: e.message };
+    console.error("email: falha inesperada no teste de conexão", e instanceof Error ? e.name : "erro");
+    return { error: "Não foi possível testar agora. Tente de novo; se persistir, avise o suporte." };
   }
 }

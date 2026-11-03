@@ -14,7 +14,7 @@ import { getCoraStatus, hasCoraCredentials } from "@/modules/providers/cora-conf
 import { CORA_SCOPE, ENV_LABEL } from "@/modules/providers/cora";
 import { CoraForm } from "./cora-form";
 import { EmailForm } from "./email-form";
-import { AuthorizeForm, TestForm } from "./email-live-forms";
+import { AuthorizeForm, SmtpTestForm, TestForm } from "./email-live-forms";
 import { getEmailLiveStatus } from "@/modules/providers/email-auth";
 import { listSendLog } from "@/modules/providers/email-live";
 import { getEmailStatus, hasEmailAccount } from "@/modules/providers/email-config";
@@ -147,6 +147,7 @@ export default async function Integracoes() {
           </div>
           <p className="mb-3 rounded-md bg-muted p-3 text-xs text-muted-foreground">Guardar a conta <strong>não liga o envio</strong>: nenhum e-mail sai até a fase do envio real, a homologação (SPF, DKIM e DMARC do domínio) e a sua autorização escrita. Por segurança só aceitamos o <strong>nome público</strong> do servidor (sem IP) e as portas 465, 587, 2525 ou 25.</p>
           <EmailForm current={email.configured ? { host: email.host, port: email.port, security: email.security, fromEmail: email.fromEmail, fromName: email.fromName ?? "", replyTo: email.replyTo ?? "" } : null} />
+          {email.configured && <div className="mt-4 rounded-md border border-border p-3"><SmtpTestForm ownEmail={ctx.user.email ?? ""} /></div>}
           <div className="mt-6 border-t border-border pt-4" aria-labelledby="live-h">
             <h3 id="live-h" className="mb-1 font-medium">Envio real — canário</h3>
             <p className="mb-3 text-xs text-muted-foreground">O e-mail real só sai com <strong>três travas</strong> ao mesmo tempo: (1) a chave do servidor <code>EMAIL_EXTERNAL_ENABLED</code> ligada por quem opera o servidor; (2) uma autorização registrada aqui, com a referência do documento escrito, a lista de quem pode receber e o limite diário; (3) a conta cadastrada acima. Qualquer uma faltando, nada é enviado. Boleto, nota e WhatsApp continuam simulados.</p>

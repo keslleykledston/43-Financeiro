@@ -10,7 +10,8 @@ const L = ({ id, children }: { id: string; children: React.ReactNode }) => <labe
 export function EmailForm({ current }: { current: Cur }) {
   const [s, act, pending] = useActionState(saveEmailAction, undefined);
   const v = s?.values;
-  const cur: Cur = v ? { host: v.host, port: Number(v.port), security: v.security, fromEmail: v.fromEmail, fromName: v.fromName, replyTo: v.replyTo } : current;
+  // erro: o que a pessoa digitou. Sucesso: o que acabou de guardar, até a página trazer os dados guardados (sem isso o formulário aparecia vazio logo após guardar).
+  const cur: Cur = v && (s?.error || !current) ? { host: v.host, port: Number(v.port), security: v.security, fromEmail: v.fromEmail, fromName: v.fromName, replyTo: v.replyTo } : current;
   return (
     <form action={act} autoComplete="off" className="space-y-3" key={s?.saved ?? s?.error ?? "n"}>
       <div className="grid gap-3 sm:grid-cols-3">

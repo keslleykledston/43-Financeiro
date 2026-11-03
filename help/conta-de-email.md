@@ -11,6 +11,13 @@
 - **E-mail remetente** e, se quiser, **nome do remetente** (ex.: *K3G Solutions — Financeiro*) e **responder para**.
 - **Usuário e senha:** de preferência uma conta/senha de aplicativo **só do sistema**, não a senha pessoal de uma caixa.
 
+## Testar conexão
+Depois de guardar a conta, logo abaixo do formulário aparece **Testar conexão**. Ele faz duas coisas:
+1. **Confere o login no servidor** (conecta, negocia a conexão segura e testa o usuário e a senha) **sem enviar nada**. Se falhar, mostra o motivo em português: usuário/senha recusados, servidor não encontrado, porta/segurança erradas ou servidor sem resposta.
+2. Se a **chave do servidor** de e-mail estiver ligada, **envia um e-mail de teste** (texto fixo, sem dado de cliente). **Sem autorização de envio registrada**, o teste vai **somente para o seu e-mail de login** (até 5 por dia). **Com autorização ativa**, vai para um endereço da lista e conta no limite diário dela. Com a chave desligada, só o passo 1 acontece e a tela avisa que o e-mail de teste não foi enviado.
+
+Depois de **Guardar**, o formulário continua preenchido (só usuário e senha ficam em branco, por segurança) e a conta aparece como *Guardada*.
+
 ## Como os dados são guardados
 - Usuário e senha ficam **cifrados** e **nunca voltam** para a tela (nem para a diretoria). O servidor, a porta e o remetente aparecem para conferência.
 - Para corrigir só o remetente (por exemplo), deixe usuário e senha **em branco**: os atuais são mantidos. Para trocar a senha, digite a nova.

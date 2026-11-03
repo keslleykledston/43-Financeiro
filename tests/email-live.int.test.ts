@@ -13,7 +13,7 @@ import { approveBatch, generateBatch, getBatch } from "@/modules/billing/batches
 import { ensureDefaultTemplates, listQueue, processQueue, runScheduled, scheduleQueue } from "@/modules/messaging/service";
 import { saveEmailAccount, removeEmailAccount } from "@/modules/providers/email-config";
 import { authorizeEmailLive, getEmailLiveStatus, revokeEmailLive } from "@/modules/providers/email-auth";
-import { emailLiveActive, listSendLog, sendTestEmail } from "@/modules/providers/email-live";
+import { emailLiveActive, listSendLog, sendTestEmail, testEmailAccount } from "@/modules/providers/email-live";
 
 const enabled = !!process.env.POSTGRES_USER;
 const D = "2026-10-01"; // emissão: a régua do dia 1 tem o e-mail "emissao" de cada cobrança
@@ -209,6 +209,44 @@ describe.skipIf(!enabled)("E23 — envio REAL de e-mail (canário) com transport
     expect((await listSendLog(db, dirA, A)).map((l) => l.status).sort()).toEqual(["desconhecido", "enviado", "falhou"]);
     const aud = await db.select().from(schema.auditLog);
     expect(JSON.stringify(aud)).not.toMatch(/teste@k3g|x@k3gsolutions|Senha-Do-Smtp/i);
+  });
+
+  it("«Testar conexão»: confere o login sem enviar; com a chave ligada, sem autorização só ao e-mail de login (teto 5/dia); com autorização, só à lista", async () => {
+    const withVerify = (verify: () => Promise<unknown>) => ({ lookup: async () => [{ address: "93.184.216.34", family: 4 }], createTransport: () => ({ verify, sendMail: async (m: Record<string, unknown>) => { sent.push({ o: {}, m }); return behavior(m); }, close() {} }) });
+    await expect(testEmailAccount(db, dirA, A, "", ON, withVerify(async () => true))).rejects.toThrow(/Guarde a conta/);
+    await saveEmailAccount(db, dirA, A, mail());
+    await expect(testEmailAccount(db, gerA, A, "", ON, withVerify(async () => true))).rejects.toBeInstanceOf(Forbidden);
+    // login recusado: erro curto, nada enviado, sem segredo no registro
+    await expect(testEmailAccount(db, dirA, A, "", ON, withVerify(async () => { throw Object.assign(new Error("535 Senha-Do-Smtp-123"), { code: "EAUTH", responseCode: 535, command: "AUTH" }); }))).rejects.toThrow(/conexão falhou: o servidor recusou o usuário ou a senha/);
+    expect(sent).toHaveLength(0);
+    // chave do servidor desligada: só a conexão
+    expect(await testEmailAccount(db, dirA, A, "", {}, withVerify(async () => true))).toEqual({ connection: true, sent: false, reason: "chave_desligada" });
+    expect(sent).toHaveLength(0);
+    // chave ligada, SEM autorização: destino padrão = e-mail de login; outro endereço é recusado
+    await expect(testEmailAccount(db, dirA, A, "outro@k3gsolutions.com.br", ON, withVerify(async () => true))).rejects.toThrow(/só pode ir para o seu próprio e-mail/);
+    expect(sent).toHaveLength(0);
+    const r = await testEmailAccount(db, dirA, A, "", ON, withVerify(async () => true));
+    expect(r).toMatchObject({ connection: true, sent: true, to: "dir-a@t.com" });
+    expect(sent).toHaveLength(1); expect(sent[0].m).toMatchObject({ to: ["dir-a@t.com"], subject: "Teste de e-mail do K3G Finance" });
+    expect(String(sent[0].m.text)).not.toMatch(/Cliente|R\$/);
+    for (let i = 0; i < 4; i++) await testEmailAccount(db, dirA, A, "DIR-A@t.com", ON, withVerify(async () => true));
+    await expect(testEmailAccount(db, dirA, A, "", ON, withVerify(async () => true))).rejects.toThrow(/Limite diário de envios de teste/);
+    expect(sent).toHaveLength(5);
+    // com autorização ativa: só a lista dela e o limite dela
+    await db.execute(sql`truncate email_send_log`);
+    await authorizeEmailLive(db, dirA, A, { reference: "doc 25/10/2026", allowed: "@k3gsolutions.com.br", dailyLimit: 2 });
+    await expect(testEmailAccount(db, dirA, A, "x@fora.com", ON, withVerify(async () => true))).rejects.toThrow(/não está na lista/);
+    await testEmailAccount(db, dirA, A, "fin@k3gsolutions.com.br", ON, withVerify(async () => true));
+    await testEmailAccount(db, dirA, A, "fin@k3gsolutions.com.br", ON, withVerify(async () => true));
+    await expect(testEmailAccount(db, dirA, A, "fin@k3gsolutions.com.br", ON, withVerify(async () => true))).rejects.toThrow(/Limite diário/);
+    // envio recusado depois de a conexão passar: mensagem clara e registro «falhou»
+    await db.execute(sql`truncate email_send_log`);
+    behavior = async () => { throw Object.assign(new Error("x"), { responseCode: 550, command: "RCPT TO" }); };
+    await expect(testEmailAccount(db, dirA, A, "fin@k3gsolutions.com.br", ON, withVerify(async () => true))).rejects.toThrow(/conexão está OK, mas o servidor recusou o envio do teste/);
+    expect((await listSendLog(db, dirA, A)).map((l) => l.status)).toEqual(["falhou"]);
+    const aud = JSON.stringify(await db.select().from(schema.auditLog));
+    expect(aud).toMatch(/email\.connection_failed/); expect(aud).toMatch(/email\.connection_ok/);
+    expect(aud).not.toMatch(/dir-a@t\.com|fin@k3g|Senha-Do-Smtp/i);
   });
 
   it("revogou entre reservar e enviar: NADA é enviado, o item volta à fila e o registro marca a revogação (Codex E23 P1)", async () => {

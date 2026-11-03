@@ -11,7 +11,7 @@ import type { Security } from "./email";
  * A chamada acontece FORA de transação do banco (reservar → enviar → registrar).
  */
 export type SmtpConfig = { host: string; port: number; security: Security; fromEmail: string; fromName: string | null; replyTo: string | null; user: string; password: string };
-export type Transport = { sendMail(m: Record<string, unknown>): Promise<{ messageId?: string; accepted?: unknown[]; rejected?: unknown[] }>; close?(): void };
+export type Transport = { verify?(): Promise<unknown>; sendMail(m: Record<string, unknown>): Promise<{ messageId?: string; accepted?: unknown[]; rejected?: unknown[] }>; close?(): void };
 export type SmtpDeps = { lookup?: Lookup; createTransport?: (o: Record<string, unknown>) => Transport };
 
 const TOTAL_TIMEOUT_MS = 45_000;
@@ -42,6 +42,47 @@ export function mapSmtpError(e: unknown): SendResult & { ok: false } {
   return { ok: false, retryable: false, unknown: true, error: "resultado_desconhecido" }; // timeout/queda com o conteúdo possivelmente já entregue
 }
 
+type Prepared = { ok: true; transport: Transport } | { ok: false; retryable: boolean; error: string };
+/** DNS (só endereço público; o IP validado é o usado na conexão) + transporte com TLS obrigatório e tempos limite. Compartilhado pelo envio e pelo teste de conexão. */
+async function prepare(cfg: SmtpConfig, d: SmtpDeps, make: (o: Record<string, unknown>) => Transport): Promise<Prepared> {
+  const fromDomain = cfg.fromEmail.slice(cfg.fromEmail.lastIndexOf("@") + 1);
+  let ip: { address: string; family: number };
+  try {
+    let dnsTimer: ReturnType<typeof setTimeout> | undefined;
+    try { ip = await Promise.race([resolvePublicAddress(cfg.host, d.lookup!), new Promise<never>((_, rej) => { dnsTimer = setTimeout(() => rej(new Error("dns_sem_resposta")), DNS_TIMEOUT_MS); })]); }
+    finally { if (dnsTimer) clearTimeout(dnsTimer); }
+  }
+  catch (e) { const msg = (e as Error).message; return { ok: false, retryable: msg === "dns_sem_resposta", error: msg === "servidor_interno_bloqueado" ? msg : "dns_falhou" }; }
+  return { ok: true, transport: make({
+    host: ip.address, port: cfg.port, secure: cfg.security === "ssl", requireTLS: cfg.security === "starttls", name: fromDomain,
+    auth: { user: cfg.user, pass: cfg.password },
+    tls: { servername: cfg.host, minVersion: "TLSv1.2", rejectUnauthorized: true },
+    connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 30_000, disableFileAccess: true, disableUrlAccess: true, pool: false,
+  }) };
+}
+
+/**
+ * Teste de CONEXÃO (não envia e-mail): conecta, negocia TLS e confere o login no servidor SMTP. Mesmas defesas do envio (servidor só em endereço público, TLS válido).
+ * Usado pelo botão «Testar conexão» em Integrações. Sem confirmação de login = erro com um código curto (nunca a mensagem do servidor).
+ */
+export async function verifySmtpConnection(cfg: SmtpConfig, deps: SmtpDeps = {}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const d: SmtpDeps = process.env.VITEST === "true" ? { ...real(), ...deps } : real();
+  const make = d.createTransport ?? ((o: Record<string, unknown>) => nodemailer.createTransport(o) as unknown as Transport);
+  const prep = await prepare(cfg, d, make);
+  if (!prep.ok) return { ok: false, error: prep.error };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    if (!prep.transport.verify) return { ok: false, error: "verificacao_indisponivel" };
+    await Promise.race([prep.transport.verify(), new Promise<never>((_, rej) => { timer = setTimeout(() => rej(Object.assign(new Error("timeout"), { code: "ETIMEDOUT" })), 30_000); })]);
+    return { ok: true };
+  } catch (e) {
+    const err = e as { code?: string };
+    if (err?.code === "ETIMEDOUT" || err?.code === "ESOCKET") return { ok: false, error: "sem_resposta_do_servidor" };
+    const m = mapSmtpError(e);
+    return { ok: false, error: m.error === "resultado_desconhecido" ? "sem_resposta_do_servidor" : m.error };
+  } finally { if (timer) clearTimeout(timer); try { prep.transport.close?.(); } catch { /* nada a fazer */ } }
+}
+
 export function createSmtpEmailProvider(cfg: SmtpConfig, allowed: readonly string[], deps: SmtpDeps = {}): EmailProvider {
   const d: SmtpDeps = process.env.VITEST === "true" ? { ...real(), ...deps } : real(); // injeção só sob o executor de testes
   const make = d.createTransport ?? ((o: Record<string, unknown>) => nodemailer.createTransport(o) as unknown as Transport);
@@ -54,19 +95,9 @@ export function createSmtpEmailProvider(cfg: SmtpConfig, allowed: readonly strin
       if (!m.to.every((a) => isAllowed(a, allowed))) return { ok: false, retryable: false, error: "destinatario_nao_autorizado" };
       const att = m.attachments ?? [];
       if (att.length > 1 || att.some((a) => a.contentType !== "application/pdf" || !Buffer.isBuffer(a.content) || a.content.length < 100 || a.content.length > MAX_ATTACHMENT_BYTES || a.content.subarray(0, 5).toString("latin1") !== "%PDF-" || !/^[A-Za-z0-9._-]{1,80}\.pdf$/.test(a.filename))) return { ok: false, retryable: false, error: "anexo_invalido" };
-      let ip: { address: string; family: number };
-      try {
-        let dnsTimer: ReturnType<typeof setTimeout> | undefined;
-        try { ip = await Promise.race([resolvePublicAddress(cfg.host, d.lookup!), new Promise<never>((_, rej) => { dnsTimer = setTimeout(() => rej(new Error("dns_sem_resposta")), DNS_TIMEOUT_MS); })]); }
-        finally { if (dnsTimer) clearTimeout(dnsTimer); }
-      }
-      catch (e) { const msg = (e as Error).message; return { ok: false, retryable: msg === "dns_sem_resposta", error: msg === "servidor_interno_bloqueado" ? msg : "dns_falhou" }; }
-      const transport = make({
-        host: ip.address, port: cfg.port, secure: cfg.security === "ssl", requireTLS: cfg.security === "starttls", name: fromDomain,
-        auth: { user: cfg.user, pass: cfg.password },
-        tls: { servername: cfg.host, minVersion: "TLSv1.2", rejectUnauthorized: true },
-        connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 30_000, disableFileAccess: true, disableUrlAccess: true, pool: false,
-      });
+      const prep = await prepare(cfg, d, make);
+      if (!prep.ok) return prep;
+      const transport = prep.transport;
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         const info = await Promise.race([

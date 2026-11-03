@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isForbiddenIp, resolvePublicAddress } from "@/modules/providers/net-guard";
-import { createSmtpEmailProvider, isAllowed, mapSmtpError, type SmtpConfig } from "@/modules/providers/smtp";
+import { createSmtpEmailProvider, isAllowed, mapSmtpError, verifySmtpConnection, type SmtpConfig } from "@/modules/providers/smtp";
 
 const cfg: SmtpConfig = { host: "smtp.k3gsolutions.com.br", port: 587, security: "starttls", fromEmail: "financeiro@k3gsolutions.com.br", fromName: "K3G", replyTo: null, user: "u", password: "p" };
 const PUBLIC = async () => [{ address: "93.184.216.34", family: 4 }];
@@ -91,5 +91,29 @@ describe("E23 — adaptador SMTP (transporte simulado)", () => {
     expect(await mk(async () => ({ messageId: "<m>", accepted: [], rejected: ["a@k3gsolutions.com.br"] })).send(msg())).toMatchObject({ ok: false, error: "destinatario_recusado" });
     expect(await mk(async () => { throw Object.assign(new Error("x"), { code: "ETIMEDOUT" }); }).send(msg())).toMatchObject({ ok: false, unknown: true });
     expect(await mk(async () => ({ accepted: ["a@k3gsolutions.com.br"] })).send(msg({ idempotencyKey: "msg-9" }))).toMatchObject({ ok: true, providerRef: "smtp-msg-9" });
+  });
+});
+
+describe("Teste de conexão do SMTP (sem enviar e-mail)", () => {
+  const withVerify = (verify: () => Promise<unknown>, opts: Record<string, unknown>[] = []) => ({ lookup: PUBLIC, createTransport: (o: Record<string, unknown>) => { opts.push(o); return { verify, sendMail: async () => { throw new Error("nunca deve enviar"); }, close() {} }; } });
+  it("login aceito = ok; usa o IP validado, TLS verificado pelo nome e NUNCA chama sendMail", async () => {
+    const opts: Record<string, unknown>[] = [];
+    expect(await verifySmtpConnection(cfg, withVerify(async () => true, opts))).toEqual({ ok: true });
+    expect(opts[0]).toMatchObject({ host: "93.184.216.34", port: 587, requireTLS: true, tls: { servername: "smtp.k3gsolutions.com.br", rejectUnauthorized: true, minVersion: "TLSv1.2" }, pool: false });
+  });
+  it("erros viram códigos curtos (sem texto do servidor): login recusado, TLS, conexão, sem resposta", async () => {
+    const fail = (e: object) => verifySmtpConnection(cfg, withVerify(async () => { throw Object.assign(new Error("Invalid login: 535 senha=SEGREDO"), e); }));
+    expect(await fail({ code: "EAUTH", responseCode: 535, command: "AUTH PLAIN" })).toEqual({ ok: false, error: "autenticacao_recusada" });
+    expect(await fail({ code: "ETLS" })).toEqual({ ok: false, error: "tls_recusado" });
+    expect(await fail({ code: "ECONNECTION", command: "CONN" })).toEqual({ ok: false, error: "falha_antes_do_envio" });
+    expect(await fail({ code: "ETIMEDOUT" })).toEqual({ ok: false, error: "sem_resposta_do_servidor" });
+    expect(JSON.stringify(await fail({ code: "EAUTH", responseCode: 535 }))).not.toContain("SEGREDO");
+  });
+  it("recusa ANTES de conectar: servidor que resolve para endereço interno ou que não resolve", async () => {
+    let created = 0;
+    const mk = (lookup: () => Promise<{ address: string; family: number }[]>) => ({ lookup, createTransport: () => { created++; return { verify: async () => true, sendMail: async () => ({}), close() {} }; } });
+    expect(await verifySmtpConnection(cfg, mk(async () => [{ address: "10.0.0.5", family: 4 }]))).toEqual({ ok: false, error: "servidor_interno_bloqueado" });
+    expect(await verifySmtpConnection(cfg, mk(async () => []))).toEqual({ ok: false, error: "dns_falhou" });
+    expect(created).toBe(0);
   });
 });

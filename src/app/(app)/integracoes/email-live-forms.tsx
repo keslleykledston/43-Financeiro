@@ -1,6 +1,6 @@
 "use client";
 import { useActionState } from "react";
-import { authorizeEmailLiveAction, testEmailAction } from "./actions";
+import { authorizeEmailLiveAction, testEmailAction, testSmtpAction } from "./actions";
 
 const box = "w-full rounded-md border border-input bg-card px-3 py-2.5 text-sm";
 const L = ({ id, children }: { id: string; children: React.ReactNode }) => <label htmlFor={id} className="mb-1 block text-sm font-medium">{children}</label>;
@@ -28,6 +28,23 @@ export function TestForm() {
       <div className="flex flex-wrap items-end gap-2">
         <div className="min-w-[16rem] flex-1"><L id="test-to">Enviar e-mail de teste para</L><input id="test-to" name="to" type="email" required maxLength={200} placeholder="alguem@seudominio.com.br" className={box} /></div>
         <button disabled={pending} className="rounded-md bg-card px-4 py-2.5 text-sm ring-1 ring-input disabled:opacity-60">{pending ? "Enviando…" : "Enviar teste"}</button>
+      </div>
+      {s?.error && <p role="alert" className="text-sm text-negative-foreground">{s.error}</p>}
+      {s?.saved && <p role="status" className="text-sm text-positive-foreground">{s.saved}</p>}
+    </form>
+  );
+}
+
+/** «Testar conexão»: confere o login no servidor SMTP e envia um e-mail de teste (só ao seu e-mail de login, ou a um endereço da lista autorizada). */
+export function SmtpTestForm({ ownEmail }: { ownEmail: string }) {
+  const [s, act, pending] = useActionState(testSmtpAction, undefined);
+  return (
+    <form action={act} className="space-y-2" aria-labelledby="smtp-test-h">
+      <h3 id="smtp-test-h" className="font-medium">Testar conexão</h3>
+      <p className="text-xs text-muted-foreground">Confere se o servidor aceita o usuário e a senha guardados e envia um e-mail de teste (texto fixo, sem dado de cliente). Sem autorização de envio registrada, o teste só vai para o seu e-mail de login.</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-[16rem] flex-1"><L id="smtp-test-to">Enviar o e-mail de teste para</L><input id="smtp-test-to" name="to" type="email" required maxLength={200} defaultValue={ownEmail} className={box} /></div>
+        <button disabled={pending} className="rounded-md bg-card px-4 py-2.5 text-sm ring-1 ring-input disabled:opacity-60">{pending ? "Testando…" : "Testar conexão"}</button>
       </div>
       {s?.error && <p role="alert" className="text-sm text-negative-foreground">{s.error}</p>}
       {s?.saved && <p role="status" className="text-sm text-positive-foreground">{s.saved}</p>}

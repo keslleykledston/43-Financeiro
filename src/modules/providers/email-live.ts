@@ -1,11 +1,11 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
-import { auditLog, emailLiveAuthorizations, emailSendLog } from "@/lib/db/schema";
+import { auditLog, emailLiveAuthorizations, emailSendLog, users } from "@/lib/db/schema";
 import { SecretBoxCorrupt, SecretBoxUnavailable } from "@/lib/security/secretbox";
 import { Invalid, requirePerm } from "@/modules/identity/service";
 import { readEmailCredentials } from "./email-secrets";
 import { parseEmailAddress } from "./email";
-import { createSmtpEmailProvider, isAllowed, type SmtpDeps } from "./smtp";
+import { createSmtpEmailProvider, isAllowed, verifySmtpConnection, type SmtpDeps } from "./smtp";
 import type { EmailProvider } from "./types";
 
 /**
@@ -90,6 +90,61 @@ export async function sendTestEmail(db: DB, actorId: string, companyId: string, 
   });
   if (!res.ok) throw new Invalid(res.unknown ? "O servidor não confirmou o envio (pode ter chegado): confira a caixa de destino antes de tentar de novo" : `O servidor recusou o envio (${res.error}). Confira servidor, porta, usuário e senha`);
   return { logId };
+}
+
+const SMTP_WHY: Record<string, string> = {
+  autenticacao_recusada: "o servidor recusou o usuário ou a senha", tls_recusado: "o servidor não completou a conexão segura (TLS): confira a porta e a segurança",
+  falha_antes_do_envio: "não foi possível conectar: confira servidor, porta e segurança", dns_falhou: "o nome do servidor não foi encontrado",
+  servidor_interno_bloqueado: "o servidor informado é interno e não é aceito", sem_resposta_do_servidor: "o servidor não respondeu a tempo", verificacao_indisponivel: "a verificação não está disponível neste servidor",
+};
+const smtpWhy = (code: string) => SMTP_WHY[code] ?? `código ${code.slice(0, 40)}`;
+/** Sem autorização registrada, o teste só vai para o e-mail de login de quem testa, com teto próprio por dia. */
+const OWN_TEST_DAILY = 5;
+
+/**
+ * «Testar conexão» (diretoria): (1) conecta no SMTP e confere o login SEM enviar nada; (2) se a chave do servidor está ligada, envia UM e-mail de teste de texto fixo (sem dado de cliente).
+ * Destino: com autorização ativa, só endereço da lista (e conta no limite dela); sem autorização, SOMENTE o e-mail de login de quem testa (teto de 5 por dia). Chave desligada = só o passo 1.
+ * Reservar (registro «enviando») → enviar fora de transação → registrar, como o teste do canário.
+ */
+export async function testEmailAccount(db: DB, actorId: string, companyId: string, toRaw: string, env: Record<string, string | undefined> = process.env, deps?: SmtpDeps):
+  Promise<{ connection: true; sent: false; reason: "chave_desligada" } | { connection: true; sent: true; to: string; logId: string }> {
+  await requirePerm(db, actorId, companyId, "providers.credentials");
+  let cfg;
+  try { cfg = await readEmailCredentials(db, companyId); }
+  catch (e) { if (e instanceof SecretBoxUnavailable || e instanceof SecretBoxCorrupt) throw new Invalid("Cofre de credenciais indisponível ou ilegível neste processo"); throw e; }
+  if (!cfg) throw new Invalid("Guarde a conta de e-mail antes de testar");
+  const conn = await verifySmtpConnection(cfg, deps);
+  await db.insert(auditLog).values({ companyId, actorId, action: conn.ok ? "email.connection_ok" : "email.connection_failed", detail: conn.ok ? {} : { error: conn.error.slice(0, 60) } });
+  if (!conn.ok) throw new Invalid(`A conexão falhou: ${smtpWhy(conn.error)}. Nenhum e-mail foi enviado`);
+  if (!flagOn(env)) return { connection: true, sent: false, reason: "chave_desligada" };
+
+  const [u] = await db.select({ email: users.email }).from(users).where(eq(users.id, actorId));
+  const own = (u?.email ?? "").trim().toLowerCase();
+  const auth = await activeAuthorization(db, companyId);
+  const to = (toRaw ?? "").trim() ? parseEmailAddress(toRaw, "o e-mail de destino")! : own;
+  const allowed = auth ? auth.allowed : [own];
+  if (!own || !isAllowed(to, allowed)) throw new Invalid(auth ? "A conexão está OK, mas este endereço não está na lista de destinatários autorizados. Nada foi enviado" : "A conexão está OK. Sem autorização de envio registrada, o e-mail de teste só pode ir para o seu próprio e-mail de login. Nada foi enviado");
+  const limit = auth ? auth.dailyLimit : OWN_TEST_DAILY;
+  const logId = await db.transaction(async (tx) => {
+    const x = tx as unknown as DB;
+    await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"email-live:" + companyId}))`);
+    if ((await sentToday(x, companyId)) + 1 > limit) throw new Invalid("Limite diário de envios de teste atingido");
+    const [l] = await x.insert(emailSendLog).values({ companyId, kind: "teste", recipientDomains: domainsOf([to]), recipients: 1, actorId }).returning({ id: emailSendLog.id });
+    return l.id;
+  });
+  if (!flagOn(env) || (auth && (await activeAuthorization(db, companyId))?.id !== auth.id)) {
+    await db.transaction(async (tx) => { await finishLog(tx as unknown as DB, logId, { status: "falhou", error: "autorizacao_revogada" }); });
+    throw new Invalid("A autorização foi revogada. Nada foi enviado");
+  }
+  const provider = createSmtpEmailProvider(cfg, allowed, deps);
+  const res = await provider.send({ to: [to], subject: "Teste de e-mail do K3G Finance", text: "Este é um e-mail de teste do K3G Finance, enviado pela diretoria para conferir a conta de e-mail. Nenhuma cobrança está envolvida. Pode ignorar.", html: "<p>Este é um e-mail de teste do K3G Finance, enviado pela diretoria para conferir a conta de e-mail. Nenhuma cobrança está envolvida. Pode ignorar.</p>", idempotencyKey: `teste-${logId}` }).catch(() => ({ ok: false as const, retryable: false, unknown: true, error: "resultado_desconhecido" }));
+  await db.transaction(async (tx) => {
+    const x = tx as unknown as DB;
+    await finishLog(x, logId, res.ok ? { status: "enviado", providerRef: res.providerRef } : { status: res.unknown ? "desconhecido" : "falhou", error: res.error });
+    await x.insert(auditLog).values({ companyId, actorId, action: res.ok ? "email.test_sent" : "email.test_failed", detail: { logId, ...(res.ok ? {} : { error: res.error.slice(0, 60) }) } });
+  });
+  if (!res.ok) throw new Invalid(res.unknown ? "A conexão está OK, mas o servidor não confirmou o envio do teste (pode ter chegado): confira a caixa de destino antes de tentar de novo" : `A conexão está OK, mas o servidor recusou o envio do teste (${smtpWhy(res.error)})`);
+  return { connection: true, sent: true, to, logId };
 }
 
 export async function listSendLog(db: DB, actorId: string, companyId: string, limit = 10) {
