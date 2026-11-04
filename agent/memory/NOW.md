@@ -102,3 +102,7 @@ Causa: autorização de e-mail só na K3G TESTE (lista sem o e-mail do dono); K3
 
 ## 2026-11-04 — chave própria «E-mail do sistema» (migração 0052)
 E-mail de senha/convite deixou de depender da autorização de e-mail a clientes: chave `sistema` no painel (`email_accounts.system_enabled`), destinatário exato, 40/dia/empresa, convites 15/h por ator e 3/dia por destinatário. Sandbox 787 PASS + e2e, Codex 0 C/H, 1 MEDIUM corrigido. Dono: ligar «E-mail do sistema» da K3G Solutions em Autorizações. Link de redefinição do financeiro@ gerado em arquivo privado (2 h).
+
+
+## 2026-11-04 — guardrail de duplicidade de boletos (sem migração)
+Cora: mesmo cliente + mesmo vencimento, qualquer valor, não cancelado e não nosso → só aquele boleto fica em ALERTA (`boleto_ja_existe_na_cora` / `boleto_mesmo_vencimento_na_cora`), vaga do canário/limite devolvida (attempts 0), demais seguem na mesma chamada (laço até 6 passadas). Outro contrato nosso do mesmo cliente/vencimento não conta (`knownKeys`). `retryDuplicate` = «Conferi, pedir de novo» (refaz a conferência). Alertas em Emissões e no lote. Sandbox 789 PASS; Codex 0 C, 1 H (não reproduz; teste de concorrência), 1 M e 1 L corrigidos. Boletos reais continuam NÃO ligados.

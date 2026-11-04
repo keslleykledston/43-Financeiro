@@ -17,7 +17,8 @@ export interface WhatsappProvider {
   send(m: { to: string; text: string; idempotencyKey: string }): Promise<SendResult>;
 }
 
-export type BoletoInput = { idempotencyKey: string; amountCents: number; dueDate: string; customerName: string; customerDocument: string; /** texto/instruções do boleto deste cliente (E26), já com os campos preenchidos */ instructions?: string };
+export type BoletoInput = { idempotencyKey: string; amountCents: number; dueDate: string; customerName: string; customerDocument: string; /** texto/instruções do boleto deste cliente (E26), já com os campos preenchidos */ instructions?: string;
+  /** chaves de idempotência de OUTROS boletos nossos do mesmo cliente e vencimento (ex.: dois contratos): não contam como duplicidade na conferência com a Cora */ knownKeys?: string[] };
 export type BoletoResult = { providerRef: string; status: "emitido" | "pago" | "cancelado"; digitableLineMasked: string };
 /** Situação completa de UM boleto no provedor (consulta). `payments` só tem pagamentos concluídos. Valores em centavos. */
 export type BoletoDetails = {

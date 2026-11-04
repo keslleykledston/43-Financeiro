@@ -52,7 +52,8 @@ const todayManaus = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Am
 
 /**
  * `live` = PRODUÇÃO (boletos reais). Antes de emitir: vencimento não pode estar no passado, valor abaixo do teto e ANTI-DUPLICIDADE — se a Cora já tem, para o mesmo CPF/CNPJ e vencimento, um boleto
- * não cancelado de MESMO valor que não seja o nosso (as cobranças também foram/são emitidas à mão pela equipe), NÃO emite: falha com `boleto_ja_existe_na_cora` para revisão humana.
+ * não cancelado que não seja o nosso (as cobranças também foram/são emitidas à mão pela equipe), NÃO emite: falha com `boleto_ja_existe_na_cora` (mesmo valor) ou `boleto_mesmo_vencimento_na_cora` (outro valor)
+ * para revisão humana. Boletos de OUTROS contratos nossos do mesmo cliente e vencimento (`knownKeys`) não contam.
  * Se o boleto achado é o nosso (mesmo `code`, ex.: resposta anterior perdida), devolve-o sem criar outro.
  */
 export function createCoraBoletoProvider(client: CoraClient, opts: { live?: boolean } = {}): BoletoProvider {
@@ -66,21 +67,31 @@ export function createCoraBoletoProvider(client: CoraClient, opts: { live?: bool
       if (opts.live) {
         if (i.dueDate < todayManaus()) throw new RangeError("vencimento_no_passado");
         if (i.amountCents > LIVE_MAX_CENTS) throw new RangeError("valor_acima_do_limite");
-        let dupes: Invoice[] = [];
+        let found: Invoice[] = [];
+        let same = false, other = false;
         try {
           for (let page = 1; page <= 3; page++) {
             const l = await client.listInvoices({ search: i.customerDocument, start: i.dueDate, end: i.dueDate, page, perPage: 100 });
-            dupes = dupes.concat(l.items.filter((x) => x.status !== "CANCELLED" && x.totalAmountCents === i.amountCents));
+            found = found.concat(l.items.filter((x) => x.status !== "CANCELLED")); // QUALQUER valor: já existe boleto deste cliente neste vencimento
             if (l.items.length < 100) break;
             if (page === 3) throw new Error("busca_incompleta");
           }
-          if (dupes.length > MAX_DUP_DETAILS) throw new Error("busca_incompleta");
-          for (const d of dupes) {
+          if (found.length > MAX_DUP_DETAILS) throw new Error("busca_incompleta");
+          const own = new Set((i.knownKeys ?? []).map(codeFromKey));
+          for (const d of found) {
             const full = await client.getInvoice(d.id);
-            if (full.code === codeFromKey(i.idempotencyKey)) return toResult(full); // é o nosso (emissão anterior): idempotente
+            if (full.status === "CANCELLED") continue;
+            if (full.code === codeFromKey(i.idempotencyKey)) { // é o nosso (emissão anterior): idempotente, se o valor confere
+              if (full.totalAmountCents !== i.amountCents) throw new RangeError("valor_divergente");
+              return toResult(full);
+            }
+            if (full.code && own.has(full.code)) continue; // outro boleto NOSSO do mesmo cliente e vencimento (outro contrato): não é duplicidade
+            if (full.totalAmountCents === i.amountCents) same = true; else other = true;
           }
-        } catch (e) { return mapCoraError(e, "find"); }
-        if (dupes.length > 0) throw new RangeError("boleto_ja_existe_na_cora"); // já existe um igual que não é nosso: revisão humana
+        } catch (e) { if (e instanceof RangeError) throw e; return mapCoraError(e, "find"); }
+        // já existe boleto deste cliente neste vencimento que não é nosso: NÃO emite (só este; os demais seguem). Revisão humana na Cora.
+        if (same) throw new RangeError("boleto_ja_existe_na_cora"); // mesmo valor
+        if (other) throw new RangeError("boleto_mesmo_vencimento_na_cora"); // outro valor
       }
       let inv: Invoice;
       try {

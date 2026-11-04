@@ -3,13 +3,13 @@ import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
-import { KIND_LABEL, STATUS_LABEL, getIssuanceSettings, listIssuance } from "@/modules/issuance/service";
+import { DUPLICATE_ALERT, KIND_LABEL, STATUS_LABEL, getIssuanceSettings, listIssuance } from "@/modules/issuance/service";
 import { Callout, Money, PageHeader, SectionCard, StatusPill, type StatusTone } from "@/components/k3g/primitives";
 import { EmptyState } from "@/components/k3g/states";
 import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass, inputClass } from "@/components/k3g/button";
 import { BOLETO_PROVIDER_MODES, LIVE_CANARY_DAILY_MAX, LIVE_CONFIRM_PHRASE, MODE_LABEL, coraStageOn, prodEmissionOn } from "@/modules/providers/registry";
-import { cancelIssuanceAction, processIssuanceAction, saveIssuanceSettingsAction, syncBoletoStatusAction } from "./actions";
+import { cancelIssuanceAction, processIssuanceAction, retryDuplicateAction, saveIssuanceSettingsAction, syncBoletoStatusAction } from "./actions";
 
 const TONE: Record<string, StatusTone> = { pendente: "info", enviando: "info", processando: "warning", emitido: "positive", desconhecido: "warning", falhou: "negative", cancelado: "neutral" };
 const br = (d: string) => d.split("-").reverse().join("/");
@@ -18,7 +18,7 @@ function okText(ok?: string, mode = "simulado") {
   const stage = mode === "cora_homologacao", prod = mode === "cora_producao";
   const [k, ...n] = (ok ?? "").split(":"); const v = n.map(Number);
   if (k === "solicitado") return `${v[0]} solicitação(ões) criada(s).`;
-  if (k === "rodada") return `${prod ? "Rodada na Cora de PRODUÇÃO (boletos reais)" : stage ? "Rodada na Cora de testes" : "Rodada simulada"}: ${v[0]} emitido(s), ${v[1]} em processamento, ${v[2]} a reconsultar, ${v[3]} para repetir, ${v[4]} com falha, ${v[5]} dispensado(s).${n[6] ? ` Aviso: ${decodeURIComponent(n[6])}.` : ""}`;
+  if (k === "rodada") return `${prod ? "Rodada na Cora de PRODUÇÃO (boletos reais)" : stage ? "Rodada na Cora de testes" : "Rodada simulada"}: ${v[0]} emitido(s), ${v[1]} em processamento, ${v[2]} a reconsultar, ${v[3]} para repetir, ${v[4]} com falha, ${v[5]} dispensado(s).${v[6] ? ` ATENÇÃO: ${v[6]} boleto(s) em ALERTA de duplicidade (já existe boleto do cliente na Cora): não foram emitidos, os demais seguiram.` : ""}${n[7] ? ` Aviso: ${decodeURIComponent(n[7])}.` : ""}`;
   if (k === "sync") return `Situação conferida na ${prod ? "Cora (produção)" : "Cora de testes"}: ${v[0]} boleto(s) consultado(s), ${v[1]} pago(s), ${v[2]} cancelado(s) lá fora, ${v[3]} com falha. Baixas automáticas feitas: ${v[4]}; pagos aguardando conferência: ${v[5]}.${n[6] ? ` Aviso: ${decodeURIComponent(n[6])}` : ""}`;
   if (k === "cancelado") return "Solicitação cancelada.";
   if (k === "salvo") return "Configuração salva.";
@@ -38,7 +38,7 @@ export default async function Emissoes({ searchParams }: { searchParams: Promise
     <div className="space-y-5">
       <PageHeader title="Emissões" description={`${ctx.current.name} · boletos e NFS-e (${prod ? "boletos REAIS na Cora (produção)" : stage ? "boletos na Cora de testes" : "motor simulado"}).`}
         actions={<AppLink href="/faturamento/lotes" className={buttonClass("outline")}><ArrowLeft className="size-4" aria-hidden /> Lotes</AppLink>} />
-      {prod && <Callout tone="negative" role="alert"><strong>Atenção: emissão REAL.</strong> Os boletos desta empresa são criados na <strong>Cora de PRODUÇÃO</strong>: são boletos de verdade, que cobram o cliente. {st.liveCanary ? <>Modo <strong>canário</strong>: no máximo {LIVE_CANARY_DAILY_MAX} boletos reais por dia. </> : <>Modo canário desligado: vale o limite diário. </>}Antes de emitir, a plataforma confere se a Cora já tem um boleto igual para o mesmo cliente e vencimento (se tiver, <strong>não emite</strong> e avisa). NFS-e, e-mail e WhatsApp seguem simulados/desligados. Para parar: <strong>marque “Pausar emissão”</strong>.</Callout>}
+      {prod && <Callout tone="negative" role="alert"><strong>Atenção: emissão REAL.</strong> Os boletos desta empresa são criados na <strong>Cora de PRODUÇÃO</strong>: são boletos de verdade, que cobram o cliente. {st.liveCanary ? <>Modo <strong>canário</strong>: no máximo {LIVE_CANARY_DAILY_MAX} boletos reais por dia. </> : <>Modo canário desligado: vale o limite diário. </>}Antes de emitir, a plataforma confere se a Cora já tem um boleto do mesmo cliente no mesmo vencimento, de qualquer valor (se tiver, <strong>não emite só aquele boleto</strong>, mostra o alerta de duplicidade e os demais seguem). NFS-e, e-mail e WhatsApp seguem simulados/desligados. Para parar: <strong>marque “Pausar emissão”</strong>.</Callout>}
       <Callout tone="info">{prod ? <>Modo de produção ligado para esta empresa{st.liveAuthorizedAt ? ` (autorizado em ${st.liveAuthorizedAt.toLocaleString("pt-BR", { timeZone: "America/Manaus" })})` : ""}. Cada rodada pede confirmação.</> : stage
         ? <>Os boletos desta empresa vão para a <strong>Cora de testes (homologação)</strong>: o boleto nasce lá, com número e linha digitável de teste, mas <strong>não é um boleto real e não cobra ninguém</strong>. NFS-e continua simulada. A emissão em produção só será ligada com autorização escrita da diretoria.</>
         : <>Simulação: este motor ensaia o fluxo (reservar, chamar o provedor, registrar, reconsultar quando a resposta se perde), mas <strong>nenhum boleto ou nota real é emitido</strong>. A emissão real só será ligada com credenciais, homologação e autorização escrita da diretoria.</>}</Callout>
@@ -89,6 +89,10 @@ export default async function Emissoes({ searchParams }: { searchParams: Promise
                 </div>
                 <span className="flex items-center gap-3"><Money cents={i.amountCents} /><StatusPill tone={TONE[i.status]}>{i.status === "emitido" && i.mode !== "simulado" ? (i.mode === "cora_producao" ? "Emitido (Cora PRODUÇÃO)" : "Emitido (Cora de testes)") : STATUS_LABEL[i.status]}</StatusPill>
                   {request && i.status === "pendente" && <form action={cancelIssuanceAction}><input type="hidden" name="id" value={i.id} /><button className={buttonClass("ghost", "sm")}>Cancelar</button></form>}</span>
+                {i.status === "falhou" && i.lastError && DUPLICATE_ALERT[i.lastError] && (
+                  <div className="basis-full"><Callout tone="warning" role="alert"><strong>ALERTA DE DUPLICIDADE.</strong> {DUPLICATE_ALERT[i.lastError]} Confira na Cora (busque pelo CNPJ/CPF do cliente, vencimento {br(i.dueDate)}). Se o boleto lá estiver certo, nada a fazer: os demais boletos seguem normalmente. Se ele foi cancelado ou era engano, peça de novo (a conferência roda outra vez).
+                    {request && <form action={retryDuplicateAction} className="mt-2"><input type="hidden" name="id" value={i.id} /><button className={buttonClass("outline", "sm")}>Conferi, pedir a emissão de novo</button></form>}</Callout></div>
+                )}
               </li>
             ))}
           </ul>

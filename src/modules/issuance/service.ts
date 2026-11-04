@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
 import { auditLog, billingBatches, issuanceRequests, issuanceSettings } from "@/lib/db/schema";
 import { centsFromNumeric } from "@/lib/money";
@@ -133,6 +133,34 @@ export async function requestBatchIssuance(db: DB, actorId: string, companyId: s
   });
 }
 
+/** Depois de conferir na Cora (ex.: cancelou o boleto manual duplicado), pede a emissão de novo. A solicitação em alerta é encerrada e outra nasce; a conferência com a Cora roda DE NOVO, então se o boleto existente continuar lá nada é emitido. */
+export async function retryDuplicate(db: DB, actorId: string, companyId: string, requestId: string) {
+  await requirePerm(db, actorId, companyId, "issuance.request");
+  if (!uuidOk(requestId)) throw new Invalid("Solicitação não encontrada");
+  return db.transaction(async (tx) => {
+    const x = tx as unknown as DB;
+    await lock(x, companyId);
+    const [cur] = await x.select().from(issuanceRequests).where(and(eq(issuanceRequests.id, requestId), eq(issuanceRequests.companyId, companyId), eq(issuanceRequests.status, "falhou"), eq(issuanceRequests.kind, "boleto"), isNull(issuanceRequests.externalRef)));
+    if (!cur || !isDuplicate(cur.lastError)) throw new Invalid("Só um boleto em alerta de duplicidade pode ser pedido de novo");
+    const [ok] = (await x.execute(sql`select c.id from charges c join billing_batches b on b.company_id = c.company_id and b.id = c.batch_id where c.id = ${cur.chargeId} and ${ELIGIBLE(companyId)}`)) as unknown as Row[];
+    if (!ok) throw new Invalid("Cobrança não está mais disponível para emissão");
+    await x.update(issuanceRequests).set({ status: "cancelado", updatedAt: new Date() }).where(eq(issuanceRequests.id, cur.id));
+    const [n] = await x.insert(issuanceRequests).values({ companyId, chargeId: cur.chargeId, kind: "boleto", idempotencyKey: await keyFor(x, companyId, cur.chargeId, "boleto"), requestedBy: actorId }).returning({ id: issuanceRequests.id });
+    await audit(x, companyId, actorId, "issuance.duplicate_retried", { requestId: cur.id, newRequestId: n.id, chargeId: cur.chargeId });
+    return n.id;
+  });
+}
+
+/** Alertas de duplicidade das cobranças informadas (para mostrar no boleto em específico). Só leitura. */
+export async function duplicateAlerts(db: DB, actorId: string, companyId: string, chargeIds: string[]): Promise<Map<string, { requestId: string; code: string }>> {
+  await requirePerm(db, actorId, companyId, "billing.read");
+  const ids = chargeIds.filter(uuidOk);
+  if (ids.length === 0) return new Map();
+  const rows = await db.select({ id: issuanceRequests.id, chargeId: issuanceRequests.chargeId, code: issuanceRequests.lastError }).from(issuanceRequests)
+    .where(and(eq(issuanceRequests.companyId, companyId), eq(issuanceRequests.kind, "boleto"), eq(issuanceRequests.status, "falhou"), inArray(issuanceRequests.lastError, [...DUPLICATE_CODES]), inArray(issuanceRequests.chargeId, ids)));
+  return new Map(rows.map((r) => [r.chargeId, { requestId: r.id, code: r.code! }]));
+}
+
 export async function cancelIssuance(db: DB, actorId: string, companyId: string, requestId: string) {
   await requirePerm(db, actorId, companyId, "issuance.request");
   if (!uuidOk(requestId)) throw new Invalid("Solicitação não encontrada");
@@ -145,14 +173,33 @@ export async function cancelIssuance(db: DB, actorId: string, companyId: string,
   });
 }
 
-export type RunResult = { claimed: number; issued: number; processing: number; unknown: number; retry: number; failed: number; skipped: number; recovered: number; waiting?: string };
+export type RunResult = { claimed: number; issued: number; processing: number; unknown: number; retry: number; failed: number; skipped: number; recovered: number; duplicates: number; waiting?: string };
+
+/** Guardrail de duplicidade: a Cora já tem boleto deste cliente neste vencimento. Só ESTA solicitação fica em alerta (falhou); as demais seguem e a vaga do dia é devolvida. */
+export const DUPLICATE_CODES = ["boleto_ja_existe_na_cora", "boleto_mesmo_vencimento_na_cora"] as const;
+export const DUPLICATE_ALERT: Record<string, string> = {
+  boleto_ja_existe_na_cora: "Já existe na Cora um boleto deste cliente neste vencimento, com o MESMO valor. Para não duplicar, este boleto NÃO foi emitido.",
+  boleto_mesmo_vencimento_na_cora: "Já existe na Cora um boleto deste cliente neste vencimento, com OUTRO valor. Para não duplicar, este boleto NÃO foi emitido.",
+};
+const isDuplicate = (code: string | null | undefined) => !!code && (DUPLICATE_CODES as readonly string[]).includes(code);
 
 /**
  * Uma rodada do motor. Manual (o agendador de emissão só será ligado no gate real). Respeita pausa e limite diário, e recusa com chave real ligada.
  */
 export async function processIssuance(db: DB, actorId: string, companyId: string, now = new Date(), providers?: Providers, opts: { confirmLive?: boolean } = {}): Promise<RunResult> {
+  let total = await processOnce(db, actorId, companyId, now, providers, opts), last = total;
+  // Boleto em alerta de duplicidade devolve a vaga do dia (canário/limite): as demais solicitações entram na MESMA chamada, sem o alerta atrasar ninguém.
+  for (let pass = 1; pass < 6 && last.duplicates > 0; pass++) {
+    last = await processOnce(db, actorId, companyId, now, providers, opts);
+    total = { claimed: total.claimed + last.claimed, issued: total.issued + last.issued, processing: total.processing + last.processing, unknown: total.unknown + last.unknown, retry: total.retry + last.retry, failed: total.failed + last.failed, skipped: total.skipped + last.skipped, recovered: total.recovered + last.recovered, duplicates: total.duplicates + last.duplicates, waiting: last.waiting ?? total.waiting };
+  }
+  if (last.duplicates > 0) total = { ...total, waiting: "Houve muitos alertas de duplicidade nesta rodada; processe de novo para continuar com as demais" }; // acabaram as passadas e ainda havia alerta: pode haver pendentes
+  return total;
+}
+
+async function processOnce(db: DB, actorId: string, companyId: string, now: Date, providers: Providers | undefined, opts: { confirmLive?: boolean }): Promise<RunResult> {
   await requirePerm(db, actorId, companyId, "issuance.run");
-  const out: RunResult = { claimed: 0, issued: 0, processing: 0, unknown: 0, retry: 0, failed: 0, skipped: 0, recovered: 0 };
+  const out: RunResult = { claimed: 0, issued: 0, processing: 0, unknown: 0, retry: 0, failed: 0, skipped: 0, recovered: 0, duplicates: 0 };
   const prov = resolveProviders(providers); // falha FECHADA antes de reservar qualquer coisa
   // E10b-1: provedores por MODO de boleto (simulado = o de cima; cora_homologacao = adaptador da Cora de testes). Um modo real só entra se TODAS as travas estiverem ligadas.
   const byMode = new Map<string, Providers>([["simulado", prov]]);
@@ -237,7 +284,10 @@ export async function processIssuance(db: DB, actorId: string, companyId: string
       // E26: texto da nota e do boleto deste cliente (campos {{…}} preenchidos); sem texto, vale a descrição do contrato
       const texts = issuanceTexts({ nfText: d.nf_text == null ? null : String(d.nf_text), boletoText: d.boleto_text == null ? null : String(d.boleto_text), contractDescription: String(d.description), customerName: String(d.legal_name), companyName: String(d.company_name), amountCents: cents, dueDate: String(d.due_date), competenceMonth: String(d.competence_month), issueDate: String(d.issue_date) });
       if (r.kind === "boleto") {
-        const res = await bp.boleto.issue({ idempotencyKey: r.idempotencyKey, amountCents: cents, dueDate: String(d.due_date), customerName: String(d.legal_name), customerDocument: String(d.document ?? ""), instructions: texts.boletoInstructions });
+        // outros boletos NOSSOS do mesmo cliente e vencimento (ex.: dois contratos): não são duplicidade na conferência com a Cora
+        const siblings = (await db.execute(sql`select r2.idempotency_key k from issuance_requests r2 join charges c2 on c2.company_id = r2.company_id and c2.id = r2.charge_id join charges c1 on c1.company_id = c2.company_id and c1.customer_id = c2.customer_id and c1.due_date = c2.due_date
+          where c1.company_id = ${companyId} and c1.id = ${r.chargeId} and c2.id <> c1.id and r2.kind = 'boleto' and r2.status in ('emitido', 'enviando', 'desconhecido')`)) as unknown as { k: string }[];
+        const res = await bp.boleto.issue({ idempotencyKey: r.idempotencyKey, knownKeys: siblings.map((x) => x.k), amountCents: cents, dueDate: String(d.due_date), customerName: String(d.legal_name), customerDocument: String(d.document ?? ""), instructions: texts.boletoInstructions });
         await record({ status: "emitido", externalRef: res.providerRef, externalStatus: res.status, lastError: null }, ["enviando"]); out.issued++;
       } else {
         const s = (k: string) => (d[k] == null ? null : String(d[k]));
@@ -249,7 +299,14 @@ export async function processIssuance(db: DB, actorId: string, companyId: string
       }
     } catch (e) {
       const name = (e as Error).name;
-      if (e instanceof RangeError) { // validação do provedor: não adianta repetir
+      if (e instanceof RangeError && isDuplicate((e as Error).message)) { // alerta de duplicidade: nada foi criado; devolve a vaga do dia e deixa só ESTE boleto parado para conferência
+        const code = (e as Error).message;
+        if ((await record({ status: "falhou", lastError: code, attempts: 0, claimedAt: null }, ["enviando"])).length) {
+          await audit(db, companyId, actorId, "issuance.duplicate_blocked", { requestId: r.id, chargeId: r.chargeId, code });
+          out.duplicates++;
+        }
+        out.failed++;
+      } else if (e instanceof RangeError) { // validação do provedor: não adianta repetir
         await record({ status: "falhou", lastError: safeCode((e as Error).message) }, ["enviando"]); out.failed++;
       } else if (name === "IssuanceRetryable") { // nada foi criado: repetir com backoff
         if (r.attempts >= MAX_ATTEMPTS) { await record({ status: "falhou", lastError: "tentativas_esgotadas" }, ["enviando"]); out.failed++; }
@@ -261,7 +318,7 @@ export async function processIssuance(db: DB, actorId: string, companyId: string
       }
     }
   }
-  if (out.claimed + out.issued + out.failed + out.recovered > 0) await audit(db, companyId, actorId, "issuance.run", { boletoProvider: wanted, claimed: out.claimed, issued: out.issued, processing: out.processing, unknown: out.unknown, retry: out.retry, failed: out.failed, skipped: out.skipped, recovered: out.recovered });
+  if (out.claimed + out.issued + out.failed + out.recovered > 0) await audit(db, companyId, actorId, "issuance.run", { boletoProvider: wanted, claimed: out.claimed, issued: out.issued, processing: out.processing, unknown: out.unknown, retry: out.retry, failed: out.failed, skipped: out.skipped, recovered: out.recovered, duplicates: out.duplicates });
   return out;
 }
 

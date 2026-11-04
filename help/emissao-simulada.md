@@ -52,3 +52,11 @@ Veja *Integrações → Portão da emissão real*: credenciais fora do Git, homo
 
 ## Cancelar boleto
 A diretoria pode cancelar um boleto emitido e sem pagamento, com motivo e tudo registrado: veja `cancelar-boleto.md`.
+
+## Alerta de duplicidade (boletos reais)
+Antes de emitir cada boleto real, a plataforma confere na Cora se **já existe um boleto desse cliente neste vencimento** (por exemplo, emitido à mão pela equipe).
+- Se existir, **só aquele boleto** fica parado, com o aviso **ALERTA DE DUPLICIDADE** em *Emissões* e na página do lote. **Nada é duplicado.**
+- **Os outros boletos seguem normalmente** na mesma rodada, e o boleto em alerta **não gasta** a vaga do dia (modo cuidadoso ou limite diário).
+- O aviso diz se o boleto de fora tem o **mesmo valor** ou **outro valor**. Confira na Cora (busque pelo CNPJ/CPF do cliente).
+- Se o boleto da Cora está certo, não há nada a fazer. Se ele foi cancelado ou era engano, use **Conferi, pedir a emissão de novo**: a conferência roda outra vez e só emite se o boleto de fora não existir mais.
+- Dois contratos do mesmo cliente com o mesmo vencimento **não** se bloqueiam entre si.

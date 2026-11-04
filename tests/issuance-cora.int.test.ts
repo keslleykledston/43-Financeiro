@@ -10,7 +10,7 @@ import { Invalid } from "@/modules/identity/service";
 import { createParty } from "@/modules/crm/service";
 import { createContract, decideVersion, getContract } from "@/modules/contracts/service";
 import { approveBatch, generateBatch, getBatch } from "@/modules/billing/batches";
-import { listIssuance, processIssuance, requestBatchIssuance, saveIssuanceSettings } from "@/modules/issuance/service";
+import { duplicateAlerts, listIssuance, processIssuance, requestBatchIssuance, retryDuplicate, saveIssuanceSettings } from "@/modules/issuance/service";
 import { cancelBoleto } from "@/modules/issuance/cancel";
 import { syncBoletoStatus } from "@/modules/issuance/sync";
 import { boletoView } from "@/modules/issuance/boleto-details";
@@ -638,25 +638,77 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     cora.inv.set("inv_manual000001", { id: "inv_manual000001", status: "OPEN", code: "manual-planilha", amount: 250000, due: "2026-10-14", doc: "11222333000181", name: "Cliente Um", description: "x", idem: "m1" });
     const r1 = await processIssuance(db, gerA, A, PN(), undefined, { confirmLive: true });
     const chargeIds: Record<string, string> = {}; for (const c of [cli1, cli2, c3, c4]) chargeIds[c] = (await chargeOf(c)).id;
-    // canário: só 3 reservados no dia (a ordem entre os 4 não importa); o resto espera o dia seguinte
-    expect(r1.claimed).toBe(3);
-    expect(r1.waiting).toMatch(/canário/);
-    expect((await reqs()).filter((r) => r.status === "pendente")).toHaveLength(1);
+    // o boleto em alerta de duplicidade NÃO gasta a vaga do canário: os 3 boletos reais do dia saem (a ordem entre os 4 não importa; se o alerta vem antes, a vaga volta na mesma rodada)
+    expect(r1.issued).toBe(3);
+    expect((await reqs()).filter((r) => r.status === "pendente").length).toBeLessThanOrEqual(1); // só o do alerta pode ter ficado para o dia seguinte
     expect(cora.calls.filter((c) => c.path !== "/token").every((c) => c.host === CORA_HOSTS.producao)).toBe(true); // só o host de PRODUÇÃO
     expect(cora.posts().every((c) => c.headers["Idempotency-Key"]?.length === 36 && !/payment|pay|transfer/i.test(c.path))).toBe(true);
-    // dia seguinte: o canário libera mais 3 (resta 1)
+    // dia seguinte: no máximo o do alerta (se ainda não examinado) é examinado e alerta; nada novo é emitido
     clock("2026-10-06T12:00:00-04:00");
     const r2 = await processIssuance(db, gerA, A, PN(26), undefined, { confirmLive: true });
-    expect(r2.claimed).toBe(1);
+    expect(r2.issued).toBe(0);
     expect((await reqs()).filter((r) => r.status === "pendente")).toHaveLength(0);
     // no fim: o cliente 1 (já tinha boleto igual na Cora, emitido à mão) NÃO foi emitido; os outros 3 sim, todos reais
     const all = await reqs();
-    expect(all.find((r) => r.chargeId === chargeIds[cli1])).toMatchObject({ status: "falhou", lastError: "boleto_ja_existe_na_cora", mode: "cora_producao" });
+    expect(all.find((r) => r.chargeId === chargeIds[cli1])).toMatchObject({ status: "falhou", lastError: "boleto_ja_existe_na_cora", mode: "cora_producao", attempts: 0, claimedAt: null }); // vaga devolvida
+    expect(await n("audit_log where action = 'issuance.duplicate_blocked'")).toBe(1);
     const emitted = all.filter((r) => r.status === "emitido");
     expect(emitted).toHaveLength(3);
     expect(emitted.every((r) => r.mode === "cora_producao" && /^inv_/.test(r.externalRef ?? ""))).toBe(true);
     expect(cora.posts()).toHaveLength(3); // nenhum POST para o cliente com boleto igual
     expect(cora.posts().every((c) => c.body.customer.document.identity !== "11222333000181")).toBe(true);
+  });
+
+  it("GUARDRAIL DE DUPLICIDADE: outro valor no mesmo vencimento também alerta; dois contratos nossos do mesmo cliente não se bloqueiam; 'pedir de novo' só emite se o boleto de fora sumiu", async () => {
+    await credsProd(); clock("2026-10-05T12:00:00-04:00");
+    await activeContract(cli1); await activeContract(cli2);
+    const { batchId } = await generateBatch(db, asstA, A, D);
+    await approveBatch(db, dirA, A, batchId, (await getBatch(db, asstA, A, batchId))!.hash);
+    prodOn(); await arm(); await saveIssuanceSettings(db, dirA, A, { paused: false, dailyLimit: 20, liveCanary: false, liveConfirm: PHRASE });
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    // boleto manual do cliente 1 no mesmo vencimento, mas com OUTRO valor
+    cora.inv.set("inv_manual000002", { id: "inv_manual000002", status: "OPEN", code: "manual-planilha", amount: 99900, due: "2026-10-14", doc: "11222333000181", name: "Cliente Um", description: "x", idem: "m2" });
+    const r = await processIssuance(db, gerA, A, PN(), undefined, { confirmLive: true });
+    expect(r).toMatchObject({ issued: 1, duplicates: 1 });
+    const c1 = (await chargeOf(cli1)).id, c2 = (await chargeOf(cli2)).id;
+    const all = await reqs();
+    expect(all.find((x) => x.chargeId === c1)).toMatchObject({ status: "falhou", lastError: "boleto_mesmo_vencimento_na_cora", attempts: 0 });
+    expect(all.find((x) => x.chargeId === c2)).toMatchObject({ status: "emitido" }); // o outro cliente NÃO foi impedido
+    expect(cora.posts()).toHaveLength(1);
+    // alerta aparece para a cobrança específica
+    expect((await duplicateAlerts(db, gerA, A, [c1, c2])).get(c1)).toMatchObject({ code: "boleto_mesmo_vencimento_na_cora" });
+    expect((await duplicateAlerts(db, gerA, A, [c1, c2])).has(c2)).toBe(false);
+    // pedir de novo com o boleto de fora ainda lá: alerta de novo, nada emitido
+    await retryDuplicate(db, gerA, A, all.find((x) => x.chargeId === c1)!.id);
+    await processIssuance(db, gerA, A, PN(), undefined, { confirmLive: true });
+    expect((await reqs()).find((x) => x.chargeId === c1 && x.status !== "cancelado")).toMatchObject({ status: "falhou", lastError: "boleto_mesmo_vencimento_na_cora" });
+    expect(cora.posts()).toHaveLength(1);
+    // o boleto de fora foi cancelado na Cora: agora pedir de novo emite
+    cora.inv.get("inv_manual000002")!.status = "CANCELLED";
+    await retryDuplicate(db, gerA, A, (await reqs()).find((x) => x.chargeId === c1 && x.status === "falhou")!.id);
+    const r3 = await processIssuance(db, gerA, A, PN(), undefined, { confirmLive: true });
+    expect(r3).toMatchObject({ issued: 1, duplicates: 0 });
+    expect(cora.posts()).toHaveLength(2);
+    await expect(retryDuplicate(db, gerA, A, (await reqs()).find((x) => x.chargeId === c1 && x.status === "emitido")!.id)).rejects.toThrow(/alerta de duplicidade/); // só alerta pode ser pedido de novo
+    await expect(retryDuplicate(db, asstA, A, "00000000-0000-0000-0000-000000000000")).rejects.toThrow(); // sem permissão ou inexistente
+  });
+
+  it("GUARDRAIL × CONCORRÊNCIA: duas rodadas ao mesmo tempo com um alerta de duplicidade nunca passam do canário (3 reais por dia)", async () => {
+    await credsProd(); clock("2026-10-05T12:00:00-04:00");
+    const c3 = (await createParty(db, dirA, A, { kind: "cliente", legalName: "Cliente Tres", document: "529.982.247-25" })).id;
+    const c4 = (await createParty(db, dirA, A, { kind: "cliente", legalName: "Cliente Quatro", document: "111.444.777-35" })).id;
+    for (const c of [cli1, cli2, c3, c4]) await activeContract(c);
+    const { batchId } = await generateBatch(db, asstA, A, D);
+    await approveBatch(db, dirA, A, batchId, (await getBatch(db, asstA, A, batchId))!.hash);
+    prodOn(); await arm();
+    await requestBatchIssuance(db, gerA, A, batchId, "boleto");
+    cora.inv.set("inv_manual000003", { id: "inv_manual000003", status: "OPEN", code: "manual-planilha", amount: 250000, due: "2026-10-14", doc: "11222333000181", name: "Cliente Um", description: "x", idem: "m3" });
+    await Promise.all([1, 2, 3].map(() => processIssuance(db, gerA, A, PN(), undefined, { confirmLive: true })));
+    expect(cora.posts().length).toBeLessThanOrEqual(3); // canário: nunca mais de 3 boletos reais no dia, com ou sem alerta devolvendo vaga
+    const all = await reqs();
+    expect(all.filter((r) => r.status === "emitido").length).toBeLessThanOrEqual(3);
+    expect(all.filter((r) => r.status === "emitido").length).toBe(cora.posts().length); // nada emitido sem registro
+    expect(new Set(cora.posts().map((c) => c.body.customer.document.identity)).size).toBe(cora.posts().length); // nenhum cliente emitido duas vezes
   });
 
   it("LIMITE DIÁRIO conta só o provedor em uso: boletos da Cora de TESTES emitidos hoje não gastam o limite da emissão REAL", async () => {

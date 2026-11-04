@@ -6,6 +6,7 @@ import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
 import { getBatch } from "@/modules/billing/batches";
 import { invoicesForCharges } from "@/modules/invoices/service";
+import { DUPLICATE_ALERT, duplicateAlerts } from "@/modules/issuance/service";
 import { getIssuanceSettings } from "@/modules/issuance/service";
 import { WARNING_LABEL, type Warning } from "@/modules/billing/calendar";
 import { Callout, Money, PageHeader, SectionCard, StatusPill } from "@/components/k3g/primitives";
@@ -26,6 +27,7 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
   if (!r) notFound();
   const { batch: b, stale } = r;
   const notas = await invoicesForCharges(db, ctx.user.id, ctx.current.id, r.charges.map((c) => c.id));
+  const alertas = await duplicateAlerts(db, ctx.user.id, ctx.current.id, r.charges.map((c) => c.id));
   const pendentes = r.charges.filter((c) => c.jointInvoice && !notas.has(c.id)).length;
   const approve = can(role, "billing.approve"), write = can(role, "billing.write");
   const prov = can(role, "issuance.read") ? (await getIssuanceSettings(db, ctx.user.id, ctx.current.id)).boletoProvider : "simulado";
@@ -75,6 +77,7 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
                 <div className="min-w-0">
                   <AppLink href={`/contratos/${c.contractId}`} className="font-medium hover:underline">{c.customerName}</AppLink>
                   <p className="text-muted-foreground">{c.description} · competência {c.competenceMonth.slice(5, 7)}/{c.competenceMonth.slice(0, 4)} · vence {br(c.dueDate)}{c.jointInvoice ? " · boleto + NF" : ""}</p>
+                  {alertas.has(c.id) && <Callout tone="warning" role="alert"><strong>ALERTA DE DUPLICIDADE.</strong> {DUPLICATE_ALERT[alertas.get(c.id)!.code]} Este é o único boleto parado; os outros do lote seguem. <AppLink href="/faturamento/emissoes?status=falhou" className="underline">Ver em Emissões</AppLink></Callout>}
                   {(c.warnings as Warning[]).length > 0 && <p className="text-xs text-muted-foreground">{(c.warnings as Warning[]).map((w) => WARNING_LABEL[w]).join("; ")}</p>}
                   {(() => {
                     const nf = notas.get(c.id);
