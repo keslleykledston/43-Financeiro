@@ -43,7 +43,7 @@ describe.skipIf(!enabled)("W3b WhatsApp: webhook assinado, respostas, pedido de 
   afterAll(async () => { await conn?.end(); await admin?.end(); });
 
   beforeEach(async () => {
-    await db.execute(sql`truncate rate_limits, whatsapp_inbound_events, whatsapp_outbox, whatsapp_company_settings, whatsapp_consents, whatsapp_send_log, whatsapp_send_authorizations, whatsapp_session_companies, whatsapp_sessions, messaging_settings, message_queue, message_template_versions, message_templates, payments, charges, billing_batches, holidays, contract_versions, contracts, customer_contacts, customers, audit_log, invitations, memberships, companies, users restart identity cascade`);
+    await db.execute(sql`truncate rate_limits, whatsapp_inbound_events, whatsapp_outbox, whatsapp_company_settings, whatsapp_consents, whatsapp_send_log, whatsapp_send_authorizations, whatsapp_session_companies, whatsapp_sessions, messaging_settings, message_queue, message_template_versions, message_templates, payments, charge_invoices, charges, billing_batches, holidays, contract_versions, contracts, customer_contacts, customers, audit_log, invitations, memberships, companies, users restart identity cascade`);
     const [a, b] = await db.insert(schema.companies).values([{ name: "Empresa A" }, { name: "Empresa B" }]).returning();
     A = a.id; B = b.id;
     const mk = async (e: string) => (await db.insert(schema.users).values({ email: e, name: e.split("@")[0], passwordHash: "x" }).returning())[0].id;

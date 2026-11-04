@@ -34,7 +34,7 @@ describe.skipIf(!enabled)("E06 modelos e fila simulada (DB de teste)", () => {
   afterAll(async () => { await conn?.end(); await admin?.end(); });
 
   beforeEach(async () => {
-    await db.execute(sql`truncate message_queue, message_template_versions, message_templates, charges, billing_batches, holidays, contract_versions, contracts, integration_conflicts, integration_sync_runs, integration_connections, rate_limits, customer_contacts, vendor_contacts, customers, vendors, audit_log, invitations, memberships, companies, users restart identity cascade`);
+    await db.execute(sql`truncate message_queue, message_template_versions, message_templates, charge_invoices, charges, billing_batches, holidays, contract_versions, contracts, integration_conflicts, integration_sync_runs, integration_connections, rate_limits, customer_contacts, vendor_contacts, customers, vendors, audit_log, invitations, memberships, companies, users restart identity cascade`);
     const [a, b] = await db.insert(schema.companies).values([{ name: "Empresa A" }, { name: "Empresa B" }]).returning();
     A = a.id; B = b.id;
     const mk = async (e: string) => (await db.insert(schema.users).values({ email: e, name: e, passwordHash: "x" }).returning())[0].id;

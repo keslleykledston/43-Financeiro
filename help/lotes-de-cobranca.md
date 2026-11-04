@@ -32,3 +32,12 @@ Todas as cobranças previstas para **uma data de emissão** (25, 1, 8 ou 15, con
 - **Remover** um ajuste não apaga o registro: ele fica no histórico, fora do cálculo.
 - A composição (cada item) faz parte do que o aprovador aprova: trocar itens depois de gerar a prévia deixa o lote "desatualizado" até você atualizar.
 - **Quando o lote é aprovado, os ajustes ficam travados.** Para mudar, reabra o lote (com motivo); isso só é possível se ainda não houve pagamento nem emissão.
+
+## Nota fiscal junto do boleto (clientes que exigem NF)
+Cliente com a marca **«exige NF emitida junto do boleto»** no contrato aparece no lote com **boleto + NF**. A plataforma **não emite a nota**: você emite no emissor da prefeitura/contador e **anexa o PDF** aqui.
+- No lote, na cobrança, clique **Anexar a nota fiscal** e informe o **número**, a **data de emissão**, o **código de verificação** (opcional) e o **PDF** (até 2 MB).
+- Enquanto a nota não estiver anexada, o lote mostra um aviso e o **e-mail real dessa cobrança espera**: ninguém recebe o boleto sem a nota. As outras cobranças seguem normalmente.
+- Com a nota anexada, o e-mail leva **o boleto e a nota em anexo**, com uma frase avisando da nota.
+- **Substituir** guarda a nota anterior no histórico; **Remover** devolve a cobrança ao estado «falta a nota». Se a nota mudar entre a reserva e o envio, nada é enviado e a mensagem volta à fila.
+- Quem tem acesso aos lotes pode **baixar** o PDF; só quem edita faturamento anexa, substitui ou remove.
+- Cobrança cancelada não recebe nota. Qualquer cobrança pode ter nota anexada, mesmo sem a marca no contrato (ela segue no e-mail).

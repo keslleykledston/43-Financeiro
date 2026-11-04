@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
+import { attachInvoice, removeInvoice } from "@/modules/invoices/service";
 import { approveBatch, cancelBatch, generateBatch, reopenBatch } from "@/modules/billing/batches";
 
 // A empresa vem SEMPRE do contexto validado no servidor, nunca do formulário.
@@ -41,4 +42,21 @@ export async function cancelAction(fd: FormData) {
   try { const c = await ctx(); await cancelBatch(db, c.userId, c.companyId, id); } catch (e) { err = known(e); }
   revalidatePath("/faturamento/lotes");
   if (err) back(id, err); else redirect("/faturamento/lotes");
+}
+
+export async function attachInvoiceAction(fd: FormData) {
+  const id = uuid(fd.get("id")); let err = "", replaced = false;
+  try {
+    const c = await ctx();
+    const f = fd.get("file");
+    if (!(f instanceof File) || f.size === 0) throw new Invalid("Escolha o PDF da nota fiscal");
+    if (f.size > 2_097_152) throw new Invalid("O PDF da nota passa de 2 MB");
+    replaced = (await attachInvoice(db, c.userId, c.companyId, uuid(fd.get("chargeId")), { number: String(fd.get("number") ?? ""), issuedOn: String(fd.get("issuedOn") ?? ""), verificationCode: String(fd.get("verificationCode") ?? ""), pdf: new Uint8Array(await f.arrayBuffer()) })).replaced;
+  } catch (e) { err = known(e); }
+  revalidatePath("/faturamento/lotes"); back(id, err, replaced ? "nota_trocada" : "nota");
+}
+export async function removeInvoiceAction(fd: FormData) {
+  const id = uuid(fd.get("id")); let err = "";
+  try { const c = await ctx(); await removeInvoice(db, c.userId, c.companyId, uuid(fd.get("chargeId"))); } catch (e) { err = known(e); }
+  revalidatePath("/faturamento/lotes"); back(id, err, "nota_removida");
 }

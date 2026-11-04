@@ -5,13 +5,14 @@ import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
 import { getBatch } from "@/modules/billing/batches";
+import { invoicesForCharges } from "@/modules/invoices/service";
 import { getIssuanceSettings } from "@/modules/issuance/service";
 import { WARNING_LABEL, type Warning } from "@/modules/billing/calendar";
 import { Callout, Money, PageHeader, SectionCard, StatusPill } from "@/components/k3g/primitives";
 import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass, inputClass } from "@/components/k3g/button";
 import { formatDateTime } from "@/lib/format";
-import { approveAction, cancelAction, refreshAction, reopenAction } from "../actions";
+import { approveAction, attachInvoiceAction, cancelAction, refreshAction, removeInvoiceAction, reopenAction } from "../actions";
 import { requestBatchIssuanceAction } from "../../emissoes/actions";
 import { STATUS_LABEL, STATUS_TONE } from "../status";
 
@@ -24,10 +25,12 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
   const r = await getBatch(db, ctx.user.id, ctx.current.id, id);
   if (!r) notFound();
   const { batch: b, stale } = r;
+  const notas = await invoicesForCharges(db, ctx.user.id, ctx.current.id, r.charges.map((c) => c.id));
+  const pendentes = r.charges.filter((c) => c.jointInvoice && !notas.has(c.id)).length;
   const approve = can(role, "billing.approve"), write = can(role, "billing.write");
   const prov = can(role, "issuance.read") ? (await getIssuanceSettings(db, ctx.user.id, ctx.current.id)).boletoProvider : "simulado";
   const stage = prov === "cora_homologacao", prod = prov === "cora_producao"; // boletos desta empresa: Cora de testes ou Cora de PRODUÇÃO (reais)
-  const OK: Record<string, string> = { aprovado: "Lote aprovado. Nada foi emitido: aprovar não emite; a emissão é solicitada à parte, em Emissões.", reaberto: "Lote reaberto: volta a ser prévia e precisa de nova aprovação.", atualizado: "Prévia atualizada." };
+  const OK: Record<string, string> = { aprovado: "Lote aprovado. Nada foi emitido: aprovar não emite; a emissão é solicitada à parte, em Emissões.", reaberto: "Lote reaberto: volta a ser prévia e precisa de nova aprovação.", atualizado: "Prévia atualizada.", nota: "Nota fiscal anexada. O e-mail desta cobrança passa a levar boleto e nota juntos.", nota_trocada: "Nota fiscal substituída (a anterior fica no histórico).", nota_removida: "Nota fiscal removida desta cobrança." };
 
   return (
     <div className="space-y-5">
@@ -62,6 +65,8 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
         </section>
       )}
 
+      {pendentes > 0 && <Callout tone="warning">{pendentes} cobrança(s) deste lote exige(m) <strong>boleto + nota fiscal</strong> e ainda não tem a nota anexada. O e-mail real dessas cobranças espera pela nota; os demais seguem normalmente.</Callout>}
+
       <SectionCard title="Cobranças do lote">
         {r.charges.length === 0 ? <p className="text-sm text-muted-foreground">Nenhuma cobrança neste lote.</p> : (
           <ul className="divide-y divide-border">
@@ -71,6 +76,34 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
                   <AppLink href={`/contratos/${c.contractId}`} className="font-medium hover:underline">{c.customerName}</AppLink>
                   <p className="text-muted-foreground">{c.description} · competência {c.competenceMonth.slice(5, 7)}/{c.competenceMonth.slice(0, 4)} · vence {br(c.dueDate)}{c.jointInvoice ? " · boleto + NF" : ""}</p>
                   {(c.warnings as Warning[]).length > 0 && <p className="text-xs text-muted-foreground">{(c.warnings as Warning[]).map((w) => WARNING_LABEL[w]).join("; ")}</p>}
+                  {(() => {
+                    const nf = notas.get(c.id);
+                    if (!nf && !c.jointInvoice) return null;
+                    return (
+                      <div className="mt-1 text-xs">
+                        {nf ? (
+                          <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
+                            <span>Nota fiscal nº <strong>{nf.number}</strong> · emitida em {br(nf.issuedOn)} · segue junto do boleto no e-mail</span>
+                            <a href={`/faturamento/notas/${nf.id}`} className="underline">Baixar PDF</a>
+                            {write && <form action={removeInvoiceAction} className="inline"><input type="hidden" name="id" value={b.id} /><input type="hidden" name="chargeId" value={c.id} /><button className="underline">Remover</button></form>}
+                          </div>
+                        ) : <p className="font-medium text-warning-foreground">Falta a nota fiscal: o e-mail desta cobrança espera por ela.</p>}
+                        {write && (
+                          <details className="mt-1">
+                            <summary className="cursor-pointer underline">{nf ? "Substituir a nota" : "Anexar a nota fiscal"}</summary>
+                            <form action={attachInvoiceAction} encType="multipart/form-data" className="mt-2 grid max-w-xl gap-2 sm:grid-cols-2">
+                              <input type="hidden" name="id" value={b.id} /><input type="hidden" name="chargeId" value={c.id} />
+                              <div><label htmlFor={`nf-${c.id}-number`} className="mb-1 block font-medium">Número da nota</label><input id={`nf-${c.id}-number`} name="number" required maxLength={30} className={inputClass} /></div>
+                              <div><label htmlFor={`nf-${c.id}-issuedOn`} className="mb-1 block font-medium">Emitida em</label><input id={`nf-${c.id}-issuedOn`} name="issuedOn" type="date" required className={inputClass} /></div>
+                              <div><label htmlFor={`nf-${c.id}-verificationCode`} className="mb-1 block font-medium">Código de verificação (opcional)</label><input id={`nf-${c.id}-verificationCode`} name="verificationCode" maxLength={80} className={inputClass} /></div>
+                              <div><label htmlFor={`nf-${c.id}-file`} className="mb-1 block font-medium">PDF da nota (até 2 MB)</label><input id={`nf-${c.id}-file`} name="file" type="file" accept="application/pdf" required className={inputClass} /></div>
+                              <div className="sm:col-span-2"><button className={buttonClass("outline")}>{nf ? "Substituir" : "Anexar"}</button></div>
+                            </form>
+                          </details>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {c.adjustments.length > 0 && <p className="text-xs text-muted-foreground">Contrato <Money cents={c.baseCents} /> {c.adjustments.map((a) => `${a.kind === "desconto" ? "−" : "+"} ${a.description} ${(a.amountCents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`).join(" ")}</p>}
                 </div>
                 <Money cents={c.amountCents} className="font-semibold" />

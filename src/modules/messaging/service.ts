@@ -11,6 +11,7 @@ import { resolveProviders } from "@/modules/providers/registry";
 import type { Providers, SendResult } from "@/modules/providers/types";
 import { activeAuthorization, domainsOf, finishLog, flagOn, liveEmailFor, sentToday, type LiveState } from "@/modules/providers/email-live";
 import { isAllowed } from "@/modules/providers/smtp";
+import { activeInvoicePdf, activeInvoices, invoiceFilename, type InvoiceInfo } from "@/modules/invoices/service";
 import { SIMULATED_LINE, companyBoletoMode, fetchBoletoPdf, prefetchBoletoMail, type BoletoMail, type BoletoMode } from "./boleto-mail";
 
 /**
@@ -246,10 +247,14 @@ export async function saveSettings(db: DB, actorId: string, companyId: string, r
 const MAX_ATTEMPTS = 3;
 type DueRow = { q: typeof messageQueue.$inferSelect; c: typeof charges.$inferSelect; customer: string; subject: string | null; body: string | null };
 /** Texto da mensagem (assunto/corpo) a partir do modelo ativo. Único lugar que monta o texto, para o simulado e o real nunca divergirem. */
-function buildMessage(r: DueRow, companyName: string, internal: boolean, bm?: BoletoMail) {
+function buildMessage(r: DueRow, companyName: string, internal: boolean, bm?: BoletoMail, inv?: Pick<InvoiceInfo, "number">) {
   const vars: Vars = { linha_digitavel: bm?.state === "ok" ? (bm.digitable ?? "") : SIMULATED_LINE, link_boleto: bm?.state === "ok" ? (bm.pdfUrl ?? "") : "", pix_copia_cola: bm?.state === "ok" ? (bm.pixEmv ?? "") : "", cliente: r.customer, empresa: companyName, valor: formatBRL(centsFromNumeric(r.c.amount)), vencimento: br(r.c.dueDate), competencia: `${r.c.competenceMonth.slice(5, 7)}/${r.c.competenceMonth.slice(0, 4)}`, descricao: r.c.description, emissao: br(r.c.issueDate) };
   const subject = internal ? "Revisão humana D+15" : render(r.subject ?? "", vars);
-  const body = internal ? `Cobrança de ${vars.cliente} (${vars.valor}, vencida em ${vars.vencimento}) está há 15 dias em atraso. Decidir o próximo passo manualmente.` : render(r.body ?? "", vars);
+  let body = internal ? `Cobrança de ${vars.cliente} (${vars.valor}, vencida em ${vars.vencimento}) está há 15 dias em atraso. Decidir o próximo passo manualmente.` : render(r.body ?? "", vars);
+  if (inv && !internal) { // N1: a nota fiscal segue junto; a frase entra antes do último parágrafo (a assinatura), em todos os modelos
+    const line = `A nota fiscal de serviço (NFS-e nº ${inv.number}) também segue em anexo.`, i = body.lastIndexOf("\n\n");
+    body = i > 0 ? `${body.slice(0, i)}\n\n${line}${body.slice(i)}` : `${body}\n\n${line}`;
+  }
   return { subject, body };
 }
 const RECIPIENT_EMAIL = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/;
@@ -376,7 +381,7 @@ async function dispatch(db: DB, companyId: string, actorId: string | null, now: 
  */
 export async function runEmailLive(db: DB, companyId: string, actorId: string | null, now: Date, o: { respectWindow: boolean; onlyAuto?: boolean; boletos?: Map<string, BoletoMail>; boletoMode?: BoletoMode }, live: Extract<LiveState, { state: "ready" }>, hooks: { afterReserve?: () => Promise<void> } = {}): Promise<RunResult> {
   const out: RunResult = { ...EMPTY };
-  type Job = { id: string; logId: string; to: string[]; subject: string; body: string; attempts: number; boleto?: BoletoMail; dueDate: string; chargeId: string };
+  type Job = { id: string; logId: string; to: string[]; subject: string; body: string; attempts: number; boleto?: BoletoMail; dueDate: string; chargeId: string; invoice?: InvoiceInfo };
   const jobs: Job[] = [];
   await db.transaction(async (tx) => {
     const x = tx as unknown as DB;
@@ -411,6 +416,7 @@ export async function runEmailLive(db: DB, companyId: string, actorId: string | 
       .where(and(eq(messageQueue.companyId, companyId), eq(messageQueue.status, "pendente"), eq(messageQueue.channel, "email"), lte(messageQueue.scheduledFor, today)))
       .orderBy(asc(messageQueue.scheduledFor), asc(messageQueue.createdAt)).limit(500).for("update", { of: messageQueue });
     const block = async (id: string, reason: string) => { await x.update(messageQueue).set({ status: "bloqueado", blockedReason: reason, updatedAt: now }).where(and(eq(messageQueue.id, id), eq(messageQueue.status, "pendente"))); out.blocked++; };
+    const invs = await activeInvoices(x, companyId, due.map((r) => r.q.chargeId)); // N1: notas fiscais anexadas às cobranças
     for (const r of due) {
       if (jobs.length >= budget) { out.waiting = "Limite de envios atingido nesta execução"; break; }
       const q = r.q;
@@ -424,12 +430,15 @@ export async function runEmailLive(db: DB, companyId: string, actorId: string | 
       const bm = o.boletos?.get(q.chargeId);
       if (o.boletoMode && o.boletoMode !== "simulado" && bm?.state !== "ok") { out.waiting ??= "Aguardando o boleto emitido (provedor real)"; continue; }
       if ((!o.boletoMode || o.boletoMode === "simulado") && /\{\{\s*(linha_digitavel|link_boleto)\s*\}\}/.test(`${r.subject ?? ""}\n${r.body ?? ""}`)) { await block(q.id, "O modelo usa o boleto, mas o boleto desta empresa é simulado: e-mail real não vai com boleto de mentira"); continue; }
-      const { subject, body } = buildMessage(r, co.name, false, bm);
+      // N1: cliente que exige «boleto + NF» só recebe com a nota anexada (a mensagem espera; ninguém recebe o boleto sozinho)
+      const inv = invs.get(q.chargeId);
+      if (r.c.jointInvoice && !inv) { out.waiting ??= "Aguardando a nota fiscal (cliente exige NF junto do boleto)"; continue; }
+      const { subject, body } = buildMessage(r, co.name, false, bm, inv);
       const won = await x.update(messageQueue).set({ status: "enviando", renderedSubject: subject, renderedBody: body, attempts: q.attempts + 1, lastError: null, processedAt: now, processedBy: actorId, updatedAt: now })
         .where(and(eq(messageQueue.id, q.id), eq(messageQueue.status, "pendente"))).returning({ id: messageQueue.id });
       if (won.length === 0) continue;
       const [log] = await x.insert(emailSendLog).values({ companyId, kind: "fila", queueId: q.id, recipientDomains: domainsOf(to), recipients: to.length, actorId }).returning({ id: emailSendLog.id });
-      jobs.push({ id: q.id, logId: log.id, to, subject, body, attempts: q.attempts + 1, boleto: bm?.state === "ok" ? bm : undefined, dueDate: r.c.dueDate, chargeId: q.chargeId });
+      jobs.push({ id: q.id, logId: log.id, to, subject, body, attempts: q.attempts + 1, boleto: bm?.state === "ok" ? bm : undefined, dueDate: r.c.dueDate, chargeId: q.chargeId, invoice: inv });
     }
   });
   if (process.env.VITEST === "true") await hooks.afterReserve?.(); // só testes: simula a revogação entre reservar e enviar
@@ -460,7 +469,31 @@ export async function runEmailLive(db: DB, companyId: string, actorId: string | 
         continue;
       }
     }
-    if (j.boleto?.pdfUrl) { try { attachments = [{ filename: `boleto-${j.dueDate}.pdf`, contentType: "application/pdf", content: await fetchBoletoPdf(j.boleto.pdfUrl) }]; } catch { pdfFail = true; } }
+    // N1: reconfere a exigência de NF da cobrança (pode ter passado a exigir depois da reserva) e a nota ativa imediatamente antes de entregar ao SMTP; remover/trocar a nota fica recusado enquanto o item está «enviando»
+    const [cj] = await db.select({ joint: charges.jointInvoice }).from(charges).where(and(eq(charges.id, j.chargeId), eq(charges.companyId, companyId)));
+    if (cj?.joint && !j.invoice) {
+      await db.transaction(async (tx) => {
+        const x = tx as unknown as DB;
+        await finishLog(x, j.logId, { status: "falhou", error: "nota_exigida" });
+        await x.update(messageQueue).set({ status: "pendente", attempts: j.attempts - 1, lastError: "nota_exigida", updatedAt: new Date() }).where(and(eq(messageQueue.id, j.id), eq(messageQueue.status, "enviando")));
+      });
+      out.waiting = "Esta cobrança passou a exigir a nota fiscal: nada foi enviado";
+      continue;
+    }
+    if (j.invoice) {
+      const nf = await activeInvoicePdf(db, companyId, j.chargeId).catch(() => null);
+      if (!nf || nf.id !== j.invoice.id) {
+        await db.transaction(async (tx) => {
+          const x = tx as unknown as DB;
+          await finishLog(x, j.logId, { status: "falhou", error: "nota_mudou" });
+          await x.update(messageQueue).set({ status: "pendente", attempts: j.attempts - 1, lastError: "nota_mudou", updatedAt: new Date() }).where(and(eq(messageQueue.id, j.id), eq(messageQueue.status, "enviando")));
+        });
+        out.waiting = "A nota fiscal mudou antes do envio: nada foi enviado";
+        continue;
+      }
+      attachments = [{ filename: invoiceFilename(nf.number), contentType: "application/pdf", content: nf.pdf }];
+    }
+    if (j.boleto?.pdfUrl) { try { attachments = [{ filename: `boleto-${j.dueDate}.pdf`, contentType: "application/pdf", content: await fetchBoletoPdf(j.boleto.pdfUrl) }, ...(attachments ?? [])]; } catch { pdfFail = true; } }
     const res: SendResult = pdfFail ? { ok: false, retryable: true, error: "pdf_indisponivel" } : await live.provider.send({ to: j.to, subject: j.subject, text: j.body, html: toEmailHtml(j.body), idempotencyKey: `msg-${j.id}`, ...(attachments ? { attachments } : {}) }).catch(() => ({ ok: false as const, retryable: false, unknown: true, error: "resultado_desconhecido" }));
     await db.transaction(async (tx) => {
       const x = tx as unknown as DB;

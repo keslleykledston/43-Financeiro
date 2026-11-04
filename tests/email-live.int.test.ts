@@ -13,6 +13,7 @@ import { approveBatch, generateBatch, getBatch } from "@/modules/billing/batches
 import { ensureDefaultTemplates, listQueue, processQueue, runScheduled, scheduleQueue } from "@/modules/messaging/service";
 import { saveEmailAccount, removeEmailAccount } from "@/modules/providers/email-config";
 import { authorizeEmailLive, getEmailLiveStatus, revokeEmailLive } from "@/modules/providers/email-auth";
+import { attachInvoice } from "@/modules/invoices/service";
 import { emailLiveActive, listSendLog, sendTestEmail, testEmailAccount } from "@/modules/providers/email-live";
 
 const enabled = !!process.env.POSTGRES_USER;
@@ -42,7 +43,7 @@ describe.skipIf(!enabled)("E23 — envio REAL de e-mail (canário) com transport
 
   beforeEach(async () => {
     sent = []; behavior = ok;
-    await db.execute(sql`truncate email_send_log, email_live_authorizations, email_accounts, message_queue, message_template_versions, message_templates, charges, billing_batches, holidays, contract_versions, contracts, integration_conflicts, integration_sync_runs, integration_connections, rate_limits, customer_contacts, vendor_contacts, customers, vendors, audit_log, invitations, memberships, companies, users restart identity cascade`);
+    await db.execute(sql`truncate email_send_log, email_live_authorizations, email_accounts, message_queue, message_template_versions, message_templates, charge_invoices, charges, billing_batches, holidays, contract_versions, contracts, integration_conflicts, integration_sync_runs, integration_connections, rate_limits, customer_contacts, vendor_contacts, customers, vendors, audit_log, invitations, memberships, companies, users restart identity cascade`);
     const [a, b] = await db.insert(schema.companies).values([{ name: "Empresa A" }, { name: "Empresa B" }]).returning();
     A = a.id; B = b.id;
     const mk = async (e: string) => (await db.insert(schema.users).values({ email: e, name: e, passwordHash: "x" }).returning())[0].id;
@@ -266,5 +267,61 @@ describe.skipIf(!enabled)("E23 — envio REAL de e-mail (canário) com transport
     expect((await emails()).map((i) => i.status)).toEqual(["pendente", "pendente"]);
     expect(await listSendLog(db, dirA, A)).toHaveLength(0);
   });
+  // ---------- N1: nota fiscal junto do boleto ----------
+  const pdf = (tag = "nf") => Buffer.from(`%PDF-1.4\n% ${tag} ${"x".repeat(200)}\n%%EOF`);
+  const chargeOf = async (cli: string) => (await db.select().from(schema.charges).where(eq(schema.charges.customerId, cli)))[0].id;
+
+  it("N1: cliente que exige boleto + NF espera pela nota; com a nota, o e-mail leva o PDF e a frase da nota", async () => {
+    await setup();
+    await db.execute(sql`update charges set joint_invoice = true where customer_id = ${cli1}`);
+    const r1 = await processQueue(db, asstA, A, D, undefined, deps());
+    expect(sent).toHaveLength(0); expect(r1.waiting).toMatch(/Aguardando a nota fiscal/);
+    expect((await st("Cliente Um")).status).toBe("pendente"); // espera, não bloqueia
+    await attachInvoice(db, asstA, A, await chargeOf(cli1), { number: "2026/123", issuedOn: "2026-10-01", verificationCode: "AB12-CD34", pdf: pdf() });
+    await processQueue(db, asstA, A, D, undefined, deps());
+    expect(sent).toHaveLength(1);
+    const m = sent[0].m as { attachments?: { filename: string; contentType: string; content: Buffer }[]; text: string };
+    expect(m.attachments).toHaveLength(1); expect(m.attachments![0]).toMatchObject({ filename: "nota-fiscal-2026-123.pdf", contentType: "application/pdf" });
+    expect(m.attachments![0].content.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(m.text).toMatch(/NFS-e nº 2026\/123\) também segue em anexo/);
+    expect(m.text.trim().endsWith("Empresa A")).toBe(true); // a frase entra antes da assinatura
+    expect((await st("Cliente Um")).status).toBe("enviado");
+  });
+
+  it("N1: nota removida entre a reserva e o envio volta à fila sem enviar", async () => {
+    await setup();
+    await db.execute(sql`update charges set joint_invoice = true where customer_id = ${cli1}`);
+    const cid = await chargeOf(cli1);
+    await attachInvoice(db, asstA, A, cid, { number: "9", issuedOn: "2026-10-01", pdf: pdf() });
+    await processQueue(db, asstA, A, D, undefined, { ...deps(), afterReserve: async () => { await db.execute(sql`update charge_invoices set status = 'removida', closed_at = now() where charge_id = ${cid}`); } });
+    expect(sent).toHaveLength(0);
+    expect(await st("Cliente Um")).toMatchObject({ status: "pendente", lastError: "nota_mudou" });
+    expect((await listSendLog(db, dirA, A, 5))[0]).toMatchObject({ status: "falhou" });
+  });
+
+  it("N1: o serviço recusa remover/trocar a nota enquanto o e-mail da cobrança está sendo enviado (reserva)", async () => {
+    await setup();
+    const cid = await chargeOf(cli1);
+    await db.execute(sql`update charges set joint_invoice = true where id = ${cid}`);
+    await attachInvoice(db, asstA, A, cid, { number: "5", issuedOn: "2026-10-01", pdf: pdf() });
+    let blocked = "";
+    await processQueue(db, asstA, A, D, undefined, { ...deps(), afterReserve: async () => { blocked = await attachInvoice(db, asstA, A, cid, { number: "6", issuedOn: "2026-10-01", pdf: pdf("v2") }).then(() => "", (e) => String(e.message)); } });
+    expect(blocked).toMatch(/sendo enviado/);
+    expect(sent).toHaveLength(1); // o envio seguiu com a nota que estava ativa
+  });
+
+  it("N1: cobrança que passa a exigir NF depois da reserva não sai sem a nota", async () => {
+    await setup();
+    await processQueue(db, asstA, A, D, undefined, { ...deps(), afterReserve: async () => { await db.execute(sql`update charges set joint_invoice = true where customer_id = ${cli1}`); } });
+    expect(sent).toHaveLength(0);
+    expect(await st("Cliente Um")).toMatchObject({ status: "pendente", lastError: "nota_exigida" });
+  });
+
+  it("N1: cobrança que NÃO exige nota e sem nota anexada segue sem anexo", async () => {
+    await setup();
+    await processQueue(db, asstA, A, D, undefined, deps());
+    expect(sent).toHaveLength(1); expect((sent[0].m as { attachments?: unknown[] }).attachments).toBeUndefined();
+  });
+
 });
 

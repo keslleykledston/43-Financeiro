@@ -18,6 +18,8 @@ const TOTAL_TIMEOUT_MS = 45_000;
 const DNS_TIMEOUT_MS = 10_000;
 const MAX_RECIPIENTS = 3;
 export const MAX_ATTACHMENT_BYTES = 3_000_000;
+/** Boleto + nota fiscal (N1): até 2 PDFs, soma limitada. */
+export const MAX_ATTACHMENTS_TOTAL = 5_200_000;
 
 /** Endereço exato ("a@x.com") ou domínio exato ("@x.com"; subdomínios NÃO valem). */
 export function isAllowed(address: string, allowed: readonly string[]): boolean {
@@ -94,7 +96,7 @@ export function createSmtpEmailProvider(cfg: SmtpConfig, allowed: readonly strin
       if (m.to.length === 0 || m.to.length > MAX_RECIPIENTS) return { ok: false, retryable: false, error: "destinatarios_invalidos" };
       if (!m.to.every((a) => isAllowed(a, allowed))) return { ok: false, retryable: false, error: "destinatario_nao_autorizado" };
       const att = m.attachments ?? [];
-      if (att.length > 1 || att.some((a) => a.contentType !== "application/pdf" || !Buffer.isBuffer(a.content) || a.content.length < 100 || a.content.length > MAX_ATTACHMENT_BYTES || a.content.subarray(0, 5).toString("latin1") !== "%PDF-" || !/^[A-Za-z0-9._-]{1,80}\.pdf$/.test(a.filename))) return { ok: false, retryable: false, error: "anexo_invalido" };
+      if (att.length > 2 || att.reduce((n, a) => n + (Buffer.isBuffer(a.content) ? a.content.length : 0), 0) > MAX_ATTACHMENTS_TOTAL || att.some((a) => a.contentType !== "application/pdf" || !Buffer.isBuffer(a.content) || a.content.length < 100 || a.content.length > MAX_ATTACHMENT_BYTES || a.content.subarray(0, 5).toString("latin1") !== "%PDF-" || !/^[A-Za-z0-9._-]{1,80}\.pdf$/.test(a.filename))) return { ok: false, retryable: false, error: "anexo_invalido" };
       const prep = await prepare(cfg, d, make);
       if (!prep.ok) return prep;
       const transport = prep.transport;

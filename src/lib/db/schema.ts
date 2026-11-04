@@ -1,5 +1,7 @@
 import { sql } from "drizzle-orm";
-import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb, pgEnum, integer, boolean, unique, foreignKey, check, numeric, date, bigint } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb, pgEnum, integer, boolean, unique, foreignKey, check, numeric, date, bigint, customType } from "drizzle-orm/pg-core";
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
 
 export const roleEnum = pgEnum("role", ["admin_tecnico", "diretoria", "gerente", "assistente", "contabilidade"]);
 export const statusEnum = pgEnum("member_status", ["active", "invited", "removed"]);
@@ -1549,4 +1551,33 @@ export const coraWebhookEvents = pgTable("cora_webhook_events", {
   check("cora_webhook_events_attempts_chk", sql`${t.attempts} between 0 and 20`),
   check("cora_webhook_events_status_chk", sql`${t.status} in ('pendente', 'processado', 'ignorado', 'erro')`),
   check("cora_webhook_events_shape_chk", sql`${t.eventType} ~ '^[a-z_]{2,20}[.][a-z_*]{2,20}$' and ${t.resourceId} ~ '^inv_[A-Za-z0-9_-]{4,64}$' and (${t.eventId} is null or char_length(${t.eventId}) <= 100)`),
+]);
+
+
+// N1 — nota fiscal (NFS-e) ANEXADA a uma cobrança: o PDF da nota emitida fora (prefeitura/contador/emissor) para seguir JUNTO do boleto no e-mail. Uma ativa por cobrança; trocar arquiva a anterior (histórico permanente).
+export const chargeInvoices = pgTable("charge_invoices", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  chargeId: uuid("charge_id").notNull(),
+  number: text("number").notNull(), // número da NFS-e como aparece na nota
+  issuedOn: date("issued_on", { mode: "string" }).notNull(),
+  verificationCode: text("verification_code"), // código de verificação / chave de acesso (opcional)
+  source: text("source").notNull().default("manual"), // manual (PDF anexado por pessoa) | provider (emissor integrado, fase N2)
+  status: text("status").notNull().default("ativa"), // ativa | substituida | removida
+  pdf: bytea("pdf").notNull(),
+  pdfSha256: text("pdf_sha256").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  createdBy: uuid("created_by").references(() => users.id),
+  closedBy: uuid("closed_by").references(() => users.id),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+}, (t) => [
+  foreignKey({ columns: [t.companyId, t.chargeId], foreignColumns: [charges.companyId, charges.id] }),
+  uniqueIndex("charge_invoices_one_active_uq").on(t.chargeId).where(sql`${t.status} = 'ativa'`),
+  index("charge_invoices_charge_idx").on(t.companyId, t.chargeId),
+  check("charge_invoices_status_chk", sql`${t.status} in ('ativa', 'substituida', 'removida')`),
+  check("charge_invoices_source_chk", sql`${t.source} in ('manual', 'provider')`),
+  check("charge_invoices_size_chk", sql`${t.sizeBytes} between 100 and 2097152 and octet_length(${t.pdf}) = ${t.sizeBytes}`),
+  check("charge_invoices_text_chk", sql`${t.number} ~ '^[0-9A-Za-z][0-9A-Za-z./-]{0,29}$' and (${t.verificationCode} is null or ${t.verificationCode} ~ '^[0-9A-Za-z./_-]{1,80}$')`),
+  check("charge_invoices_pdf_chk", sql`encode(substring(${t.pdf} from 1 for 5), 'escape') = '%PDF-' and ${t.pdfSha256} = encode(sha256(${t.pdf}), 'hex')`), // é um PDF e o hash confere (também para inserção direta)
+  check("charge_invoices_closed_chk", sql`(${t.status} = 'ativa') = (${t.closedAt} is null)`),
 ]);
