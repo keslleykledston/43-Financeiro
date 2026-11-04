@@ -217,3 +217,10 @@ Calendário (`src/modules/billing/calendar.ts`, funções puras testadas contra 
 - Alternativa descartada: afrouxar a trava de imutabilidade da mensagem enviada (perde o histórico de quem recebeu o quê).
 - Consequências: migração 0045 (coluna + índice único + CHECK). Cancelar sem intenção de reemitir deixa a nova mensagem esperando (vira "Perdeu a data" depois do limite de atraso).
 
+
+## ADR-039 — Emissor de NFS-e = Padrão Nacional (substitui «NFS-e da Cora» da ADR-014) — N2 (2026-11-04, decisão do dono)
+- Decisão do dono: "NFS padrão nacional". O emissor da N2 passa a ser a **NFS-e Padrão Nacional** (ADN/CGNFS-e); a Cora deixa de ser o caminho de NFS-e (continua só boleto/extrato). Tudo segue atrás de `FiscalProvider` + `FISCAL_LIVE_ENABLED` DESLIGADA + gate E10 + autorização escrita.
+- O que o Padrão Nacional exige (a CONFIRMAR em homologação, não presumir): certificado digital **A1 ICP-Brasil** do prestador (assinatura do XML da DPS + mTLS), **município do prestador conveniado** ao Padrão Nacional, ambiente de **produção restrita** para testar antes da produção, dados fiscais completos (regime, inscrição municipal, CNAE, código de serviço nacional, alíquota ISS, IBGE — já em `company_fiscal`).
+- Isto revoga o «não guardamos certificado A1» da ADR-019 SÓ para a N2: o A1 entra no mesmo cofre cifrado da Cora (AAD `empresa|nfse|campo`), escrita apenas, só diretoria (`providers.credentials`), leitura em claro só num arquivo protegido por teste de guarda. Um certificado por CNPJ.
+- Fatias: **N2a** (sem certificado, sem rede) — montar a DPS (XML) a partir de contrato/cobrança/cliente/`company_fiscal`, validar com testes e XSD oficial, adaptador `FiscalProvider` simulado já com o formato real, prévia da nota na cobrança; **N2b** — cofre do A1 + homologação (produção restrita) com uma nota de teste; **N2c** — produção, canário de 1 nota, autorização escrita. A N1 (anexar PDF emitido fora) continua valendo como plano B.
+- Bloqueios do dono: A1 de cada CNPJ (ou decisão de emitir pelo portal nacional manualmente e usar só a N1), confirmação do município/regime com o contador, código de serviço nacional (cTribNac) escolhido pelo contador.

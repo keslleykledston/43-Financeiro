@@ -118,3 +118,7 @@ Aba Dados reúne identificação, nome aparente+emissão, endereço e contatos; 
 
 ## 2026-11-04 — lista de clientes: filtro padrão «Ativos»
 `/clientes` mostra só ativos por padrão; `?situacao=todas` mostra tudo; busca sem resultado oferece «Ver todas as situações». Formulário de busca com `key` (o select acompanha a URL). e2e e47. Sandbox 793 PASS.
+
+
+## 2026-11-04 — N2: emissor NFS-e = Padrão Nacional (ADR-039)
+Dono confirmou: e-mail de clientes e do sistema JÁ ligados na K3G Solutions (painel) e emissor «Padrão Nacional». Próximo: N2a (DPS em XML + adaptador simulado + prévia, sem certificado). N2b exige A1 ICP-Brasil por CNPJ + município conveniado + cTribNac do contador.
