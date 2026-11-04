@@ -279,7 +279,8 @@ describe.skipIf(!enabled)("E23 — envio REAL de e-mail (canário) com transport
     await sendTestEmail(db, dirA, A, "dir-a@t.com", ON, deps().smtp);
     expect(sent.at(-1)!.m.to).toEqual(["dir-a@t.com"]);
     await expect(testEmailAccount(db, dirA, A, "alguem@externo.com", ON, deps().smtp)).rejects.toThrow(Invalid); // «Testar conexão» também só vai ao próprio e-mail
-    expect(await mailReadiness(db, A, "dir-a@t.com", { env: ON, deps: deps().smtp })).toBe("fora_da_lista"); // e-mails do SISTEMA (senha/convite) não usam a marca «todos»
+    expect(await mailReadiness(db, A, "dir-a@t.com", { env: ON, deps: deps().smtp })).toBe("fora_da_lista"); // convite (endereço digitado) não usa a marca «todos»
+    expect(await mailReadiness(db, A, "dir-a@t.com", { env: ON, deps: deps().smtp }, true)).toBeNull(); // senha: e-mail de login de usuário cadastrado vale com «todos»
   });
 
   // ---------- N1: nota fiscal junto do boleto ----------

@@ -2,7 +2,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
 import { auditLog, emailSendLog, memberships } from "@/lib/db/schema";
 import { activeAuthorization, domainsOf, finishLog, flagOn, liveEmailFor, manausDay } from "./email-live";
-import { isAllowed, type SmtpDeps } from "./smtp";
+import { isAllowed, isAllowedOutbound, type SmtpDeps } from "./smtp";
 
 /**
  * E27 — e-mails do SISTEMA (redefinição de senha e convite). Nada a ver com cobrança: sem dados de cliente, um destinatário por mensagem.
@@ -29,14 +29,15 @@ async function systemToday(x: DB, companyId: string): Promise<number> {
 }
 
 /** Por que (ainda) não dá para enviar por esta empresa a este endereço; null = pronto. Não lê a conta em claro além de `liveEmailFor`. */
-export async function mailReadiness(db: DB, companyId: string, to: string, o: MailOpts = {}): Promise<SystemReason | null> {
+export async function mailReadiness(db: DB, companyId: string, to: string, o: MailOpts = {}, ownAddress = false): Promise<SystemReason | null> {
   const env = o.env ?? process.env;
   if (!flagOn(env)) return "desligado";
   if (!(await activeAuthorization(db, companyId))) return "sem_autorizacao";
   const live = await liveEmailFor(db, companyId, env, o.deps);
   if (live.state === "off") return "sem_autorizacao";
   if (live.state === "blocked") return "sem_conta";
-  return isAllowed(to, live.allowed) ? null : "fora_da_lista";
+  // «ownAddress»: o destino é o e-mail de login de um usuário JÁ cadastrado (redefinição de senha) — aí a marca «todos» do painel vale. Convite (endereço digitado) continua estrito.
+  return (ownAddress ? isAllowedOutbound(to, live.allowed) : isAllowed(to, live.allowed)) ? null : "fora_da_lista";
 }
 
 /** Primeira empresa ATIVA do usuário em que o e-mail do sistema está pronto para este endereço. */
@@ -44,16 +45,16 @@ export async function mailRouteForUser(db: DB, userId: string, to: string, o: Ma
   const ms = await db.select({ companyId: memberships.companyId }).from(memberships).where(and(eq(memberships.userId, userId), eq(memberships.status, "active"))).orderBy(asc(memberships.createdAt));
   let last: SystemReason = "desligado";
   for (const m of ms) {
-    const why = await mailReadiness(db, m.companyId, to, o);
+    const why = await mailReadiness(db, m.companyId, to, o, true);
     if (!why) return { companyId: m.companyId };
-    last = why;
+    if (last === "desligado" || why === "sem_autorizacao" || why === "sem_conta") last = why; // o motivo mais útil, não o da última empresa
   }
   return { reason: last };
 }
 
 export async function sendSystemEmail(db: DB, companyId: string, actorId: string | null, mail: SystemMail, o: MailOpts = {}): Promise<SystemSendResult> {
   const env = o.env ?? process.env;
-  const why = await mailReadiness(db, companyId, mail.to, o);
+  const why = await mailReadiness(db, companyId, mail.to, o, mail.kind === "senha");
   if (why) return { sent: false, reason: why };
   const live = await liveEmailFor(db, companyId, env, o.deps);
   if (live.state !== "ready") return { sent: false, reason: "sem_conta" };

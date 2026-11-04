@@ -13,6 +13,7 @@ import { saveEmailAccount } from "@/modules/providers/email-config";
 import { authorizeEmailLive } from "@/modules/providers/email-auth";
 import { sentToday } from "@/modules/providers/email-live";
 import { inviteMail, sendSystemEmail } from "@/modules/providers/email-system";
+import { setEmail } from "@/modules/authorizations/panel";
 
 const enabled = !!process.env.POSTGRES_USER;
 const ON = { EMAIL_EXTERNAL_ENABLED: "true" };
@@ -60,6 +61,16 @@ describe.skipIf(!enabled)("E27 — redefinição de senha, convites e e-mail do 
   });
 
   describe("pedido por e-mail (esqueci minha senha)", () => {
+    it("com a autorização «todos» do painel: o e-mail de senha chega ao usuário cadastrado, mas o convite a endereço digitado continua barrado", async () => {
+      await saveEmailAccount(db, dirA, A, mail());
+      await setEmail(db, dirA, A, true, { dailyLimit: 20 }, ON);
+      const r = await requestPasswordReset(db, "ana@k3gsolutions.com.br", "1.1.1.1", BASE, opts());
+      expect(r).toMatchObject({ issued: true, sent: { sent: true } });
+      expect(sent).toHaveLength(1); expect(sent[0].to).toEqual(["ana@k3gsolutions.com.br"]);
+      expect(await requestPasswordReset(db, "naoexiste@t.com", "1.1.1.2", BASE, opts())).toEqual({ issued: false });
+      expect(await sendSystemEmail(db, A, dirA, inviteMail("novo@externo.com", "https://x/convite/t", "Empresa A", "Assistente", 72), opts())).toEqual({ sent: false, reason: "fora_da_lista" });
+      expect(sent).toHaveLength(1);
+    });
     it("com o e-mail do sistema desligado: nada é criado nem enviado, e a resposta é a mesma para e-mail inexistente", async () => {
       const r1 = await requestPasswordReset(db, "ana@k3gsolutions.com.br", "1.1.1.1", BASE, opts());
       const r2 = await requestPasswordReset(db, "naoexiste@t.com", "1.1.1.1", BASE, opts());
