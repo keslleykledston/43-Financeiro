@@ -10,7 +10,7 @@ import { addDays } from "./dates";
 import { resolveProviders } from "@/modules/providers/registry";
 import type { Providers, SendResult } from "@/modules/providers/types";
 import { activeAuthorization, domainsOf, finishLog, flagOn, liveEmailFor, sentToday, type LiveState } from "@/modules/providers/email-live";
-import { isAllowed } from "@/modules/providers/smtp";
+import { ALLOW_ALL, isAllowed } from "@/modules/providers/smtp";
 import { activeInvoicePdf, activeInvoices, invoiceFilename, type InvoiceInfo } from "@/modules/invoices/service";
 import { SIMULATED_LINE, companyBoletoMode, fetchBoletoPdf, prefetchBoletoMail, type BoletoMail, type BoletoMode } from "./boleto-mail";
 
@@ -424,7 +424,7 @@ export async function runEmailLive(db: DB, companyId: string, actorId: string | 
       const mine = contacts.filter((c) => c.partyId === q.customerId);
       const valid = [...new Set(mine.map((c) => c.email?.trim().toLowerCase() ?? "").filter((e) => RECIPIENT_EMAIL.test(e)))].slice(0, 3);
       if (valid.length === 0) { await block(q.id, REASON_EMAIL); continue; }
-      const to = valid.filter((a) => isAllowed(a, live.allowed));
+      const to = live.allowed.includes(ALLOW_ALL) ? valid : valid.filter((a) => isAllowed(a, live.allowed)); // «todos»: só os contatos financeiros DESTE cliente (já filtrados acima)
       if (to.length === 0) { await block(q.id, "Destinatário fora da lista autorizada do envio real (canário): fica sem enviar até a lista ser ampliada"); continue; }
       // E33: e-mail REAL com boleto: precisa do boleto emitido e em aberto (espera, sem bloquear); modelo que usa o boleto com provedor SIMULADO é bloqueado (nunca mandar boleto de mentira a cliente de verdade)
       const bm = o.boletos?.get(q.chargeId);

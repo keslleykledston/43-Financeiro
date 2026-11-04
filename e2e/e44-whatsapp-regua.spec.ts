@@ -63,6 +63,7 @@ test("W4 — régua de WhatsApp: nasce desligada, a chave do servidor aparece, l
     await expect(page.getByText("Régua da empresa:")).toContainText("ligada");
     await page.goto("/whatsapp/configuracao");
     await page.getByRole("button", { name: "Desligar cobrança por WhatsApp" }).click();
+    await page.waitForURL(/\/whatsapp\/configuracao\?(ok|erro)=/); // espera a ação terminar antes de navegar (senão a navegação pode abortá-la)
     await page.goto("/whatsapp/regua");
     await expect(page.getByText("Régua da empresa:")).toContainText("desligada");
     await expect(page.getByText("Antes, libere a cobrança por WhatsApp em Configuração.")).toBeVisible();

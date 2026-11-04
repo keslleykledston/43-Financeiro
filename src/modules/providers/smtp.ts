@@ -21,12 +21,21 @@ export const MAX_ATTACHMENT_BYTES = 3_000_000;
 /** Boleto + nota fiscal (N1): até 2 PDFs, soma limitada. */
 export const MAX_ATTACHMENTS_TOTAL = 5_200_000;
 
-/** Endereço exato ("a@x.com") ou domínio exato ("@x.com"; subdomínios NÃO valem). */
+/** Marca da autorização «todos os clientes» (painel de autorizações): qualquer endereço de contato financeiro cadastrado. Nunca vale para e-mail de TESTE (esse só vai ao e-mail de quem testa). */
+export const ALLOW_ALL = "*";
+/** Endereço exato ("a@x.com") ou domínio exato ("@x.com"; subdomínios NÃO valem). ESTRITO: a marca «todos» (`*`) NÃO vale aqui (e-mails do sistema — senha, convite — e o teste usam esta função). */
 export function isAllowed(address: string, allowed: readonly string[]): boolean {
   const a = address.trim().toLowerCase();
   const at = a.lastIndexOf("@");
   if (at < 1) return false;
   return allowed.some((e) => (e.startsWith("@") ? a.slice(at) === e : a === e));
+}
+
+/** Só para a COBRANÇA: com a marca «todos», qualquer endereço bem formado (quem chama garante que ele veio dos contatos financeiros do cliente). */
+export function isAllowedOutbound(address: string, allowed: readonly string[]): boolean {
+  const a = address.trim().toLowerCase();
+  if (allowed.includes(ALLOW_ALL)) return /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/.test(a);
+  return isAllowed(a, allowed);
 }
 
 const real = (): SmtpDeps => ({ lookup: async (h) => dnsLookup(h, { all: true, verbatim: true }) });
@@ -94,7 +103,7 @@ export function createSmtpEmailProvider(cfg: SmtpConfig, allowed: readonly strin
     async send(m) {
       if (!m.idempotencyKey) return { ok: false, retryable: false, error: "idempotency_key_ausente" };
       if (m.to.length === 0 || m.to.length > MAX_RECIPIENTS) return { ok: false, retryable: false, error: "destinatarios_invalidos" };
-      if (!m.to.every((a) => isAllowed(a, allowed))) return { ok: false, retryable: false, error: "destinatario_nao_autorizado" };
+      if (!m.to.every((a) => isAllowedOutbound(a, allowed))) return { ok: false, retryable: false, error: "destinatario_nao_autorizado" };
       const att = m.attachments ?? [];
       if (att.length > 2 || att.reduce((n, a) => n + (Buffer.isBuffer(a.content) ? a.content.length : 0), 0) > MAX_ATTACHMENTS_TOTAL || att.some((a) => a.contentType !== "application/pdf" || !Buffer.isBuffer(a.content) || a.content.length < 100 || a.content.length > MAX_ATTACHMENT_BYTES || a.content.subarray(0, 5).toString("latin1") !== "%PDF-" || !/^[A-Za-z0-9._-]{1,80}\.pdf$/.test(a.filename))) return { ok: false, retryable: false, error: "anexo_invalido" };
       const prep = await prepare(cfg, d, make);

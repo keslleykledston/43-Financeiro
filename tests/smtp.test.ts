@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isForbiddenIp, resolvePublicAddress } from "@/modules/providers/net-guard";
-import { createSmtpEmailProvider, isAllowed, mapSmtpError, verifySmtpConnection, type SmtpConfig } from "@/modules/providers/smtp";
+import { ALLOW_ALL, createSmtpEmailProvider, isAllowed, isAllowedOutbound, mapSmtpError, verifySmtpConnection, type SmtpConfig } from "@/modules/providers/smtp";
 
 const cfg: SmtpConfig = { host: "smtp.k3gsolutions.com.br", port: 587, security: "starttls", fromEmail: "financeiro@k3gsolutions.com.br", fromName: "K3G", replyTo: null, user: "u", password: "p" };
 const PUBLIC = async () => [{ address: "93.184.216.34", family: 4 }];
@@ -32,6 +32,9 @@ describe("E23 — lista de destinatários", () => {
     const l = ["fulano@x.com", "@k3gsolutions.com.br"];
     expect(isAllowed("Fulano@X.com", l)).toBe(true); expect(isAllowed("a@k3gsolutions.com.br", l)).toBe(true);
     expect(isAllowed("a@sub.k3gsolutions.com.br", l)).toBe(false); expect(isAllowed("a@evilk3gsolutions.com.br", l)).toBe(false); expect(isAllowed("outro@x.com", l)).toBe(false);
+    expect(isAllowedOutbound("qualquer@cliente.com.br", [ALLOW_ALL])).toBe(true); expect(isAllowedOutbound("sem-arroba", [ALLOW_ALL])).toBe(false); expect(isAllowedOutbound("a b@x.com", [ALLOW_ALL])).toBe(false); expect(isAllowedOutbound("<a@x.com>", [ALLOW_ALL])).toBe(false);
+    expect(isAllowed("qualquer@cliente.com.br", [ALLOW_ALL])).toBe(false); // e-mails do sistema e testes: estrito, a marca «todos» não vale
+    expect(isAllowedOutbound("a@k3gsolutions.com.br", ["@k3gsolutions.com.br"])).toBe(true); expect(isAllowedOutbound("a@outro.com", ["@k3gsolutions.com.br"])).toBe(false);
     expect(isAllowed("@k3gsolutions.com.br", l)).toBe(false); expect(isAllowed("", l)).toBe(false); expect(isAllowed("a@k3gsolutions.com.br", [])).toBe(false);
   });
 });

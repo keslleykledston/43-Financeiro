@@ -3,6 +3,7 @@ import type { DB } from "@/lib/db";
 import { auditLog, emailAccounts, emailLiveAuthorizations } from "@/lib/db/schema";
 import { Invalid, requirePerm } from "@/modules/identity/service";
 import { parseEmailAddress } from "./email";
+import { ALLOW_ALL } from "./smtp";
 import { activeAuthorization, flagOn, sentToday } from "./email-live";
 
 /**
@@ -15,6 +16,7 @@ const DOMAIN = /^@(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63
 
 /** "a@x.com, @minhaempresa.com.br" → lista normalizada. Domínio inteiro SÓ do domínio do remetente (canário interno); fora dele, endereço a endereço. */
 export function parseAllowed(raw: string, ownDomain: string): string[] {
+  if (String(raw ?? "").trim() === ALLOW_ALL) return [ALLOW_ALL]; // «todos os contatos financeiros dos clientes» (só pelo painel de autorizações)
   const parts = [...new Set(String(raw ?? "").split(/[\s,;]+/).map((s) => s.trim().toLowerCase()).filter(Boolean))];
   if (parts.length === 0) throw new Invalid("Informe ao menos um destinatário autorizado");
   if (parts.length > 20) throw new Invalid("No máximo 20 destinatários autorizados");

@@ -13,6 +13,8 @@ import { approveBatch, generateBatch, getBatch } from "@/modules/billing/batches
 import { ensureDefaultTemplates, listQueue, processQueue, runScheduled, scheduleQueue } from "@/modules/messaging/service";
 import { saveEmailAccount, removeEmailAccount } from "@/modules/providers/email-config";
 import { authorizeEmailLive, getEmailLiveStatus, revokeEmailLive } from "@/modules/providers/email-auth";
+import { mailReadiness } from "@/modules/providers/email-system";
+import { setEmail } from "@/modules/authorizations/panel";
 import { attachInvoice } from "@/modules/invoices/service";
 import { emailLiveActive, listSendLog, sendTestEmail, testEmailAccount } from "@/modules/providers/email-live";
 
@@ -267,6 +269,19 @@ describe.skipIf(!enabled)("E23 — envio REAL de e-mail (canário) com transport
     expect((await emails()).map((i) => i.status)).toEqual(["pendente", "pendente"]);
     expect(await listSendLog(db, dirA, A)).toHaveLength(0);
   });
+  it("A1: autorização «todos os clientes» (painel) envia aos dois clientes; o teste continua só para o próprio e-mail", async () => {
+    await saveEmailAccount(db, dirA, A, mail());
+    await setEmail(db, dirA, A, true, { dailyLimit: 20 }, ON);
+    await approved();
+    await processQueue(db, asstA, A, D, undefined, deps());
+    expect(sent.map((x) => (x.m.to as string[])[0]).sort()).toEqual(["fin1@k3gsolutions.com.br", "fin2@cliente-externo.com.br"]);
+    await expect(sendTestEmail(db, dirA, A, "alguem@externo.com", ON, deps().smtp)).rejects.toThrow(/próprio e-mail de login/);
+    await sendTestEmail(db, dirA, A, "dir-a@t.com", ON, deps().smtp);
+    expect(sent.at(-1)!.m.to).toEqual(["dir-a@t.com"]);
+    await expect(testEmailAccount(db, dirA, A, "alguem@externo.com", ON, deps().smtp)).rejects.toThrow(Invalid); // «Testar conexão» também só vai ao próprio e-mail
+    expect(await mailReadiness(db, A, "dir-a@t.com", { env: ON, deps: deps().smtp })).toBe("fora_da_lista"); // e-mails do SISTEMA (senha/convite) não usam a marca «todos»
+  });
+
   // ---------- N1: nota fiscal junto do boleto ----------
   const pdf = (tag = "nf") => Buffer.from(`%PDF-1.4\n% ${tag} ${"x".repeat(200)}\n%%EOF`);
   const chargeOf = async (cli: string) => (await db.select().from(schema.charges).where(eq(schema.charges.customerId, cli)))[0].id;

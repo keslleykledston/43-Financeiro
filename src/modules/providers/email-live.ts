@@ -5,7 +5,7 @@ import { SecretBoxCorrupt, SecretBoxUnavailable } from "@/lib/security/secretbox
 import { Invalid, requirePerm } from "@/modules/identity/service";
 import { readEmailCredentials } from "./email-secrets";
 import { parseEmailAddress } from "./email";
-import { createSmtpEmailProvider, isAllowed, verifySmtpConnection, type SmtpDeps } from "./smtp";
+import { ALLOW_ALL, createSmtpEmailProvider, isAllowed, verifySmtpConnection, type SmtpDeps } from "./smtp";
 import type { EmailProvider } from "./types";
 
 /**
@@ -69,7 +69,9 @@ export async function sendTestEmail(db: DB, actorId: string, companyId: string, 
   const live = await liveEmailFor(db, companyId, env, deps);
   if (live.state === "off") throw new Invalid("Não há autorização de envio real ativa para esta empresa. Nada foi enviado");
   if (live.state === "blocked") throw new Invalid(`${live.reason}. Nada foi enviado`);
-  if (!isAllowed(to, live.allowed)) throw new Invalid("Este endereço não está na lista de destinatários autorizados. Nada foi enviado");
+  // autorização «todos os clientes»: o e-mail de TESTE continua só para quem testa (nunca para um endereço qualquer)
+  const own = live.allowed.includes(ALLOW_ALL) ? ((await db.select({ email: users.email }).from(users).where(eq(users.id, actorId)))[0]?.email ?? "").trim().toLowerCase() : null;
+  if (!isAllowed(to, own !== null ? [own] : live.allowed)) throw new Invalid(own !== null ? "Com a autorização «todos os clientes», o e-mail de teste só pode ir para o seu próprio e-mail de login. Nada foi enviado" : "Este endereço não está na lista de destinatários autorizados. Nada foi enviado");
   const logId = await db.transaction(async (tx) => {
     const x = tx as unknown as DB;
     await x.execute(sql`select pg_advisory_xact_lock(hashtext(${"email-live:" + companyId}))`); // limite diário sem corrida
@@ -122,7 +124,7 @@ export async function testEmailAccount(db: DB, actorId: string, companyId: strin
   const own = (u?.email ?? "").trim().toLowerCase();
   const auth = await activeAuthorization(db, companyId);
   const to = (toRaw ?? "").trim() ? parseEmailAddress(toRaw, "o e-mail de destino")! : own;
-  const allowed = auth ? auth.allowed : [own];
+  const allowed = auth && !auth.allowed.includes(ALLOW_ALL) ? auth.allowed : [own]; // sem autorização, ou com a de «todos os clientes»: o teste só vai ao próprio e-mail
   if (!own || !isAllowed(to, allowed)) throw new Invalid(auth ? "A conexão está OK, mas este endereço não está na lista de destinatários autorizados. Nada foi enviado" : "A conexão está OK. Sem autorização de envio registrada, o e-mail de teste só pode ir para o seu próprio e-mail de login. Nada foi enviado");
   const limit = auth ? auth.dailyLimit : OWN_TEST_DAILY;
   const logId = await db.transaction(async (tx) => {
