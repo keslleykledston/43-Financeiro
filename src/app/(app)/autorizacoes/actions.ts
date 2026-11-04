@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
-import { setBoletos, setBoletosCanary, setEmail, setEmailLimit, setRegua, setReguaKinds, setWhatsapp, setWhatsappLimit, type Fn } from "@/modules/authorizations/panel";
+import { setBoletos, setBoletosCanary, setEmail, setEmailLimit, setRegua, setSistema, setReguaKinds, setWhatsapp, setWhatsappLimit, type Fn } from "@/modules/authorizations/panel";
 
 // A empresa vem SEMPRE do contexto validado no servidor, nunca do formulário.
 async function ctx() { const c = await requireContext(); if (!c.current) throw new Forbidden(); return { userId: c.user.id, companyId: c.current.id }; }
@@ -18,6 +18,7 @@ export async function toggleAction(fd: FormData) {
     const c = await ctx();
     if (fn === "boletos") await setBoletos(db, c.userId, c.companyId, on);
     else if (fn === "email") await setEmail(db, c.userId, c.companyId, on, { dailyLimit: fd.get("dailyLimit") ?? undefined });
+    else if (fn === "sistema") await setSistema(db, c.userId, c.companyId, on);
     else if (fn === "whatsapp") await setWhatsapp(db, c.userId, c.companyId, on, { dailyCap: fd.get("dailyCap") ?? undefined });
     else if (fn === "regua") await setRegua(db, c.userId, c.companyId, on, { kinds: fd.getAll("kinds") });
     else throw new Invalid("Função desconhecida");

@@ -1,6 +1,6 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
-import { auditLog, emailLiveAuthorizations, emailSendLog, users } from "@/lib/db/schema";
+import { auditLog, emailAccounts, emailLiveAuthorizations, emailSendLog, users } from "@/lib/db/schema";
 import { SecretBoxCorrupt, SecretBoxUnavailable } from "@/lib/security/secretbox";
 import { Invalid, requirePerm } from "@/modules/identity/service";
 import { readEmailCredentials } from "./email-secrets";
@@ -49,6 +49,24 @@ export async function liveEmailFor(x: DB, companyId: string, env: Record<string,
   catch (e) { if (e instanceof SecretBoxUnavailable || e instanceof SecretBoxCorrupt) return { state: "blocked", reason: "Cofre de credenciais indisponível ou ilegível neste processo" }; throw e; }
   if (!cfg) return { state: "blocked", reason: "Conta de e-mail não cadastrada" };
   return { state: "ready", provider: createSmtpEmailProvider(cfg, auth.allowed, deps), allowed: auth.allowed, dailyLimit: auth.dailyLimit, authorizationId: auth.id, env };
+}
+
+/**
+ * E-mail do SISTEMA (redefinição de senha e convite): trava própria, SEPARADA da autorização de e-mail a clientes — chave do servidor + chave «E-mail do sistema» da empresa + conta SMTP legível.
+ * O provedor só aceita o destinatário informado (um endereço exato; nunca a lista de clientes).
+ */
+export type SystemLiveState = { state: "off" } | { state: "blocked"; reason: string } | { state: "ready"; provider: EmailProvider };
+export async function systemEmailOn(x: DB, companyId: string): Promise<boolean> {
+  const [a] = await x.select({ on: emailAccounts.systemEnabled }).from(emailAccounts).where(eq(emailAccounts.companyId, companyId));
+  return !!a?.on;
+}
+export async function systemEmailFor(x: DB, companyId: string, to: string, env: Record<string, string | undefined> = process.env, deps?: SmtpDeps): Promise<SystemLiveState> {
+  if (!flagOn(env) || !(await systemEmailOn(x, companyId))) return { state: "off" };
+  let cfg;
+  try { cfg = await readEmailCredentials(x, companyId); }
+  catch (e) { if (e instanceof SecretBoxUnavailable || e instanceof SecretBoxCorrupt) return { state: "blocked", reason: "Cofre de credenciais indisponível ou ilegível neste processo" }; throw e; }
+  if (!cfg) return { state: "blocked", reason: "Conta de e-mail não cadastrada" };
+  return { state: "ready", provider: createSmtpEmailProvider(cfg, [to.trim().toLowerCase()], deps) };
 }
 
 export const domainsOf = (to: string[]) => [...new Set(to.map((a) => a.slice(a.lastIndexOf("@") + 1).toLowerCase()))].join(",").slice(0, 300);

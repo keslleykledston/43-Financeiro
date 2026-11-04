@@ -7,7 +7,7 @@ import { databaseUrl } from "@/lib/db/url";
 import * as schema from "@/lib/db/schema";
 import type { DB } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
-import { getPanel, setBoletos, setEmail, setEmailLimit, setRegua, setReguaKinds, setWhatsapp, setWhatsappLimit } from "@/modules/authorizations/panel";
+import { getPanel, setBoletos, setEmail, setEmailLimit, setRegua, setReguaKinds, setSistema, setWhatsapp, setWhatsappLimit } from "@/modules/authorizations/panel";
 import { saveEmailAccount } from "@/modules/providers/email-config";
 import { authorizeEmailLive, getEmailLiveStatus } from "@/modules/providers/email-auth";
 
@@ -41,7 +41,7 @@ describe.skipIf(!enabled)("A1 — painel único de autorizações (DB de teste)"
 
   it("tudo nasce desligado; gerente VÊ mas não muda; outra empresa não mexe", async () => {
     const p = await getPanel(db, gerA, A, ALL);
-    expect(Object.values(p.rows).map((r) => r.on)).toEqual([false, false, false, false]);
+    expect(Object.values(p.rows).map((r) => r.on)).toEqual([false, false, false, false, false]);
     expect(Object.values(p.rows).every((r) => !r.canChange)).toBe(true);
     expect((await getPanel(db, dirA, A, ALL)).rows.email.canChange).toBe(true);
     await expect(setEmail(db, gerA, A, true, {}, ALL)).rejects.toThrow(Forbidden);
@@ -67,6 +67,23 @@ describe.skipIf(!enabled)("A1 — painel único de autorizações (DB de teste)"
     const au = await db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "authorization.panel"));
     expect(au.length).toBe(4); expect(JSON.stringify(au)).not.toMatch(/@/);
     expect(JSON.stringify(await db.select().from(schema.emailLiveAuthorizations))).not.toMatch(/dir-a/); // a referência não leva nome de pessoa
+  });
+
+  it("«E-mail do sistema» é uma chave própria: exige a conta, só a diretoria liga, não mexe na autorização de clientes e fica auditada", async () => {
+    await expect(setSistema(db, dirA, A, true, ALL)).rejects.toThrow(/Cadastre antes a conta/);
+    await saveEmailAccount(db, dirA, A, mail());
+    await expect(setSistema(db, gerA, A, true, ALL)).rejects.toThrow(Forbidden);
+    await expect(setSistema(db, dirB, A, true, ALL)).rejects.toThrow(Forbidden);
+    await expect(setSistema(db, dirA, A, true, {})).rejects.toThrow(/desligado neste servidor/);
+    await setSistema(db, dirA, A, true, ALL);
+    const p = await getPanel(db, dirA, A, ALL);
+    expect(p.rows.sistema).toMatchObject({ on: true, canChange: true }); expect(p.rows.email.on).toBe(false); // clientes continua desligado
+    expect(await getEmailLiveStatus(db, dirA, A).then((s) => s.authorization)).toBeNull();
+    await setSistema(db, dirA, A, true, ALL); // ligar de novo não duplica
+    await setSistema(db, dirA, A, false, ALL);
+    expect((await getPanel(db, dirA, A, ALL)).rows.sistema.on).toBe(false);
+    const au = (await db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "authorization.panel"))).filter((r) => (r.detail as { function?: string }).function === "sistema");
+    expect(au).toHaveLength(2);
   });
 
   it("salvar limite/réguas NUNCA liga nem amplia: exige a função ligada e preserva a lista de destinatários", async () => {

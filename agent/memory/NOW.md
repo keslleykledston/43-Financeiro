@@ -98,3 +98,7 @@ Por ordem do dono ("ligue"): `WHATSAPP_AUTOMATION_ENABLED="true"` no compose (we
 
 ## 2026-11-04 — e-mail de senha não chegava
 Causa: autorização de e-mail só na K3G TESTE (lista sem o e-mail do dono); K3G Solutions sem autorização; e a chave «todos» do painel não valia para e-mail de senha. Correção: 'senha' aceita «todos» (só usuário cadastrado e ativo); convite segue estrito. Sandbox 786 PASS, Codex 0 C/H/M. Falta o dono ligar «E-mail para clientes» da K3G Solutions no painel.
+
+
+## 2026-11-04 — chave própria «E-mail do sistema» (migração 0052)
+E-mail de senha/convite deixou de depender da autorização de e-mail a clientes: chave `sistema` no painel (`email_accounts.system_enabled`), destinatário exato, 40/dia/empresa, convites 15/h por ator e 3/dia por destinatário. Sandbox 787 PASS + e2e, Codex 0 C/H, 1 MEDIUM corrigido. Dono: ligar «E-mail do sistema» da K3G Solutions em Autorizações. Link de redefinição do financeiro@ gerado em arquivo privado (2 h).

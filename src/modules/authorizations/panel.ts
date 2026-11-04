@@ -19,7 +19,7 @@ import { CAPS } from "@/modules/whatsapp/domain";
  * Cada chave delega ao serviço que já existia (mesmas validações, mesmos registros); as travas que não são «autorização» continuam: chave do servidor (parada de emergência), limites diários,
  * conferência de boleto duplicado na Cora e consentimento por contato no WhatsApp.
  */
-export type Fn = "boletos" | "email" | "whatsapp" | "regua";
+export type Fn = "boletos" | "email" | "sistema" | "whatsapp" | "regua";
 export const REGUA_KINDS = ["d_menos_3", "d0", "d_mais_3", "d_mais_7"] as const;
 export type PanelRow = {
   fn: Fn; on: boolean; canChange: boolean;
@@ -33,7 +33,7 @@ export type PanelRow = {
 };
 export type Panel = { rows: Record<Fn, PanelRow>; role: string };
 
-const FN_PERM = { boletos: "issuance.manage", email: "providers.credentials", whatsapp: "whatsapp.authorize", regua: "whatsapp.authorize" } as const;
+const FN_PERM = { boletos: "issuance.manage", email: "providers.credentials", sistema: "providers.credentials", whatsapp: "whatsapp.authorize", regua: "whatsapp.authorize" } as const;
 const audit = (x: DB, companyId: string, actorId: string, fn: Fn, on: boolean, extra: Record<string, unknown> = {}) => x.insert(auditLog).values({ companyId, actorId, action: "authorization.panel", detail: { function: fn, on, ...extra } });
 /** Referência da autorização: sem nome de pessoa (quem ligou fica no `authorized_by` e na auditoria). */
 const stamp = () => `Painel de autorizações — ligado em ${new Date().toLocaleDateString("pt-BR", { timeZone: "America/Manaus" })}`;
@@ -42,7 +42,7 @@ export async function getPanel(db: DB, actorId: string, companyId: string, env: 
   await requirePerm(db, actorId, companyId, "billing.read");
   const role = (await activeRole(db, actorId, companyId))!;
   const [iss] = await db.select().from(issuanceSettings).where(eq(issuanceSettings.companyId, companyId));
-  const [acc] = await db.select({ id: emailAccounts.id }).from(emailAccounts).where(eq(emailAccounts.companyId, companyId));
+  const [acc] = await db.select({ id: emailAccounts.id, systemEnabled: emailAccounts.systemEnabled, systemEnabledAt: emailAccounts.systemEnabledAt }).from(emailAccounts).where(eq(emailAccounts.companyId, companyId));
   const mail = await activeAuthorization(db, companyId);
   const [wa] = await db.select().from(whatsappCompanySettings).where(eq(whatsappCompanySettings.companyId, companyId));
   const prod = iss?.boletoProvider === "cora_producao";
@@ -56,6 +56,11 @@ export async function getPanel(db: DB, actorId: string, companyId: string, env: 
       fn: "email", serverOff: !flagOn(env), on: !!mail, canChange: can(role, FN_PERM.email), at: mail?.createdAt ?? null,
       blocked: !flagOn(env) ? "O envio de e-mail está desligado neste servidor (chave de emergência)." : !acc ? "Cadastre antes a conta de e-mail em Integrações → E-mail." : null,
       detail: { scope: mail ? (mail.allowed.includes(ALLOW_ALL) ? "todos" : "lista") : null, dailyLimit: mail?.dailyLimit ?? 50, sentToday: mail ? await sentToday(db, companyId) : 0 },
+    },
+    sistema: {
+      fn: "sistema", serverOff: !flagOn(env), on: !!acc?.systemEnabled, canChange: can(role, FN_PERM.sistema), at: acc?.systemEnabled ? acc.systemEnabledAt ?? null : null,
+      blocked: !flagOn(env) ? "O envio de e-mail está desligado neste servidor (chave de emergência)." : !acc ? "Cadastre antes a conta de e-mail em Integrações → E-mail." : null,
+      detail: {},
     },
     whatsapp: {
       fn: "whatsapp", serverOff: !sendOn(env), on: !!wa?.sendEnabled, canChange: can(role, FN_PERM.whatsapp), at: wa?.authorizedAt ?? null,
@@ -112,6 +117,19 @@ export async function setEmail(db: DB, actorId: string, companyId: string, on: b
   const dailyLimit = o.dailyLimit === undefined || o.dailyLimit === "" ? 50 : asLimit(o.dailyLimit, 1, 200, "Limite diário de e-mails");
   await authorizeEmailLive(db, actorId, companyId, { reference: stamp(), allowed: ALLOW_ALL, dailyLimit });
   await audit(db, companyId, actorId, "email", true, { dailyLimit });
+}
+/** E-MAIL DO SISTEMA (redefinição de senha e convites). Chave própria, SEM relação com a autorização de e-mail a clientes: nunca envia cobrança e só escreve a UM destinatário por vez (quem pediu a senha ou o convidado). */
+export async function setSistema(db: DB, actorId: string, companyId: string, on: boolean, env: Record<string, string | undefined> = process.env) {
+  await requirePerm(db, actorId, companyId, FN_PERM.sistema);
+  if (on && !flagOn(env)) throw new Invalid("O envio de e-mail está desligado neste servidor (chave de emergência). Nada foi ligado");
+  const [acc] = await db.select({ id: emailAccounts.id, on: emailAccounts.systemEnabled }).from(emailAccounts).where(eq(emailAccounts.companyId, companyId));
+  if (!acc) { if (on) throw new Invalid("Cadastre antes a conta de e-mail em Integrações → E-mail"); return; }
+  if (acc.on === on) return;
+  await db.transaction(async (tx) => {
+    const x = tx as unknown as DB;
+    await x.update(emailAccounts).set(on ? { systemEnabled: true, systemEnabledAt: new Date(), systemEnabledBy: actorId, updatedAt: new Date() } : { systemEnabled: false, systemEnabledAt: null, systemEnabledBy: null, updatedAt: new Date() }).where(eq(emailAccounts.id, acc.id));
+    await audit(x, companyId, actorId, "sistema", on);
+  });
 }
 /** Só muda o limite diário, MANTENDO destinatários e referência. Exige a função já ligada (nunca liga nem amplia). */
 export async function setEmailLimit(db: DB, actorId: string, companyId: string, dailyLimit: unknown, env: Record<string, string | undefined> = process.env) {

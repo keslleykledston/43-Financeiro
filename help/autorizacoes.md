@@ -7,7 +7,7 @@ Um painel único com uma **chave por função**. Antes havia que marcar, escreve
 ## As chaves
 - **Boletos reais (Cora):** liga a emissão de boletos de verdade (cobram o cliente). Pede uma confirmação. Começa em **modo cuidadoso** (no máximo 3 boletos por dia). Desligar **pausa** a emissão. Os boletos só nascem quando um lote aprovado tem a emissão solicitada e processada em Faturamento → Emissões.
 - **E-mail para clientes:** o sistema passa a enviar cobranças e lembretes, com o **boleto e a nota fiscal em anexo**, aos **contatos financeiros** cadastrados dos clientes. Defina o **limite por dia**. Pede antes a conta de e-mail (Integrações → E-mail).
-  Esta chave também libera o e-mail de **redefinição de senha** («Esqueci minha senha») para quem já tem login. O **convite** a um endereço novo continua exigindo o endereço na lista de destinatários (modo avançado).
+- **E-mail do sistema (senha e convites):** chave **separada** da de clientes. Liga o envio da **redefinição de senha** («Esqueci minha senha») e dos **convites de acesso**. Nunca envia cobrança e escreve a uma pessoa por vez. Também pede a conta de e-mail cadastrada. Desligada, a senha e o convite só funcionam por **link manual** (Configurações → Membros).
 - **WhatsApp para clientes:** liga a cobrança por WhatsApp (limite por dia). **Cada contato continua precisando de consentimento** (WhatsApp → Consentimentos); quem pede «PARAR» nunca mais recebe.
 - **Régua automática:** avisos automáticos nos dias escolhidos (3 dias antes, no vencimento, 3 e 7 dias depois). Depende do WhatsApp ligado.
 

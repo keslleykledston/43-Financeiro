@@ -1,25 +1,25 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
 import { auditLog, emailSendLog, memberships } from "@/lib/db/schema";
-import { activeAuthorization, domainsOf, finishLog, flagOn, liveEmailFor, manausDay } from "./email-live";
-import { isAllowed, isAllowedOutbound, type SmtpDeps } from "./smtp";
+import { domainsOf, finishLog, flagOn, manausDay, systemEmailFor, systemEmailOn } from "./email-live";
+import type { SmtpDeps } from "./smtp";
 
 /**
  * E27 — e-mails do SISTEMA (redefinição de senha e convite). Nada a ver com cobrança: sem dados de cliente, um destinatário por mensagem.
- * Passam pelas MESMAS três travas do envio real (chave do servidor, autorização ativa da diretoria, conta SMTP) e pela MESMA lista de
- * destinatários autorizados. Com qualquer trava faltando NÃO sai nada e o chamador recebe o motivo (ele oferece o link manual).
+ * Trava PRÓPRIA, separada do e-mail a clientes: chave do servidor + chave «E-mail do sistema» da empresa (Autorizações) + conta SMTP. Sem depender da autorização de cobrança.
+ * Um destinatário por mensagem: o e-mail de login de quem pediu a senha, ou o convidado por quem administra acessos. Com qualquer trava faltando NÃO sai nada e o chamador recebe o motivo (ele oferece o link manual).
  * Limite diário próprio (não gasta o da cobrança). Nunca lança por "desligado": devolve `sent: false`.
  */
 export const SYSTEM_DAILY_LIMIT = 40;
 export type SystemKind = "senha" | "convite";
 export type SystemMail = { kind: SystemKind; to: string; subject: string; text: string; html: string };
-export type SystemReason = "desligado" | "sem_autorizacao" | "sem_conta" | "fora_da_lista" | "limite" | "falhou" | "desconhecido";
+export type SystemReason = "desligado" | "sem_autorizacao" | "sem_conta" | "limite" | "falhou" | "desconhecido";
 export type SystemSendResult = { sent: true } | { sent: false; reason: SystemReason };
 export type MailOpts = { env?: Record<string, string | undefined>; deps?: SmtpDeps };
 
 const SAY: Record<SystemReason, string> = {
-  desligado: "o envio de e-mail está desligado no servidor", sem_autorizacao: "não há autorização de envio ativa", sem_conta: "a conta de e-mail não está cadastrada ou legível",
-  fora_da_lista: "o endereço não está na lista de destinatários autorizados", limite: "o limite diário de e-mails do sistema foi atingido", falhou: "o servidor de e-mail recusou o envio", desconhecido: "o servidor não confirmou o envio",
+  desligado: "o envio de e-mail está desligado no servidor", sem_autorizacao: "a chave «E-mail do sistema» está desligada em Autorizações", sem_conta: "a conta de e-mail não está cadastrada ou legível",
+  limite: "o limite diário de e-mails do sistema foi atingido", falhou: "o servidor de e-mail recusou o envio", desconhecido: "o servidor não confirmou o envio",
 };
 export const reasonText = (r: SystemReason) => SAY[r];
 
@@ -28,24 +28,22 @@ async function systemToday(x: DB, companyId: string): Promise<number> {
   return Number((r as unknown as { n: number }[])[0].n);
 }
 
-/** Por que (ainda) não dá para enviar por esta empresa a este endereço; null = pronto. Não lê a conta em claro além de `liveEmailFor`. */
-export async function mailReadiness(db: DB, companyId: string, to: string, o: MailOpts = {}, ownAddress = false): Promise<SystemReason | null> {
+/** Por que (ainda) não dá para enviar por esta empresa; null = pronto. Não lê a conta em claro além de `systemEmailFor`. */
+export async function mailReadiness(db: DB, companyId: string, to: string, o: MailOpts = {}): Promise<SystemReason | null> {
   const env = o.env ?? process.env;
   if (!flagOn(env)) return "desligado";
-  if (!(await activeAuthorization(db, companyId))) return "sem_autorizacao";
-  const live = await liveEmailFor(db, companyId, env, o.deps);
+  if (!(await systemEmailOn(db, companyId))) return "sem_autorizacao";
+  const live = await systemEmailFor(db, companyId, to, env, o.deps);
   if (live.state === "off") return "sem_autorizacao";
-  if (live.state === "blocked") return "sem_conta";
-  // «ownAddress»: o destino é o e-mail de login de um usuário JÁ cadastrado (redefinição de senha) — aí a marca «todos» do painel vale. Convite (endereço digitado) continua estrito.
-  return (ownAddress ? isAllowedOutbound(to, live.allowed) : isAllowed(to, live.allowed)) ? null : "fora_da_lista";
+  return live.state === "blocked" ? "sem_conta" : null;
 }
 
-/** Primeira empresa ATIVA do usuário em que o e-mail do sistema está pronto para este endereço. */
+/** Primeira empresa ATIVA do usuário em que o e-mail do sistema está pronto. */
 export async function mailRouteForUser(db: DB, userId: string, to: string, o: MailOpts = {}): Promise<{ companyId: string } | { reason: SystemReason }> {
   const ms = await db.select({ companyId: memberships.companyId }).from(memberships).where(and(eq(memberships.userId, userId), eq(memberships.status, "active"))).orderBy(asc(memberships.createdAt));
   let last: SystemReason = "desligado";
   for (const m of ms) {
-    const why = await mailReadiness(db, m.companyId, to, o, true);
+    const why = await mailReadiness(db, m.companyId, to, o);
     if (!why) return { companyId: m.companyId };
     if (last === "desligado" || why === "sem_autorizacao" || why === "sem_conta") last = why; // o motivo mais útil, não o da última empresa
   }
@@ -54,9 +52,9 @@ export async function mailRouteForUser(db: DB, userId: string, to: string, o: Ma
 
 export async function sendSystemEmail(db: DB, companyId: string, actorId: string | null, mail: SystemMail, o: MailOpts = {}): Promise<SystemSendResult> {
   const env = o.env ?? process.env;
-  const why = await mailReadiness(db, companyId, mail.to, o, mail.kind === "senha");
+  const why = await mailReadiness(db, companyId, mail.to, o);
   if (why) return { sent: false, reason: why };
-  const live = await liveEmailFor(db, companyId, env, o.deps);
+  const live = await systemEmailFor(db, companyId, mail.to, env, o.deps);
   if (live.state !== "ready") return { sent: false, reason: "sem_conta" };
   const logId = await db.transaction(async (tx) => {
     const x = tx as unknown as DB;
@@ -66,7 +64,7 @@ export async function sendSystemEmail(db: DB, companyId: string, actorId: string
     return l.id;
   });
   if (!logId) return { sent: false, reason: "limite" };
-  if (!flagOn(env) || (await activeAuthorization(db, companyId))?.id !== live.authorizationId) { // revogado entre reservar e enviar
+  if (!flagOn(env) || !(await systemEmailOn(db, companyId))) { // chave desligada entre reservar e enviar
     await db.transaction(async (tx) => { await finishLog(tx as unknown as DB, logId, { status: "falhou", error: "autorizacao_revogada" }); });
     return { sent: false, reason: "sem_autorizacao" };
   }

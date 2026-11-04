@@ -8,6 +8,8 @@ import { issueResetLink } from "@/modules/identity/recovery";
 import { adminResetTwoFactor } from "@/modules/identity/twofactor";
 import { ROLE_LABEL, type Role } from "@/modules/identity/permissions";
 import { inviteMail, reasonText, sendSystemEmail } from "@/modules/providers/email-system";
+import { hit } from "@/lib/security/rate-limit";
+import { auditLog } from "@/lib/db/schema";
 
 const inviteSchema = z.object({
   email: z.string().email().max(254),
@@ -21,6 +23,11 @@ const baseUrl = () => process.env.AUTH_URL ?? "";
 /** Tenta enviar o convite por e-mail (mesmas travas do envio real). Nunca falha o convite: devolve a frase para a tela. */
 async function mailInvite(actorId: string, companyId: string, companyName: string, email: string, role: Role, link: string): Promise<string> {
   try {
+    // contra uso como relay de spam: poucos convites por e-mail por quem convida e por destinatário (o limite da empresa fica em email-system)
+    if ((await hit(db, `invite-mail:actor:${actorId}`, 15, 3600_000)) || (await hit(db, `invite-mail:to:${email.toLowerCase()}`, 3, 24 * 3600_000))) {
+      await db.insert(auditLog).values({ companyId, actorId, action: "email.system_failed", detail: { kind: "convite", error: "limite_de_convites" } });
+      return "E-mail não enviado: limite de convites por e-mail atingido. Envie o link abaixo por outro meio.";
+    }
     const r = await sendSystemEmail(db, companyId, actorId, inviteMail(email, link, companyName, ROLE_LABEL[role], INVITE_TTL_MS / 3600_000));
     return r.sent ? `Convite enviado por e-mail para ${email}.` : `E-mail não enviado: ${reasonText(r.reason)}. Envie o link abaixo por outro meio.`;
   } catch { return "E-mail não enviado. Envie o link abaixo por outro meio."; }

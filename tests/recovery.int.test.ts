@@ -13,7 +13,7 @@ import { saveEmailAccount } from "@/modules/providers/email-config";
 import { authorizeEmailLive } from "@/modules/providers/email-auth";
 import { sentToday } from "@/modules/providers/email-live";
 import { inviteMail, sendSystemEmail } from "@/modules/providers/email-system";
-import { setEmail } from "@/modules/authorizations/panel";
+import { setEmail, setSistema } from "@/modules/authorizations/panel";
 
 const enabled = !!process.env.POSTGRES_USER;
 const ON = { EMAIL_EXTERNAL_ENABLED: "true" };
@@ -27,9 +27,9 @@ describe.skipIf(!enabled)("E27 — redefinição de senha, convites e e-mail do 
   let A: string, B: string, dirA: string, dirB: string, gerA: string, asstA: string, admA: string, multi: string, ana: string;
   let sent: Record<string, unknown>[]; let fail: boolean;
   const opts = () => ({ env: ON, deps: { lookup: async () => [{ address: "93.184.216.34", family: 4 }], createTransport: () => ({ sendMail: async (m: Record<string, unknown>) => { if (fail) throw Object.assign(new Error("x"), { responseCode: 550 }); sent.push(m); return { messageId: `<i${sent.length}@k3g>`, accepted: m.to as string[], rejected: [] }; }, close() {} }) } });
-  const goLive = async (allowed = "ana@k3gsolutions.com.br, ger@k3gsolutions.com.br") => {
+  const goLive = async () => { // liga a chave «E-mail do sistema» (independe da autorização de e-mail a clientes)
     await saveEmailAccount(db, dirA, A, mail());
-    await authorizeEmailLive(db, dirA, A, { reference: "autorização escrita 2026-10-25 (teste)", allowed, dailyLimit: 50 });
+    await setSistema(db, dirA, A, true, ON);
   };
   const pw = async (id: string) => (await db.select().from(schema.users).where(eq(schema.users.id, id)))[0];
 
@@ -61,14 +61,18 @@ describe.skipIf(!enabled)("E27 — redefinição de senha, convites e e-mail do 
   });
 
   describe("pedido por e-mail (esqueci minha senha)", () => {
-    it("com a autorização «todos» do painel: o e-mail de senha chega ao usuário cadastrado, mas o convite a endereço digitado continua barrado", async () => {
+    it("a chave «E-mail do sistema» é separada: sem ela a autorização de clientes não libera a senha; com ela a senha sai sem autorização de clientes", async () => {
       await saveEmailAccount(db, dirA, A, mail());
-      await setEmail(db, dirA, A, true, { dailyLimit: 20 }, ON);
-      const r = await requestPasswordReset(db, "ana@k3gsolutions.com.br", "1.1.1.1", BASE, opts());
+      await setEmail(db, dirA, A, true, { dailyLimit: 20 }, ON); // só e-mail a clientes
+      expect(await requestPasswordReset(db, "ana@k3gsolutions.com.br", "1.1.1.1", BASE, opts())).toEqual({ issued: false });
+      expect(sent).toHaveLength(0);
+      await db.execute(sql`truncate email_live_authorizations restart identity cascade`); // sem autorização de clientes
+      await setSistema(db, dirA, A, true, ON);
+      const r = await requestPasswordReset(db, "ana@k3gsolutions.com.br", "1.1.1.2", BASE, opts());
       expect(r).toMatchObject({ issued: true, sent: { sent: true } });
       expect(sent).toHaveLength(1); expect(sent[0].to).toEqual(["ana@k3gsolutions.com.br"]);
-      expect(await requestPasswordReset(db, "naoexiste@t.com", "1.1.1.2", BASE, opts())).toEqual({ issued: false });
-      expect(await sendSystemEmail(db, A, dirA, inviteMail("novo@externo.com", "https://x/convite/t", "Empresa A", "Assistente", 72), opts())).toEqual({ sent: false, reason: "fora_da_lista" });
+      await setSistema(db, dirA, A, false, ON);
+      expect(await requestPasswordReset(db, "ana@k3gsolutions.com.br", "1.1.1.3", BASE, opts())).toEqual({ issued: false });
       expect(sent).toHaveLength(1);
     });
     it("com o e-mail do sistema desligado: nada é criado nem enviado, e a resposta é a mesma para e-mail inexistente", async () => {
@@ -134,9 +138,9 @@ describe.skipIf(!enabled)("E27 — redefinição de senha, convites e e-mail do 
       await completePasswordReset(db, t, NOVA, "4.4.4.4"); // dentro do prazo ainda vale
     });
 
-    it("destinatário fora da lista, conta desativada e falha de envio não deixam link válido; limites de pedido", async () => {
-      await goLive("ger@k3gsolutions.com.br");
-      expect(await requestPasswordReset(db, "ana@k3gsolutions.com.br", "1.1.1.1", BASE, opts())).toEqual({ issued: false }); // ana não está na lista
+    it("conta desativada, e-mail inexistente e falha de envio não deixam link válido; limites de pedido", async () => {
+      await goLive();
+      expect(await requestPasswordReset(db, "naoexiste@t.com", "1.1.1.1", BASE, opts())).toEqual({ issued: false });
       await db.update(schema.users).set({ disabledAt: new Date() }).where(eq(schema.users.id, gerA));
       expect(await requestPasswordReset(db, "ger@k3gsolutions.com.br", "1.1.1.1", BASE, opts())).toEqual({ issued: false });
       await db.update(schema.users).set({ disabledAt: null }).where(eq(schema.users.id, gerA));
@@ -241,9 +245,8 @@ describe.skipIf(!enabled)("E27 — redefinição de senha, convites e e-mail do 
       const link = `${BASE}/convite/${await inviteMember(db, dirA, A, "ger@k3gsolutions.com.br", "gerente")}`;
       const m = inviteMail("ger@k3gsolutions.com.br", link, "Empresa A", "Gerente", 72);
       expect(await sendSystemEmail(db, A, dirA, m, opts())).toEqual({ sent: false, reason: "sem_autorizacao" });
-      await goLive("ger@k3gsolutions.com.br");
+      await goLive();
       expect(await sendSystemEmail(db, A, dirA, m, { ...opts(), env: {} })).toEqual({ sent: false, reason: "desligado" });
-      expect(await sendSystemEmail(db, A, dirA, { ...m, to: "x@fora.com" }, opts())).toEqual({ sent: false, reason: "fora_da_lista" });
       expect(sent).toHaveLength(0);
       expect(await sendSystemEmail(db, A, dirA, m, opts())).toEqual({ sent: true });
       expect(sent).toHaveLength(1);

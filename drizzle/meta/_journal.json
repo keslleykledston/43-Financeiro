@@ -365,6 +365,13 @@
       "when": 1793764241490,
       "tag": "0051_charge_invoices",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1793799465787,
+      "tag": "0052_email_system_switch",
+      "breakpoints": true
     }
   ]
 }

@@ -16,6 +16,7 @@ const KIND_LABEL: Record<string, string> = { d_menos_3: "3 dias antes", d0: "No 
 const OK: Record<string, string> = {
   "boletos:ligado": "Boletos reais LIGADOS. Os boletos só nascem quando um lote aprovado tem a emissão solicitada e processada, e começam em modo cuidadoso.", "boletos:desligado": "Emissão de boletos PAUSADA: nada novo será emitido.", "boletos:salvo": "Modo dos boletos atualizado.",
   "email:ligado": "E-mail a clientes LIGADO.", "email:desligado": "E-mail a clientes DESLIGADO: nada mais sai.", "email:salvo": "Limite de e-mails salvo.",
+  "sistema:ligado": "E-mail do sistema LIGADO (senha e convites).", "sistema:desligado": "E-mail do sistema DESLIGADO: senha e convites só por link manual.",
   "whatsapp:ligado": "WhatsApp LIGADO.", "whatsapp:desligado": "WhatsApp DESLIGADO (a régua também).", "whatsapp:salvo": "Limite de WhatsApp salvo.",
   "regua:ligado": "Régua automática LIGADA.", "regua:desligado": "Régua automática DESLIGADA.", "regua:salvo": "Réguas atualizadas.",
 };
@@ -23,6 +24,7 @@ const OK: Record<string, string> = {
 const COPY: Record<Fn, { title: string; what: string; on: string; off: string }> = {
   boletos: { title: "Boletos reais (Cora)", what: "Emitir boletos de verdade na Cora, que cobram o cliente.", on: "Ligado — emissão liberada", off: "Desligado — nada é emitido" },
   email: { title: "E-mail para clientes", what: "Enviar cobranças e lembretes (com o boleto e a nota fiscal) aos contatos financeiros dos clientes.", on: "Ligado — envia aos contatos financeiros", off: "Desligado — nenhum e-mail sai" },
+  sistema: { title: "E-mail do sistema (senha e convites)", what: "Enviar a redefinição de senha («Esqueci minha senha») e os convites de acesso. Não envia cobrança e escreve a uma pessoa por vez. Independe do e-mail para clientes.", on: "Ligado — senha e convites por e-mail", off: "Desligado — só link manual" },
   whatsapp: { title: "WhatsApp para clientes", what: "Enviar cobranças por WhatsApp. Cada contato precisa ter dado consentimento.", on: "Ligado", off: "Desligado" },
   regua: { title: "Régua automática de WhatsApp", what: "Avisos automáticos antes e depois do vencimento, nos dias escolhidos.", on: "Ligada", off: "Desligada" },
 };
@@ -32,7 +34,7 @@ export default async function Autorizacoes({ searchParams }: { searchParams: Pro
   const role = ctx.current ? await activeRole(db, ctx.user.id, ctx.current.id) : null;
   if (!ctx.current || !role || !can(role, "billing.read")) return <Callout tone="warning">Seu papel não tem acesso ao painel de autorizações.</Callout>;
   const p = await getPanel(db, ctx.user.id, ctx.current.id);
-  const order: Fn[] = ["boletos", "email", "whatsapp", "regua"];
+  const order: Fn[] = ["boletos", "email", "sistema", "whatsapp", "regua"];
 
   return (
     <div className="space-y-5">

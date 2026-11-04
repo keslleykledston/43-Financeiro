@@ -1030,6 +1030,10 @@ export const emailAccounts = pgTable("email_accounts", {
   userEnc: text("user_enc").notNull(),
   passEnc: text("pass_enc").notNull(),
   updatedBy: uuid("updated_by").notNull().references(() => users.id),
+  // chave própria do e-mail do SISTEMA (redefinição de senha e convites), separada da autorização de e-mail a clientes
+  systemEnabled: boolean("system_enabled").notNull().default(false),
+  systemEnabledAt: timestamp("system_enabled_at", { withTimezone: true }),
+  systemEnabledBy: uuid("system_enabled_by").references(() => users.id),
 }, (t) => [
   uniqueIndex("email_accounts_company_uq").on(t.companyId),
   check("email_accounts_port_chk", sql`${t.port} in (25, 465, 587, 2525)`),
