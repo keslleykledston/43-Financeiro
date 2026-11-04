@@ -10,7 +10,7 @@ import { Invalid } from "@/modules/identity/service";
 import { createParty } from "@/modules/crm/service";
 import { createContract, decideVersion, getContract } from "@/modules/contracts/service";
 import { approveBatch, generateBatch, getBatch } from "@/modules/billing/batches";
-import { duplicateAlerts, listIssuance, processIssuance, requestBatchIssuance, retryDuplicate, saveIssuanceSettings } from "@/modules/issuance/service";
+import { cancelPendingBoletos, duplicateAlerts, listIssuance, openBoletoRequests, processIssuance, requestBatchIssuance, retryDuplicate, saveIssuanceSettings } from "@/modules/issuance/service";
 import { cancelBoleto } from "@/modules/issuance/cancel";
 import { syncBoletoStatus } from "@/modules/issuance/sync";
 import { boletoView } from "@/modules/issuance/boleto-details";
@@ -606,7 +606,13 @@ describe.skipIf(!enabled)("E10b-1 motor de emissão × Cora (testes): ponta a po
     cora.hooks.tokenFail = false;
     await requestBatchIssuance(db, gerA, A, batchId, "boleto"); // pendentes em andamento: não troca
     await expect(arm()).rejects.toThrow(/boletos em andamento/);
-    await db.execute(sql`update issuance_requests set status = 'cancelado'`);
+    expect((await openBoletoRequests(db, A)).pending).toBeGreaterThan(0);
+    await expect(cancelPendingBoletos(db, asstA, A)).rejects.toThrow(); // sem permissão de solicitar
+    const cp = await cancelPendingBoletos(db, gerA, A); // «Cancelar solicitações pendentes» do painel: nada foi enviado, nada é emitido
+    expect(cp.cancelled).toBeGreaterThan(0);
+    expect(await openBoletoRequests(db, A)).toEqual({ pending: 0, inFlight: 0 });
+    expect(await n("audit_log where action = 'issuance.pending_cancelled'")).toBe(1);
+    expect((await cancelPendingBoletos(db, gerA, A)).cancelled).toBe(0); // repetir não faz nada
     await arm({ liveCanary: false }); // pedir "sem canário" na entrada é ignorado: entra SEMPRE em canário
     const st = (await db.select().from(schema.issuanceSettings))[0];
     expect(st).toMatchObject({ boletoProvider: "cora_producao", liveCanary: true, liveAuthorizedBy: dirA });

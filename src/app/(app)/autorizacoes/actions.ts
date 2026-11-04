@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
-import { setBoletos, setBoletosCanary, setEmail, setEmailLimit, setRegua, setSistema, setReguaKinds, setWhatsapp, setWhatsappLimit, type Fn } from "@/modules/authorizations/panel";
+import { cancelPendingRequests, setBoletos, setBoletosCanary, setEmail, setEmailLimit, setRegua, setSistema, setReguaKinds, setWhatsapp, setWhatsappLimit, type Fn } from "@/modules/authorizations/panel";
 
 // A empresa vem SEMPRE do contexto validado no servidor, nunca do formulário.
 async function ctx() { const c = await requireContext(); if (!c.current) throw new Forbidden(); return { userId: c.user.id, companyId: c.current.id }; }
@@ -43,3 +43,8 @@ export async function canaryAction(fd: FormData) {
   back(err, "boletos:salvo");
 }
 export type { Fn };
+export async function cancelPendingAction() {
+  let err = "";
+  try { const c = await ctx(); await cancelPendingRequests(db, c.userId, c.companyId); } catch (e) { err = known(e); }
+  back(err, "boletos:pendentes");
+}

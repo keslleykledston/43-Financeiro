@@ -9,12 +9,12 @@ import { SwitchForm } from "@/components/k3g/switch-form";
 import { ConfirmForm } from "@/components/k3g/confirm-form";
 import { buttonClass, inputClass } from "@/components/k3g/button";
 import { LIVE_CANARY_DAILY_MAX } from "@/modules/providers/registry";
-import { canaryAction, saveLimitAction, toggleAction } from "./actions";
+import { cancelPendingAction, canaryAction, saveLimitAction, toggleAction } from "./actions";
 
 const when = (d: Date | null) => (d ? d.toLocaleString("pt-BR", { timeZone: "America/Manaus", dateStyle: "short", timeStyle: "short" }) : null);
 const KIND_LABEL: Record<string, string> = { d_menos_3: "3 dias antes", d0: "No vencimento", d_mais_3: "3 dias depois", d_mais_7: "7 dias depois" };
 const OK: Record<string, string> = {
-  "boletos:ligado": "Boletos reais LIGADOS. Os boletos só nascem quando um lote aprovado tem a emissão solicitada e processada, e começam em modo cuidadoso.", "boletos:desligado": "Emissão de boletos PAUSADA: nada novo será emitido.", "boletos:salvo": "Modo dos boletos atualizado.",
+  "boletos:ligado": "Boletos reais LIGADOS. Os boletos só nascem quando um lote aprovado tem a emissão solicitada e processada, e começam em modo cuidadoso.", "boletos:desligado": "Emissão de boletos PAUSADA: nada novo será emitido.", "boletos:salvo": "Modo dos boletos atualizado.", "boletos:pendentes": "Solicitações pendentes canceladas. Nada foi emitido. Agora ligue os boletos reais e solicite de novo no lote.",
   "email:ligado": "E-mail a clientes LIGADO.", "email:desligado": "E-mail a clientes DESLIGADO: nada mais sai.", "email:salvo": "Limite de e-mails salvo.",
   "sistema:ligado": "E-mail do sistema LIGADO (senha e convites).", "sistema:desligado": "E-mail do sistema DESLIGADO: senha e convites só por link manual.",
   "whatsapp:ligado": "WhatsApp LIGADO.", "whatsapp:desligado": "WhatsApp DESLIGADO (a régua também).", "whatsapp:salvo": "Limite de WhatsApp salvo.",
@@ -66,6 +66,13 @@ export default async function Autorizacoes({ searchParams }: { searchParams: Pro
                 </SwitchForm>
               </div>
 
+              {fn === "boletos" && !r.on && Number(r.detail.pendingRequests) > 0 && (
+                <ConfirmForm action={cancelPendingAction} className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3 text-sm" message={`Cancelar as ${r.detail.pendingRequests} solicitações de boleto ainda não enviadas? Nada é emitido; depois você solicita de novo no lote.`}>
+                  <span>Há <strong>{Number(r.detail.pendingRequests)} solicitação(ões) de boleto aguardando</strong> (pedidas antes de ligar os boletos reais). Elas precisam ser canceladas para trocar o modo; depois é só solicitar de novo no lote.</span>
+                  {can(role, "issuance.request") && <button className={buttonClass("outline", "sm")}>Cancelar solicitações pendentes</button>}
+                </ConfirmForm>
+              )}
+              {fn === "boletos" && !r.on && Number(r.detail.inFlightRequests) > 0 && <p className="mt-3 border-t border-border pt-3 text-sm text-muted-foreground">Há {Number(r.detail.inFlightRequests)} boleto(s) em envio ou reconsulta. Conclua a rodada em Emissões antes de ligar os boletos reais.</p>}
               {fn === "boletos" && r.detail.provider === "cora_producao" && (
                 <ConfirmForm action={canaryAction} className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3 text-sm" message={r.detail.canary ? "Sair do modo cuidadoso? Deixa de valer o teto de 3 boletos por dia; vale só o limite diário da emissão." : undefined}>
                   <span>Modo cuidadoso: <strong>{r.detail.canary ? `no máximo ${LIVE_CANARY_DAILY_MAX} boletos por dia` : "sem esse teto (vale o limite diário da emissão)"}</strong></span>

@@ -106,3 +106,7 @@ E-mail de senha/convite deixou de depender da autorização de e-mail a clientes
 
 ## 2026-11-04 — guardrail de duplicidade de boletos (sem migração)
 Cora: mesmo cliente + mesmo vencimento, qualquer valor, não cancelado e não nosso → só aquele boleto fica em ALERTA (`boleto_ja_existe_na_cora` / `boleto_mesmo_vencimento_na_cora`), vaga do canário/limite devolvida (attempts 0), demais seguem na mesma chamada (laço até 6 passadas). Outro contrato nosso do mesmo cliente/vencimento não conta (`knownKeys`). `retryDuplicate` = «Conferi, pedir de novo» (refaz a conferência). Alertas em Emissões e no lote. Sandbox 789 PASS; Codex 0 C, 1 H (não reproduz; teste de concorrência), 1 M e 1 L corrigidos. Boletos reais continuam NÃO ligados.
+
+
+## 2026-11-04 — «Cancelar solicitações pendentes» no painel
+Ligar boletos reais era barrado por 8 solicitações de boleto PENDENTES (modo simulado, K3G Solutions, lote 01/11 pedido antes da hora). Botão no painel cancela só pendente/0 tentativas/sem external_ref (nada emitido); depois solicitar de novo no lote. Sandbox 789 PASS; Codex 0 C/H/M. Nada foi cancelado em produção por mim: o dono clica.

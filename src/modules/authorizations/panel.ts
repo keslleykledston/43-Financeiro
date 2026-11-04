@@ -4,7 +4,7 @@ import { auditLog, emailAccounts, issuanceSettings, whatsappCompanySettings } fr
 import { Invalid, activeRole, requirePerm } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
 import { LIVE_CONFIRM_PHRASE, LiveNotAvailable, prodEmissionOn } from "@/modules/providers/registry";
-import { saveIssuanceSettings } from "@/modules/issuance/service";
+import { cancelPendingBoletos, openBoletoRequests, saveIssuanceSettings } from "@/modules/issuance/service";
 import { activeAuthorization, flagOn, sentToday } from "@/modules/providers/email-live";
 import { authorizeEmailLive, revokeEmailLive } from "@/modules/providers/email-auth";
 import { ALLOW_ALL } from "@/modules/providers/smtp";
@@ -50,7 +50,7 @@ export async function getPanel(db: DB, actorId: string, companyId: string, env: 
     boletos: {
       fn: "boletos", serverOff: !prodEmissionOn(env), on: prod && iss?.paused === false, canChange: can(role, FN_PERM.boletos), at: prod ? iss?.liveAuthorizedAt ?? null : null,
       blocked: prodEmissionOn(env) ? null : "A emissão em produção está desligada neste servidor (chave de emergência).",
-      detail: { provider: iss?.boletoProvider ?? "simulado", paused: iss?.paused ?? true, canary: iss?.liveCanary ?? true, dailyLimit: iss?.dailyLimit ?? 20 },
+      detail: { provider: iss?.boletoProvider ?? "simulado", paused: iss?.paused ?? true, canary: iss?.liveCanary ?? true, dailyLimit: iss?.dailyLimit ?? 20, ...(await openBoletoRequests(db, companyId).then((o) => ({ pendingRequests: o.pending, inFlightRequests: o.inFlight }))) },
     },
     email: {
       fn: "email", serverOff: !flagOn(env), on: !!mail, canChange: can(role, FN_PERM.email), at: mail?.createdAt ?? null,
@@ -94,6 +94,10 @@ export async function setBoletos(db: DB, actorId: string, companyId: string, on:
     }
   } catch (e) { if (e instanceof LiveNotAvailable) throw new Invalid(e.message); throw e; }
   await audit(db, companyId, actorId, "boletos", on, o.canary === undefined ? {} : { canary: o.canary });
+}
+/** Cancela as solicitações de boleto ainda NÃO enviadas (as pedidas antes de ligar os boletos reais), para poder trocar o provedor. Não emite nada; depois é só solicitar de novo no lote. */
+export async function cancelPendingRequests(db: DB, actorId: string, companyId: string) {
+  return cancelPendingBoletos(db, actorId, companyId); // exige issuance.request; a própria função audita (issuance.pending_cancelled)
 }
 /** Modo cuidadoso dos boletos reais (3 por dia). Sair dele libera o limite diário configurado. */
 export async function setBoletosCanary(db: DB, actorId: string, companyId: string, canary: boolean, env: Record<string, string | undefined> = process.env) {

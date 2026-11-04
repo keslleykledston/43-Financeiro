@@ -72,7 +72,7 @@ export async function saveIssuanceSettings(db: DB, actorId: string, companyId: s
     if (provider === "cora_producao" && !canary && prev.liveCanary && (i.liveConfirm ?? "").trim() !== LIVE_CONFIRM_PHRASE) throw new Invalid(`Para sair do modo canário, digite exatamente: ${LIVE_CONFIRM_PHRASE}`);
     if (provider !== prev.boletoProvider) {
       const [{ open }] = (await x.execute(sql`select count(*)::int open from issuance_requests where company_id = ${companyId} and kind = 'boleto' and status in ('pendente', 'enviando', 'desconhecido')`)) as unknown as { open: number }[];
-      if (open > 0) throw new Invalid("Há boletos em andamento (aguardando, enviando ou a reconsultar). Conclua ou cancele-os antes de trocar o provedor");
+      if (open > 0) throw new Invalid("Há boletos em andamento (aguardando, enviando ou a reconsultar). Conclua ou cancele-os antes de trocar o provedor (em Autorizações há o botão «Cancelar solicitações pendentes»; depois é só solicitar de novo no lote)");
     }
     const auto = i.autoSettle === undefined ? prev.autoSettle : i.autoSettle === true;
     if (auto && provider === "simulado") throw new Invalid("A baixa automática só vale com um provedor da Cora (testes ou produção)");
@@ -159,6 +159,26 @@ export async function duplicateAlerts(db: DB, actorId: string, companyId: string
   const rows = await db.select({ id: issuanceRequests.id, chargeId: issuanceRequests.chargeId, code: issuanceRequests.lastError }).from(issuanceRequests)
     .where(and(eq(issuanceRequests.companyId, companyId), eq(issuanceRequests.kind, "boleto"), eq(issuanceRequests.status, "falhou"), inArray(issuanceRequests.lastError, [...DUPLICATE_CODES]), inArray(issuanceRequests.chargeId, ids)));
   return new Map(rows.map((r) => [r.chargeId, { requestId: r.id, code: r.code! }]));
+}
+
+/** Solicitações de boleto que ainda NÃO foram enviadas a nenhum provedor (pendentes, 0 tentativas) e as que já estão em curso (enviando/reconsulta). Só leitura. */
+export async function openBoletoRequests(x: DB, companyId: string): Promise<{ pending: number; inFlight: number }> {
+  const [r] = (await x.execute(sql`select count(*) filter (where status = 'pendente' and attempts = 0 and external_ref is null)::int pending, count(*) filter (where status in ('enviando', 'desconhecido') or (status = 'pendente' and (attempts > 0 or external_ref is not null)))::int in_flight
+    from issuance_requests where company_id = ${companyId} and kind = 'boleto'`)) as unknown as { pending: number; in_flight: number }[];
+  return { pending: Number(r.pending), inFlight: Number(r.in_flight) };
+}
+
+/** Cancela TODAS as solicitações de boleto ainda não enviadas (pendentes, sem tentativa). Nada é emitido nem cancelado fora: depois é só solicitar de novo no lote. Não toca no que já está em curso. */
+export async function cancelPendingBoletos(db: DB, actorId: string, companyId: string) {
+  await requirePerm(db, actorId, companyId, "issuance.request");
+  return db.transaction(async (tx) => {
+    const x = tx as unknown as DB;
+    await lock(x, companyId);
+    const res = await x.update(issuanceRequests).set({ status: "cancelado", updatedAt: new Date() })
+      .where(and(eq(issuanceRequests.companyId, companyId), eq(issuanceRequests.kind, "boleto"), eq(issuanceRequests.status, "pendente"), eq(issuanceRequests.attempts, 0), isNull(issuanceRequests.externalRef))).returning({ id: issuanceRequests.id });
+    if (res.length) await audit(x, companyId, actorId, "issuance.pending_cancelled", { count: res.length });
+    return { cancelled: res.length };
+  });
 }
 
 export async function cancelIssuance(db: DB, actorId: string, companyId: string, requestId: string) {
