@@ -15,7 +15,9 @@ export default async function Clientes({ searchParams }: { searchParams: Promise
   }
   const kind = sp.tipo === "cliente" || sp.tipo === "fornecedor" ? (sp.tipo as Kind) : undefined;
   const archived = sp.arq === "1";
-  const situacao = (["ativo", "suspenso", "cancelado"] as const).find((x) => x === sp.situacao) as Status | undefined;
+  // Padrão: só os ATIVOS (faturáveis). «todas» (explícito na URL) mostra qualquer situação; suspensos e cancelados continuam a um clique.
+  const todas = sp.situacao === "todas";
+  const situacao = todas ? undefined : ((["ativo", "suspenso", "cancelado"] as const).find((x) => x === sp.situacao) ?? "ativo") as Status;
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
   const mode = await getCustomerMode(db, ctx.user.id, ctx.current.id);
   const r = await listParties(db, ctx.user.id, ctx.current.id, { q: sp.q, kind, status: situacao, archived, page });
@@ -27,7 +29,7 @@ export default async function Clientes({ searchParams }: { searchParams: Promise
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div><h1 className="text-2xl font-semibold">Clientes e fornecedores</h1><p className="text-sm text-muted-foreground">{ctx.current.name} · {r.total} {archived ? "arquivados" : "ativos"}</p></div>
+        <div><h1 className="text-2xl font-semibold">Clientes e fornecedores</h1><p className="text-sm text-muted-foreground">{ctx.current.name} · {r.total} {archived ? "arquivados" : situacao ? { ativo: "ativos", suspenso: "suspensos", cancelado: "cancelados" }[situacao] : "no total"}</p></div>
         <div className="flex flex-wrap gap-2 text-sm">
           {can(role, "crm.write") && <><Link href="/clientes/novo" className="rounded-md bg-primary px-4 py-2.5 font-medium text-primary-foreground">Novo</Link>
           <Link href="/clientes/importar" className="rounded-md bg-card px-4 py-2.5 ring-1 ring-input">Importar CSV</Link></>}
@@ -35,10 +37,10 @@ export default async function Clientes({ searchParams }: { searchParams: Promise
         </div>
       </div>
       {mode === "crm" && <p role="note" className="rounded-md bg-info-soft p-3 text-sm text-info-foreground">Os <strong>clientes</strong> desta empresa vêm do CRM (somente leitura). Fornecedores continuam locais. <Link href="/integracoes" className="underline">Integrações</Link></p>}
-      <form className="flex flex-wrap gap-2" role="search">
+      <form key={`${sp.q ?? ""}|${todas ? "todas" : situacao}`} className="flex flex-wrap gap-2" role="search"> {/* key: ao navegar por link (ex.: «Ver todas as situações») os campos refletem a URL */}
         {kind && <input type="hidden" name="tipo" value={kind} />}{archived && <input type="hidden" name="arq" value="1" />}
         <label htmlFor="situacao" className="sr-only">Situação</label>
-        <select id="situacao" name="situacao" defaultValue={situacao ?? ""} className="h-10 rounded-md border border-input bg-card px-2 text-sm"><option value="">Todas as situações</option><option value="ativo">Ativos</option><option value="suspenso">Suspensos</option><option value="cancelado">Cancelados</option></select>
+        <select id="situacao" name="situacao" defaultValue={todas ? "todas" : situacao} className="h-10 rounded-md border border-input bg-card px-2 text-sm"><option value="ativo">Ativos</option><option value="suspenso">Suspensos</option><option value="cancelado">Cancelados</option><option value="todas">Todas as situações</option></select>
         <label htmlFor="q" className="sr-only">Buscar</label>
         <input id="q" name="q" defaultValue={sp.q} placeholder="Buscar por nome ou documento" className="min-w-[12rem] flex-1 rounded-md border border-input bg-card px-3 py-2.5" />
         <button className="rounded-md bg-card px-4 py-2.5 ring-1 ring-input">Buscar</button>
@@ -50,6 +52,7 @@ export default async function Clientes({ searchParams }: { searchParams: Promise
       {r.items.length === 0 ? (
         <section className="rounded-lg border bg-card p-8 text-center">
           <p className="font-medium">{sp.q ? "Nada encontrado para essa busca." : archived ? "Nenhum cadastro arquivado." : "Nenhum cadastro ainda."}</p>
+          {situacao === "ativo" && !archived && sp.situacao !== "ativo" && <p className="mt-1 text-sm text-muted-foreground">A lista mostra só os <strong>ativos</strong>. <Link href={`/clientes${qs({ situacao: "todas", page: undefined })}`} className="text-primary underline">Ver todas as situações</Link></p>}
           {!sp.q && !archived && can(role, "crm.write") && <p className="mt-1 text-sm text-muted-foreground">Cadastre um cliente ou importe uma planilha CSV para começar.</p>}
         </section>
       ) : (

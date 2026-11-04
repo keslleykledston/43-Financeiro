@@ -119,7 +119,7 @@ test("E03b — CRM: ativar, prévia sem gravar, aplicar, idempotência, somente 
     await expect(page.getByText("✎ Rede Beta CRM")).toContainText("(cancelado)");
     await page.getByRole("button", { name: "Confirmar e aplicar" }).click();
     await expect(page.getByRole("status").filter({ hasText: "Sincronização concluída" })).toContainText("0 arquivados");
-    await page.goto("/clientes?q=Rede");
+    await page.goto("/clientes?q=Rede&situacao=todas"); // o padrão da lista é só ATIVOS; o cancelado aparece em «todas»
     await expect(page.getByRole("link", { name: /Rede Alfa Renomeada/ })).toBeVisible();
     const beta = page.getByRole("link", { name: /Rede Beta CRM/ });
     await expect(beta).toBeVisible();                    // continua na lista ativa

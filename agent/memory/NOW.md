@@ -114,3 +114,7 @@ Ligar boletos reais era barrado por 8 solicitações de boleto PENDENTES (modo s
 
 ## 2026-11-04 — clientes: nome aparente, Editar, emite boleto/NF (migração 0053)
 Aba Dados reúne identificação, nome aparente+emissão, endereço e contatos; botão Editar (?editar=1). `customers.alias` (display_name gerada prioriza alias; `public_name` gerada = regra antiga para mensagens ao cliente), `issues_boleto` (false = fora da emissão de boletos; trava em request/lote/worker `cliente_sem_boleto`), `issues_invoice` (nota esperada no lote; não segura e-mail). Sandbox 793 PASS; Codex 0 C/H, 1 M aceito. Os 8 boletos reais de 01/11 foram emitidos (R$ 13.500,00).
+
+
+## 2026-11-04 — lista de clientes: filtro padrão «Ativos»
+`/clientes` mostra só ativos por padrão; `?situacao=todas` mostra tudo; busca sem resultado oferece «Ver todas as situações». Formulário de busca com `key` (o select acompanha a URL). e2e e47. Sandbox 793 PASS.

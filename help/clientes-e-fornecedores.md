@@ -11,7 +11,7 @@
 Na página do cadastro, adicione contatos. Marque **Contato financeiro** para quem recebe cobranças.
 
 ## Buscar e filtrar
-Busque por nome, nome fantasia ou documento (com ou sem pontuação). Use as abas *Todos / Clientes / Fornecedores*. A lista tem 20 itens por página.
+Busque por nome, nome fantasia ou documento (com ou sem pontuação). Por padrão a lista mostra **só os ativos** (faturáveis). Para ver suspensos, cancelados ou tudo, troque o filtro **Situação** (a última opção é «Todas as situações»); se a busca não achar um cliente, a tela avisa e oferece «Ver todas as situações». Use as abas *Todos / Clientes / Fornecedores*. A lista tem 20 itens por página.
 
 ## Arquivar
 *Arquivar cadastro* some da lista ativa, mas **o histórico é mantido**. Veja em *Ver arquivados* e use *Restaurar*. Não há exclusão definitiva.
