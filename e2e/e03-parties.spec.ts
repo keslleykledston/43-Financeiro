@@ -40,10 +40,11 @@ test("E03 — cadastro, validação, duplicidade, contatos, histórico, busca, a
 
   await test.step("editar, contato financeiro e histórico", async () => {
     await page.goto(detalhe);
+    await page.getByRole("link", { name: "Editar", exact: true }).click();
     await page.getByLabel("Nome fantasia (opcional)").fill("Acme");
-    await page.getByRole("button", { name: "Salvar" }).click();
+    await page.getByRole("button", { name: "Salvar", exact: true }).click();
     await expect(page.getByText("Alterações salvas.")).toBeVisible();
-    await page.getByRole("tab", { name: /^Contatos/ }).click();
+    await page.getByRole("link", { name: "Editar", exact: true }).click();
     await page.getByLabel("Nome do contato").fill("Maria Financeiro");
     await page.getByLabel("E-mail do contato").fill("maria@acme.test");
     await page.getByLabel(/Contato financeiro/).check();

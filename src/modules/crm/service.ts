@@ -224,13 +224,14 @@ export async function listParties(db: DB, actorId: string, companyId: string, qu
     eq(t.companyId, companyId),
     query.archived ? isNotNull(t.archivedAt) : isNull(t.archivedAt),
     query.status ? eq(t.status, query.status) : undefined,
-    like ? or(ilike(t.legalName, like), ilike(t.tradeName, like), digits ? ilike(t.document, `%${digits}%`) : undefined) : undefined,
+    like ? or(ilike(t.legalName, like), ilike(t.tradeName, like), (t as unknown) === customers ? ilike(customers.displayName, like) : undefined, digits ? ilike(t.document, `%${digits}%`) : undefined) : undefined, // «nome aparente» entra na busca pelo nome mostrado
   );
   const sel = (k: Kind) => {
     const { main: t } = tables(k);
     return db.select({
       id: t.id, legalName: t.legalName, displayName: k === "cliente" ? sql<string>`coalesce(${customers.displayName}, ${t.legalName})`.as("display_name") : sql<string>`${t.legalName}`.as("display_name"), tradeName: t.tradeName, docType: t.docType, document: t.document,
-      archivedAt: t.archivedAt, status: t.status, source: t.source, kind: sql<Kind>`${sql.raw(`'${k}'`)}::text`.as("kind"),
+      archivedAt: t.archivedAt, status: t.status, source: t.source,
+      issuesBoleto: k === "cliente" ? sql<boolean>`${customers.issuesBoleto}`.as("issues_boleto") : sql<boolean>`true`.as("issues_boleto"), issuesInvoice: k === "cliente" ? sql<boolean>`${customers.issuesInvoice}`.as("issues_invoice") : sql<boolean>`false`.as("issues_invoice"), kind: sql<Kind>`${sql.raw(`'${k}'`)}::text`.as("kind"),
     }).from(t).where(where(t));
   };
   const kinds: Kind[] = query.kind ? [query.kind] : ["cliente", "fornecedor"];

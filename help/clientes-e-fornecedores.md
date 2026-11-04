@@ -35,13 +35,23 @@ Busque por nome, nome fantasia ou documento (com ou sem pontuação). Use as aba
 ## Validador de CPF/CNPJ
 Ao digitar o documento no cadastro, o sistema confere os **dígitos verificadores** na hora: verde = válido (mostra o formato certo); vermelho = não confere. Quando o erro parece digitação (por exemplo, dois dígitos finais trocados), aparece a **sugestão** com um clique. O servidor confere de novo ao salvar. CNPJ alfanumérico também é aceito. Clientes que vêm do CRM continuam somente leitura aqui (a correção é no CRM); para o histórico da planilha use *Histórico → Corrigir CNPJ/CPF*.
 
-## Editar o cliente (tudo na mesma caixa)
-Abra **Clientes → o cliente**: a caixa **Editar** reúne, em abas, tudo o que é ajuste do cadastro:
-- **Dados:** razão social, nome fantasia, CPF/CNPJ (com o validador) e situação.
-- **Endereço:** CEP, logradouro, número, complemento, bairro, município, código IBGE e UF. É o endereço do cliente como tomador da nota fiscal.
-- **Nota fiscal e boleto:** o **texto da nota fiscal** (a descrição do serviço que vai na NFS-e) e o **texto do boleto** (instruções que saem no boleto). Em branco, vale o padrão (descrição do contrato na nota; nenhuma instrução no boleto). Dá para usar os campos `{{cliente}}`, `{{empresa}}`, `{{valor}}`, `{{vencimento}}`, `{{competencia}}`, `{{descricao}}` e `{{emissao}}`; só texto simples, sem HTML. Na emissão (hoje simulada) esses textos e o endereço já seguem para o provedor.
-- **Anotações:** o registro de observações do cliente (só de acréscimo: não dá para editar nem apagar).
-- **Contatos:** quem recebe as cobranças (marque o contato financeiro).
-**Cliente vindo do CRM:** a aba *Dados* mostra razão social, CNPJ e situação só para leitura (a sincronização os sobrescreveria; corrija no CRM). Endereço, textos, anotações e contatos são só daqui e **continuam editáveis**; a sincronização não os altera.
-Quem pode editar: quem altera cadastros (diretoria, gerente, assistente). Cada alteração entra no registro de atividades (só os **nomes** dos campos, nunca o conteúdo).
+## Editar o cliente
+Abra **Clientes → o cliente**. A caixa **Cadastro** tem três abas: **Dados**, **Nota fiscal e boleto** (os textos) e **Anotações**.
 
+A aba **Dados** mostra tudo junto, para ler de uma vez:
+- **Identificação:** razão social, nome fantasia, CPF/CNPJ e situação.
+- **Nome aparente e emissão:** veja abaixo.
+- **Endereço:** CEP, logradouro, número, complemento, bairro, município, código IBGE e UF. É o endereço do cliente como tomador da nota fiscal.
+- **Contatos:** quem recebe as cobranças (marque o contato financeiro).
+
+Para mudar qualquer coisa, clique em **Editar** (canto da aba Dados). Os formulários aparecem; ao terminar, clique em **Concluir edição**.
+
+### Nome aparente
+Como o cliente é conhecido no dia a dia, quando isso é diferente do nome fantasia. Ele **aparece no lugar do nome em todas as telas e na busca**, e ajuda a achar o cliente. **Boleto e nota fiscal continuam saindo com a razão social, e os e-mails e WhatsApp ao cliente não usam o nome aparente** (ele é interno, só para a equipe). Em branco, vale a regra de sempre (o fantasia, quando a razão social é só o número do CNPJ).
+
+### O que este cliente recebe
+- **Emite boleto:** desmarcado, o cliente **fica de fora da emissão de boletos** (por exemplo, paga por outro meio). Ele não entra no «Solicitar boletos» do lote; se for desmarcado depois de solicitado, a emissão não sai.
+- **Emite nota fiscal:** marcado, a nota fiscal é **esperada** para esse cliente: o lote mostra onde anexar o PDF e avisa quando falta. Quando o contrato exige «boleto + NF», o e-mail continua esperando pela nota; o simples «emite nota fiscal» **não** segura o e-mail.
+Quem tem contrato com «NF junto do boleto» já vem marcado como «emite nota fiscal».
+
+**Cliente vindo do CRM:** a identificação (razão social, CNPJ e situação) fica só para leitura: a sincronização a sobrescreveria, corrija no CRM. Nome aparente, emissão, endereço, textos, anotações e contatos são só daqui e podem ser editados.

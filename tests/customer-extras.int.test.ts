@@ -7,7 +7,7 @@ import { databaseUrl } from "@/lib/db/url";
 import * as schema from "@/lib/db/schema";
 import type { DB } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
-import { createParty, getParty, updateParty } from "@/modules/crm/service";
+import { createParty, getParty, listParties, updateParty } from "@/modules/crm/service";
 import { parseExtras, updateCustomerExtras } from "@/modules/crm/extras";
 
 const enabled = !!process.env.POSTGRES_USER;
@@ -22,6 +22,16 @@ describe("E26 — parseExtras (puro)", () => {
     bad({ cep: "123" }, /CEP deve ter 8/); bad({ cep: "6900x000" }, /só números/); bad({ cityIbge: "12" }, /IBGE deve ter 7/); bad({ uf: "AMA" }, /máximo 2/); bad({ uf: "1a" }, /UF inválida/);
     bad({ street: "x".repeat(161) }, /máximo 160/); bad({ nfText: "x".repeat(1001) }, /máximo 1000/); bad({ boletoText: "x".repeat(401) }, /máximo 400/);
     bad({ nfText: "Olá {{senha}}" }, /Campo desconhecido/); bad({ nfText: "<b>oi</b>" }, /HTML/); bad({ boletoText: "Oi {{cliente" }, /mal formadas/);
+  });
+});
+
+describe("nome aparente e flags (puro)", () => {
+  it("normaliza o nome aparente e valida as flags", () => {
+    expect(parseExtras({ alias: "  Mercado   do Zé " })).toEqual({ alias: "Mercado do Zé" });
+    expect(parseExtras({ alias: "" })).toEqual({ alias: null });
+    expect(() => parseExtras({ alias: "x".repeat(121) })).toThrow(/máximo 120/);
+    expect(parseExtras({ issuesBoleto: false, issuesInvoice: true })).toEqual({ issuesBoleto: false, issuesInvoice: true });
+    expect(() => parseExtras({ issuesBoleto: "sim" })).toThrow();
   });
 });
 
@@ -86,5 +96,31 @@ describe.skipIf(!enabled)("E26 — ajustes do cliente (DB de teste)", () => {
     const f = (q: ReturnType<typeof sql>) => db.execute(q).catch((e) => { throw new Error(why(e)); });
     await expect(f(sql`update customers set cep = '123' where id = ${cli}`)).rejects.toThrow(/customers_extras_chk/);
     await expect(f(sql`update customers set uf = 'am' where id = ${cli}`)).rejects.toThrow(/customers_extras_chk/);
+  });
+
+  it("nome aparente: vale em toda tela (display_name), entra na busca, vale também para cliente do CRM e nunca muda a razão social", async () => {
+    const r = await updateCustomerExtras(db, asstA, A, cli, { alias: "Mercadinho do Zé" });
+    expect(r.changed).toEqual(["nome aparente"]);
+    const p = await getParty(db, dirA, A, cli) as unknown as { displayName: string; legalName: string; alias: string };
+    expect(p).toMatchObject({ displayName: "Mercadinho do Zé", legalName: "Cliente Local", alias: "Mercadinho do Zé" });
+    expect(((await db.select().from(schema.customers).where(eq(schema.customers.id, cli)))[0]).publicName).toBe("Cliente Local"); // o nome que sai em mensagens ao cliente NÃO usa o nome aparente (interno)
+    const found = await listParties(db, dirA, A, { q: "mercadinho" });
+    expect(found.items.map((i) => i.id)).toEqual([cli]);
+    expect(found.items[0]).toMatchObject({ displayName: "Mercadinho do Zé", legalName: "Cliente Local" });
+    await updateCustomerExtras(db, asstA, A, crm, { alias: "GR Plus" }); // cliente sincronizado do CRM (modo CRM): o nome aparente é só daqui
+    expect(((await getParty(db, dirA, A, crm)) as unknown as { displayName: string }).displayName).toBe("GR Plus");
+    await updateCustomerExtras(db, asstA, A, crm, { alias: "" }); // limpar volta à regra do fantasia
+    expect(((await getParty(db, dirA, A, crm)) as unknown as { displayName: string }).displayName).toBe("GR PLUS SOLUTIONS");
+    const audit = JSON.stringify(await db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "party.extras_updated")));
+    expect(audit).not.toMatch(/Mercadinho/); // a auditoria guarda só o NOME do campo
+  });
+
+  it("emite boleto / emite nota fiscal: padrão, edição e rastro de auditoria", async () => {
+    expect(await getParty(db, dirA, A, cli)).toMatchObject({ issuesBoleto: true, issuesInvoice: false });
+    const r = await updateCustomerExtras(db, asstA, A, cli, { issuesBoleto: false, issuesInvoice: true });
+    expect(r.changed).toEqual(["emite boleto", "emite nota fiscal"]);
+    expect(await getParty(db, dirA, A, cli)).toMatchObject({ issuesBoleto: false, issuesInvoice: true });
+    expect((await updateCustomerExtras(db, asstA, A, cli, { issuesBoleto: false })).changed).toEqual([]);
+    await expect(updateCustomerExtras(db, contA, A, cli, { issuesBoleto: true })).rejects.toBeInstanceOf(Forbidden);
   });
 });

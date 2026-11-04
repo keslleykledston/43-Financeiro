@@ -8,12 +8,16 @@ import { validateTemplate } from "@/modules/messaging/templates";
 /**
  * E26 — ajustes do CLIENTE que ficam só aqui (o CRM não os tem e a sincronização não os toca): endereço (tomador da NFS-e) e os textos da nota fiscal e do boleto.
  * Quem escreve: `crm.write`, inclusive em cliente vindo do CRM (identificação — razão social, CNPJ, situação — continua somente leitura nesse caso).
- * Atualização PARCIAL: só as chaves enviadas mudam (o formulário de endereço e o de textos são separados).
+ * Atualização PARCIAL: só as chaves enviadas mudam (os formulários de endereço, textos e «nome aparente + o que recebe» são separados).
+ * O nome aparente muda o nome mostrado em todas as telas; as flags decidem se o cliente entra na emissão de boletos (`issuesBoleto`) e se a nota fiscal é esperada (`issuesInvoice`).
  */
 export const ADDRESS_KEYS = ["cep", "street", "streetNumber", "complement", "district", "cityName", "cityIbge", "uf"] as const;
 export const TEXT_KEYS = ["nfText", "boletoText"] as const;
-export type ExtraKey = (typeof ADDRESS_KEYS)[number] | (typeof TEXT_KEYS)[number];
-export const EXTRA_LABEL: Record<ExtraKey, string> = { cep: "CEP", street: "logradouro", streetNumber: "número", complement: "complemento", district: "bairro", cityName: "município", cityIbge: "código IBGE", uf: "UF", nfText: "texto da nota fiscal", boletoText: "texto do boleto" };
+/** Nome aparente (texto) e o que o cliente recebe (boleto e/ou nota fiscal; booleanos). */
+export const ALIAS_KEYS = ["alias"] as const;
+export const FLAG_KEYS = ["issuesBoleto", "issuesInvoice"] as const;
+export type ExtraKey = (typeof ADDRESS_KEYS)[number] | (typeof TEXT_KEYS)[number] | (typeof ALIAS_KEYS)[number] | (typeof FLAG_KEYS)[number];
+export const EXTRA_LABEL: Record<ExtraKey, string> = { cep: "CEP", street: "logradouro", streetNumber: "número", complement: "complemento", district: "bairro", cityName: "município", cityIbge: "código IBGE", uf: "UF", alias: "nome aparente", issuesBoleto: "emite boleto", issuesInvoice: "emite nota fiscal", nfText: "texto da nota fiscal", boletoText: "texto do boleto" };
 export const NF_TEXT_MAX = 1000, BOLETO_TEXT_MAX = 400;
 
 const oneLine = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : v);
@@ -28,9 +32,10 @@ const multiline = (max: number, what: string) => z.preprocess((v) => { if (typeo
 
 const schema = z.object({
   cep: digits(8, "CEP"), street: line(160, "Logradouro"), streetNumber: line(20, "Número"), complement: line(80, "Complemento"), district: line(80, "Bairro"), cityName: line(80, "Município"),
-  cityIbge: digits(7, "Código IBGE"), uf: line(2, "UF"), nfText: multiline(NF_TEXT_MAX, "Texto da nota fiscal"), boletoText: multiline(BOLETO_TEXT_MAX, "Texto do boleto"),
+  cityIbge: digits(7, "Código IBGE"), uf: line(2, "UF"), alias: line(120, "Nome aparente"),
+  issuesBoleto: z.boolean().optional(), issuesInvoice: z.boolean().optional(), nfText: multiline(NF_TEXT_MAX, "Texto da nota fiscal"), boletoText: multiline(BOLETO_TEXT_MAX, "Texto do boleto"),
 });
-export type Extras = Partial<Record<ExtraKey, string | null>>;
+export type Extras = Partial<Record<ExtraKey, string | boolean | null>>;
 
 /** Texto simples com os mesmos campos {{…}} dos modelos de mensagem; sem HTML. */
 function checkText(t: string | null | undefined, what: string) {
@@ -40,13 +45,13 @@ function checkText(t: string | null | undefined, what: string) {
 }
 
 export function parseExtras(input: Record<string, unknown>): Extras {
-  const picked = Object.fromEntries(Object.entries(input).filter(([k]) => (ADDRESS_KEYS as readonly string[]).includes(k) || (TEXT_KEYS as readonly string[]).includes(k)));
+  const picked = Object.fromEntries(Object.entries(input).filter(([k]) => (ADDRESS_KEYS as readonly string[]).includes(k) || (TEXT_KEYS as readonly string[]).includes(k) || (ALIAS_KEYS as readonly string[]).includes(k) || (FLAG_KEYS as readonly string[]).includes(k)));
   const p = schema.safeParse(picked);
   if (!p.success) throw new Invalid(p.error.issues[0]?.message ?? "Dados inválidos");
   const out: Extras = {};
-  for (const [k, v] of Object.entries(p.data)) if (v !== undefined) out[k as ExtraKey] = v as string | null;
-  if (out.uf) { out.uf = out.uf.toUpperCase(); if (!/^[A-Z]{2}$/.test(out.uf)) throw new Invalid("UF inválida (2 letras, ex.: AM)"); }
-  checkText(out.nfText, "Texto da nota fiscal"); checkText(out.boletoText, "Texto do boleto");
+  for (const [k, v] of Object.entries(p.data)) if (v !== undefined) out[k as ExtraKey] = v as string | boolean | null;
+  if (typeof out.uf === "string" && out.uf) { out.uf = out.uf.toUpperCase(); if (!/^[A-Z]{2}$/.test(out.uf)) throw new Invalid("UF inválida (2 letras, ex.: AM)"); }
+  checkText(out.nfText as string | null | undefined, "Texto da nota fiscal"); checkText(out.boletoText as string | null | undefined, "Texto do boleto");
   return out;
 }
 
@@ -61,7 +66,7 @@ export async function updateCustomerExtras(db: DB, actorId: string, companyId: s
     const [cur] = await x.select().from(customers).where(and(eq(customers.id, customerId), eq(customers.companyId, companyId))).for("update");
     if (!cur) throw new Invalid("Cliente não encontrado");
     if (cur.archivedAt) throw new Invalid("Cliente arquivado: restaure antes de editar");
-    const changed = keys.filter((k) => ((cur[k as keyof typeof cur] as string | null) ?? null) !== (v[k] ?? null));
+    const changed = keys.filter((k) => ((cur[k as keyof typeof cur] as string | boolean | null) ?? null) !== (v[k] ?? null));
     if (changed.length === 0) return { changed: [] as string[] };
     await x.update(customers).set({ ...Object.fromEntries(changed.map((k) => [k, v[k] ?? null])), updatedAt: new Date() }).where(and(eq(customers.id, customerId), eq(customers.companyId, companyId)));
     await x.insert(auditLog).values({ companyId, actorId, action: "party.extras_updated", detail: { partyId: customerId, changed: changed.map((k) => EXTRA_LABEL[k]).join(", ") } }); // só os NOMES dos campos

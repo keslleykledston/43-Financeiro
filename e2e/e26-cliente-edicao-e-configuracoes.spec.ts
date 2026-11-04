@@ -5,16 +5,23 @@ const cnpj = (n: number) => { const base = `${String(50000000 + n).padStart(8, "
 const run = Date.now() % 100000;
 const NOME = `Cliente Edicao ${run}`;
 
-test("Cliente > Editar: dados, endereço, nota fiscal e boleto, anotações e contatos na mesma caixa", async ({ page }) => {
+test("Cliente: ver tudo na aba Dados, botão Editar, nome aparente, o que o cliente recebe, endereço, textos, anotações e contatos", async ({ page }) => {
   await page.goto("/clientes/novo");
   await page.getByLabel("Razão social / nome").fill(NOME);
   await page.getByLabel("CPF ou CNPJ").fill(cnpj(run));
   await page.getByRole("button", { name: "Cadastrar" }).click();
   await expect(page.getByRole("heading", { name: NOME })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Editar" })).toBeVisible();
-  for (const t of ["Dados", "Endereço", "Nota fiscal e boleto", /^Anotações/, /^Contatos/]) await expect(page.getByRole("tab", { name: t })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cadastro" })).toBeVisible();
+  for (const t of ["Dados", "Nota fiscal e boleto", /^Anotações/]) await expect(page.getByRole("tab", { name: t })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Endereço" })).toHaveCount(0); // endereço e contatos agora ficam na aba Dados
+  await expect(page.getByRole("tab", { name: /^Contatos/ })).toHaveCount(0);
+  for (const sec of ["Identificação", "Nome aparente e emissão", "Endereço", /^Contatos \(0\)/]) await expect(page.getByRole("heading", { name: sec })).toBeVisible();
+  await expect(page.getByText("Emite boleto").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /Salvar/ })).toHaveCount(0); // leitura: nada de formulário até clicar em Editar
 
-  await test.step("dados com validador de CNPJ", async () => {
+  await test.step("Editar: dados com validador de CNPJ", async () => {
+    await page.getByRole("link", { name: "Editar", exact: true }).click();
+    await expect(page.getByRole("link", { name: "Concluir edição" })).toBeVisible();
     await page.getByLabel("CPF ou CNPJ").fill("22.991.939/0001-60");
     await expect(page.getByText(/dígitos verificadores do CNPJ não conferem/)).toBeVisible();
     await page.getByRole("button", { name: "22.991.939/0001-06" }).click();
@@ -23,8 +30,25 @@ test("Cliente > Editar: dados, endereço, nota fiscal e boleto, anotações e co
     await expect(page.getByText("CNPJ 22.991.939/0001-06").first()).toBeVisible();
   });
 
+  await test.step("nome aparente (vale no título e na busca) e boleto/nota fiscal", async () => {
+    await page.getByRole("link", { name: "Editar", exact: true }).click();
+    await page.getByLabel("Nome aparente", { exact: true }).fill(`Mercadinho ${run}`);
+    await page.getByLabel("Emite boleto").uncheck();
+    await page.getByLabel("Emite nota fiscal").check();
+    await page.getByRole("button", { name: "Salvar nome e emissão" }).click();
+    await expect(page.getByRole("status").filter({ hasText: /Salvo: .*nome aparente.*emite boleto.*emite nota fiscal/ })).toBeVisible();
+    await page.getByRole("link", { name: "Concluir edição" }).click();
+    await expect(page.getByRole("heading", { name: `Mercadinho ${run}` })).toBeVisible();
+    await expect(page.getByText(`razão social: ${NOME}`)).toBeVisible();
+    await page.goto(`/clientes?q=${encodeURIComponent(`Mercadinho ${run}`)}`);
+    const li = page.getByRole("link", { name: new RegExp(`Mercadinho ${run}`) });
+    await expect(li).toContainText("Sem boleto");
+    await expect(li).toContainText("Com NF");
+    await li.click();
+  });
+
   await test.step("endereço", async () => {
-    await page.getByRole("tab", { name: "Endereço" }).click();
+    await page.getByRole("link", { name: "Editar", exact: true }).click();
     await page.getByLabel("CEP").fill("123");
     await page.getByRole("button", { name: "Salvar endereço" }).click();
     await expect(page.getByRole("alert").filter({ hasText: "CEP deve ter 8 dígitos" })).toBeVisible();
@@ -34,6 +58,15 @@ test("Cliente > Editar: dados, endereço, nota fiscal e boleto, anotações e co
     await page.getByLabel("UF").fill("am");
     await page.getByRole("button", { name: "Salvar endereço" }).click();
     await expect(page.getByRole("status").filter({ hasText: /Salvo: .*CEP/ })).toBeVisible();
+  });
+
+  await test.step("contato na mesma aba", async () => {
+    await page.getByLabel("Nome do contato").fill("Maria Financeiro");
+    await page.getByLabel("E-mail do contato").fill("maria@exemplo.test");
+    await page.getByLabel(/Contato financeiro/).check();
+    await page.getByRole("button", { name: "Adicionar contato" }).click();
+    await expect(page.locator("li", { hasText: "Maria Financeiro" })).toContainText("Financeiro");
+    await expect(page.getByRole("heading", { name: /^Contatos \(1\)/ })).toBeVisible();
   });
 
   await test.step("texto da nota fiscal e do boleto (campo inválido recusado)", async () => {
@@ -47,18 +80,16 @@ test("Cliente > Editar: dados, endereço, nota fiscal e boleto, anotações e co
     await expect(page.getByRole("status").filter({ hasText: /Salvo: .*texto da nota fiscal/ })).toBeVisible();
   });
 
-  await test.step("anotações e contatos nas abas; recarregar mantém o que foi salvo", async () => {
+  await test.step("anotações; recarregar mantém o que foi salvo", async () => {
     await page.getByRole("tab", { name: /^Anotações/ }).click();
     await page.getByLabel("Novo comentário").fill("Cliente pediu NF separada do boleto.");
     await page.getByRole("button", { name: "Adicionar comentário" }).click();
     await expect(page.getByRole("tab", { name: /^Anotações \(1\)/ })).toBeVisible();
     await expect(page.getByText("Cliente pediu NF separada do boleto.")).toBeVisible();
-    await page.getByRole("tab", { name: /^Contatos/ }).click();
-    await expect(page.getByText(/Nenhum contato/)).toBeVisible();
     await page.reload();
-    await page.getByRole("tab", { name: "Endereço" }).click();
-    await expect(page.getByLabel("Logradouro")).toHaveValue("Av. Exemplo");
-    await expect(page.getByLabel("UF")).toHaveValue("AM");
+    await page.getByRole("tab", { name: "Dados" }).click();
+    await expect(page.getByText("Av. Exemplo")).toBeVisible();
+    await expect(page.getByText("Emite boleto").locator("..")).toContainText("Não");
   });
 });
 

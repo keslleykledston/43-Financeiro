@@ -128,7 +128,14 @@ export const customers = pgTable("customers", {
   ...partyColumns(),
   // Nome para MOSTRAR (E25, pedido do dono): quando a razão social é só o número do CNPJ (ex.: "19.534.417 LTDA") e há nome fantasia, mostra o fantasia.
   // A razão social segue intacta em `legal_name` e é a usada em boleto/NFS-e. Coluna gerada: não se grava, só se lê.
-  displayName: text("display_name").generatedAlwaysAs(sql`CASE WHEN legal_name ~* '^[0-9]{2}[.]?[0-9]{3}[.]?[0-9]{3}([/]?[0-9]{4}[-]?[0-9]{2})?( (ltda|s/?a|s[.]a[.]?|me|epp|eireli|slu))?[.]?$' AND coalesce(btrim(trade_name), '') <> '' THEN btrim(trade_name) ELSE legal_name END`).notNull(),
+  displayName: text("display_name").generatedAlwaysAs(sql`CASE WHEN coalesce(btrim(alias), '') <> '' THEN btrim(alias) WHEN legal_name ~* '^[0-9]{2}[.]?[0-9]{3}[.]?[0-9]{3}([/]?[0-9]{4}[-]?[0-9]{2})?( (ltda|s/?a|s[.]a[.]?|me|epp|eireli|slu))?[.]?$' AND coalesce(btrim(trade_name), '') <> '' THEN btrim(trade_name) ELSE legal_name END`).notNull(),
+  // Nome PÚBLICO: o nome que sai em mensagens ao cliente (e-mail, WhatsApp) — a regra antiga (fantasia quando a razão social é só o número do CNPJ), SEM o nome aparente, que é interno e pode ser informal. Coluna gerada.
+  publicName: text("public_name").generatedAlwaysAs(sql`CASE WHEN legal_name ~* '^[0-9]{2}[.]?[0-9]{3}[.]?[0-9]{3}([/]?[0-9]{4}[-]?[0-9]{2})?( (ltda|s/?a|s[.]a[.]?|me|epp|eireli|slu))?[.]?$' AND coalesce(btrim(trade_name), '') <> '' THEN btrim(trade_name) ELSE legal_name END`).notNull(),
+  // Nome APARENTE (pedido do dono): como o cliente é conhecido no dia a dia (pode diferir do fantasia). Só local (o CRM não o tem nem o sobrescreve); quando preenchido, vale em todas as telas e buscas (`display_name`). Boleto e NFS-e seguem usando a razão social.
+  alias: text("alias"),
+  // O que este cliente RECEBE: boleto e/ou nota fiscal. `issues_boleto = false` tira o cliente da emissão de boletos; `issues_invoice = true` marca que a nota fiscal é esperada (aparece no lote para anexar).
+  issuesBoleto: boolean("issues_boleto").notNull().default(true),
+  issuesInvoice: boolean("issues_invoice").notNull().default(false),
   // E26 — ajustes do cliente que NÃO vêm do CRM (a sincronização não toca nestas colunas): endereço (tomador da NFS-e) e textos da nota fiscal e do boleto.
   cep: text("cep"), street: text("street"), streetNumber: text("street_number"), complement: text("complement"), district: text("district"),
   cityName: text("city_name"), cityIbge: text("city_ibge"), uf: text("uf"),
@@ -142,7 +149,7 @@ export const customers = pgTable("customers", {
   check("customers_status_chk", sql`${t.status} in ('ativo', 'suspenso', 'cancelado')`),
   check("customers_extras_chk", sql`(${t.cep} is null or ${t.cep} ~ '^[0-9]{8}$') and (${t.cityIbge} is null or ${t.cityIbge} ~ '^[0-9]{7}$') and (${t.uf} is null or ${t.uf} ~ '^[A-Z]{2}$')
     and char_length(${t.street}) <= 160 and char_length(${t.streetNumber}) <= 20 and char_length(${t.complement}) <= 80 and char_length(${t.district}) <= 80 and char_length(${t.cityName}) <= 80
-    and char_length(${t.nfText}) <= 1000 and char_length(${t.boletoText}) <= 400`),
+    and char_length(${t.nfText}) <= 1000 and char_length(${t.boletoText}) <= 400 and char_length(${t.alias}) <= 120`),
 ]);
 
 export const vendors = pgTable("vendors", partyColumns(), (t) => [

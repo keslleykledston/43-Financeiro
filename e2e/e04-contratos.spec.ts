@@ -113,16 +113,18 @@ test("E04 — contrato: criar → aprovar → calendário; alteração com aprov
 
   await test.step("cliente suspenso não fatura; ao reativar volta", async () => {
     await page.goto(clienteUrl);
+    await page.getByRole("link", { name: "Editar", exact: true }).click();
     await page.getByLabel("Situação").selectOption("suspenso");
-    await page.getByRole("button", { name: "Salvar" }).click();
+    await page.getByRole("button", { name: "Salvar", exact: true }).click();
     await expect(page.getByText("Alterações salvas.")).toBeVisible();
     await page.goto("/faturamento?mes=2026-10");
     await expect(page.getByText("Nenhum evento neste mês")).toBeVisible();
     await page.goto("/contratos"); await page.getByRole("link", { name: new RegExp(NOME) }).first().click();
     await expect(page.getByText(/não gera cobrança enquanto o cliente não voltar a ser ativo/)).toBeVisible();
     await page.goto(clienteUrl);
+    await page.getByRole("link", { name: "Editar", exact: true }).click();
     await page.getByLabel("Situação").selectOption("ativo");
-    await page.getByRole("button", { name: "Salvar" }).click();
+    await page.getByRole("button", { name: "Salvar", exact: true }).click();
     await expect(page.getByText("Alterações salvas.")).toBeVisible();
     await page.goto("/faturamento?mes=2026-10");
     await expect(page.getByRole("gridcell", { name: /^10 de outubro.*vencimentos/ })).toBeVisible();

@@ -20,3 +20,13 @@ async function save(id: string, fd: FormData, keys: readonly string[]): Promise<
 }
 export async function saveAddressAction(id: string, _: ExtrasState, fd: FormData): Promise<ExtrasState> { return save(id, fd, ADDRESS_KEYS); }
 export async function saveTextsAction(id: string, _: ExtrasState, fd: FormData): Promise<ExtrasState> { return save(id, fd, TEXT_KEYS); }
+/** Nome aparente + o que o cliente recebe (boleto e/ou nota fiscal). As caixas desmarcadas não vão no formulário: ausente = desligado. */
+export async function savePrefsAction(id: string, _: ExtrasState, fd: FormData): Promise<ExtrasState> {
+  try {
+    const c = await requireContext();
+    if (!c.current) throw new Forbidden();
+    const r = await updateCustomerExtras(db, c.user.id, c.current.id, id, { alias: String(fd.get("alias") ?? "").slice(0, 200), issuesBoleto: fd.get("issuesBoleto") === "on", issuesInvoice: fd.get("issuesInvoice") === "on" });
+    revalidatePath(`/clientes/${id}`); revalidatePath("/clientes");
+    return { saved: r.changed.length ? `Salvo: ${r.changed.join(", ")}.` : "Nada mudou." };
+  } catch (e) { if (e instanceof Invalid || e instanceof Forbidden) return { error: e.message }; throw e; }
+}

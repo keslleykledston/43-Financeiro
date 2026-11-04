@@ -151,7 +151,8 @@ test("E03b — CRM: ativar, prévia sem gravar, aplicar, idempotência, somente 
     await expect(page.getByText("Atual:")).toContainText("Local");
     await page.goto("/clientes?q=Rede+Alfa+Renomeada");
     await page.getByRole("link", { name: /Rede Alfa Renomeada/ }).click();
-    await expect(page.getByRole("button", { name: "Salvar" })).toBeVisible();
+    await page.getByRole("link", { name: "Editar", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Salvar", exact: true })).toBeVisible();
     await expect(page.getByRole("note")).toContainText("modo Local");
     await page.goto("/integracoes");
     await page.getByLabel(/^CRM/).check();
@@ -159,7 +160,8 @@ test("E03b — CRM: ativar, prévia sem gravar, aplicar, idempotência, somente 
     await expect(page.getByText("Atual:")).toContainText("CRM");
     await page.goto("/clientes?q=Rede+Alfa+Renomeada");
     await page.getByRole("link", { name: /Rede Alfa Renomeada/ }).click();
-    await expect(page.getByRole("button", { name: "Salvar" })).toHaveCount(0);
+    await page.getByRole("link", { name: "Editar", exact: true }).click(); // endereço, contatos e nome aparente seguem editáveis no modo CRM; a identificação não
+    await expect(page.getByRole("button", { name: "Salvar", exact: true })).toHaveCount(0);
     // deixa o sandbox no padrão
     await page.goto("/integracoes");
     await page.getByLabel(/^Local/).check();

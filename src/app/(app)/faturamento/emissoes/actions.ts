@@ -15,7 +15,7 @@ const go = (err = "", ok = "") => redirect(`/faturamento/emissoes${err ? `?erro=
 
 export async function requestBatchIssuanceAction(fd: FormData) {
   let err = "", ok = "";
-  try { const c = await ctx(); const r = await requestBatchIssuance(db, c.userId, c.companyId, String(fd.get("batchId") ?? ""), String(fd.get("kind") ?? "")); ok = `solicitado:${r.created}`; } catch (e) { err = known(e); }
+  try { const c = await ctx(); const r = await requestBatchIssuance(db, c.userId, c.companyId, String(fd.get("batchId") ?? ""), String(fd.get("kind") ?? "")); ok = `solicitado:${r.created}:${r.skippedNoBoleto}`; } catch (e) { err = known(e); }
   revalidatePath("/faturamento/emissoes"); go(err, ok);
 }
 export async function processIssuanceAction(fd: FormData) {

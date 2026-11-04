@@ -29,6 +29,7 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
   const notas = await invoicesForCharges(db, ctx.user.id, ctx.current.id, r.charges.map((c) => c.id));
   const alertas = await duplicateAlerts(db, ctx.user.id, ctx.current.id, r.charges.map((c) => c.id));
   const pendentes = r.charges.filter((c) => c.jointInvoice && !notas.has(c.id)).length;
+  const semNota = r.charges.filter((c) => !c.jointInvoice && c.customerIssuesInvoice && !notas.has(c.id)).length; // cliente «emite nota fiscal» sem exigência de NF junto: a nota é esperada, mas o e-mail não espera
   const approve = can(role, "billing.approve"), write = can(role, "billing.write");
   const prov = can(role, "issuance.read") ? (await getIssuanceSettings(db, ctx.user.id, ctx.current.id)).boletoProvider : "simulado";
   const stage = prov === "cora_homologacao", prod = prov === "cora_producao"; // boletos desta empresa: Cora de testes ou Cora de PRODUÇÃO (reais)
@@ -68,6 +69,7 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
       )}
 
       {pendentes > 0 && <Callout tone="warning">{pendentes} cobrança(s) deste lote exige(m) <strong>boleto + nota fiscal</strong> e ainda não tem a nota anexada. O e-mail real dessas cobranças espera pela nota; os demais seguem normalmente.</Callout>}
+      {semNota > 0 && <Callout tone="info">{semNota} cobrança(s) de cliente(s) marcado(s) como <strong>«emite nota fiscal»</strong> ainda sem a nota anexada. O e-mail dessas cobranças <strong>não espera</strong> a nota; anexe-a quando estiver pronta.</Callout>}
 
       <SectionCard title="Cobranças do lote">
         {r.charges.length === 0 ? <p className="text-sm text-muted-foreground">Nenhuma cobrança neste lote.</p> : (
@@ -77,11 +79,12 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
                 <div className="min-w-0">
                   <AppLink href={`/contratos/${c.contractId}`} className="font-medium hover:underline">{c.customerName}</AppLink>
                   <p className="text-muted-foreground">{c.description} · competência {c.competenceMonth.slice(5, 7)}/{c.competenceMonth.slice(0, 4)} · vence {br(c.dueDate)}{c.jointInvoice ? " · boleto + NF" : ""}</p>
+                  {!c.customerIssuesBoleto && <p className="text-xs font-medium text-warning-foreground">Cliente marcado como «não emite boleto»: fica de fora da emissão de boletos (muda em Clientes → Editar).</p>}
                   {alertas.has(c.id) && <Callout tone="warning" role="alert"><strong>ALERTA DE DUPLICIDADE.</strong> {DUPLICATE_ALERT[alertas.get(c.id)!.code]} Este é o único boleto parado; os outros do lote seguem. <AppLink href="/faturamento/emissoes?status=falhou" className="underline">Ver em Emissões</AppLink></Callout>}
                   {(c.warnings as Warning[]).length > 0 && <p className="text-xs text-muted-foreground">{(c.warnings as Warning[]).map((w) => WARNING_LABEL[w]).join("; ")}</p>}
                   {(() => {
                     const nf = notas.get(c.id);
-                    if (!nf && !c.jointInvoice) return null;
+                    if (!nf && !c.jointInvoice && !c.customerIssuesInvoice) return null;
                     return (
                       <div className="mt-1 text-xs">
                         {nf ? (

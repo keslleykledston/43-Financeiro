@@ -372,6 +372,13 @@
       "when": 1793799465787,
       "tag": "0052_email_system_switch",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1793806952672,
+      "tag": "0053_customer_alias_and_flags",
+      "breakpoints": true
     }
   ]
 }

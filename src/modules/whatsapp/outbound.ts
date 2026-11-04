@@ -93,7 +93,7 @@ export type SendContext = { chargeId: string; customerId: string; digits: string
 
 async function loadCharge(x: DB, companyId: string, chargeId: string): Promise<ChargeRow | null> {
   if (!/^[0-9a-f-]{36}$/i.test(chargeId ?? "")) return null;
-  const r = (await x.execute(sql`select c.id::text id, c.amount::text amount, c.due_date::text due, c.issue_date::text issue, c.competence_month::text competence, c.description, c.status cs, b.status bs, cu.id::text customer_id, cu.display_name customer, co.name company_name,
+  const r = (await x.execute(sql`select c.id::text id, c.amount::text amount, c.due_date::text due, c.issue_date::text issue, c.competence_month::text competence, c.description, c.status cs, b.status bs, cu.id::text customer_id, cu.public_name customer, co.name company_name,
       coalesce((select sum(p.amount) from payments p where p.company_id = c.company_id and p.charge_id = c.id and p.status = 'ativo'), 0)::text paid
     from charges c join billing_batches b on b.company_id = c.company_id and b.id = c.batch_id join customers cu on cu.company_id = c.company_id and cu.id = c.customer_id join companies co on co.id = c.company_id
     where c.company_id = ${companyId} and c.id = ${chargeId}`)) as unknown as ChargeRow[];

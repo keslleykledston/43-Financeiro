@@ -17,7 +17,7 @@ const br = (d: string) => d.split("-").reverse().join("/");
 function okText(ok?: string, mode = "simulado") {
   const stage = mode === "cora_homologacao", prod = mode === "cora_producao";
   const [k, ...n] = (ok ?? "").split(":"); const v = n.map(Number);
-  if (k === "solicitado") return `${v[0]} solicitação(ões) criada(s).`;
+  if (k === "solicitado") return `${v[0]} solicitação(ões) criada(s).${v[1] ? ` ${v[1]} cliente(s) marcado(s) como «não emite boleto» ficaram de fora.` : ""}`;
   if (k === "rodada") return `${prod ? "Rodada na Cora de PRODUÇÃO (boletos reais)" : stage ? "Rodada na Cora de testes" : "Rodada simulada"}: ${v[0]} emitido(s), ${v[1]} em processamento, ${v[2]} a reconsultar, ${v[3]} para repetir, ${v[4]} com falha, ${v[5]} dispensado(s).${v[6] ? ` ATENÇÃO: ${v[6]} boleto(s) em ALERTA de duplicidade (já existe boleto do cliente na Cora): não foram emitidos, os demais seguiram.` : ""}${n[7] ? ` Aviso: ${decodeURIComponent(n[7])}.` : ""}`;
   if (k === "sync") return `Situação conferida na ${prod ? "Cora (produção)" : "Cora de testes"}: ${v[0]} boleto(s) consultado(s), ${v[1]} pago(s), ${v[2]} cancelado(s) lá fora, ${v[3]} com falha. Baixas automáticas feitas: ${v[4]}; pagos aguardando conferência: ${v[5]}.${n[6] ? ` Aviso: ${decodeURIComponent(n[6])}` : ""}`;
   if (k === "cancelado") return "Solicitação cancelada.";

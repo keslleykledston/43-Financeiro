@@ -285,7 +285,7 @@ async function runQueue(x: DB, companyId: string, actorId: string | null, now: D
 
   const [co] = await x.select({ name: companies.name }).from(companies).where(eq(companies.id, companyId));
   const contacts = await x.select().from(customerContacts).where(and(eq(customerContacts.companyId, companyId), eq(customerContacts.isFinancial, true)));
-  const due = await x.select({ q: messageQueue, c: charges, customer: customers.displayName, subject: messageTemplateVersions.subject, body: messageTemplateVersions.body })
+  const due = await x.select({ q: messageQueue, c: charges, customer: customers.publicName, subject: messageTemplateVersions.subject, body: messageTemplateVersions.body })
     .from(messageQueue)
     .innerJoin(charges, and(eq(charges.id, messageQueue.chargeId), eq(charges.companyId, messageQueue.companyId)))
     .innerJoin(customers, and(eq(customers.id, messageQueue.customerId), eq(customers.companyId, messageQueue.companyId)))
@@ -408,7 +408,7 @@ export async function runEmailLive(db: DB, companyId: string, actorId: string | 
     const today = localParts(now).date, lateLimit = addDays(today, -st.maxLateDays);
     const [co] = await x.select({ name: companies.name }).from(companies).where(eq(companies.id, companyId));
     const contacts = await x.select().from(customerContacts).where(and(eq(customerContacts.companyId, companyId), eq(customerContacts.isFinancial, true)));
-    const due = await x.select({ q: messageQueue, c: charges, customer: customers.displayName, subject: messageTemplateVersions.subject, body: messageTemplateVersions.body })
+    const due = await x.select({ q: messageQueue, c: charges, customer: customers.publicName, subject: messageTemplateVersions.subject, body: messageTemplateVersions.body })
       .from(messageQueue)
       .innerJoin(charges, and(eq(charges.id, messageQueue.chargeId), eq(charges.companyId, messageQueue.companyId)))
       .innerJoin(customers, and(eq(customers.id, messageQueue.customerId), eq(customers.companyId, messageQueue.companyId)))

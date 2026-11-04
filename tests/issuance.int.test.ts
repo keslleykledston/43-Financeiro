@@ -109,8 +109,8 @@ describe.skipIf(!enabled)("E10 motor de emissão (simulado): reservar → chamar
     const id = await requestIssuance(db, gerA, A, c1.id, "boleto");
     await expect(requestIssuance(db, gerA, A, c1.id, "boleto")).rejects.toThrow(/Já existe/);
     await requestIssuance(db, gerA, A, c1.id, "nfse"); // tipo diferente pode
-    expect(await requestBatchIssuance(db, gerA, A, batchId, "boleto")).toEqual({ created: 1 }); // só a c2 (c1 já tem)
-    expect(await requestBatchIssuance(db, gerA, A, batchId, "boleto")).toEqual({ created: 0 });
+    expect(await requestBatchIssuance(db, gerA, A, batchId, "boleto")).toMatchObject({ created: 1 }); // só a c2 (c1 já tem)
+    expect(await requestBatchIssuance(db, gerA, A, batchId, "boleto")).toMatchObject({ created: 0 });
     await cancelIssuance(db, gerA, A, id);
     await expect(cancelIssuance(db, gerA, A, id)).rejects.toThrow(/ainda não foi enviada/);
     await requestIssuance(db, gerA, A, c1.id, "boleto"); // depois de cancelar, pode pedir de novo
@@ -361,6 +361,29 @@ describe.skipIf(!enabled)("E10 motor de emissão (simulado): reservar → chamar
     expect(n1.customerAddress).toMatchObject({ cep: "69000000", street: "Av. Exemplo", number: "100", city: "Manaus", cityIbge: "1302603", uf: "AM" });
     expect(n1.customerName).toBe("Cliente Um"); // razão social, não o fantasia
     expect(n2.description).toBe("Monitoramento de redes"); expect(b2.instructions).toBeUndefined();
+  });
+
+  it("CLIENTE «NÃO EMITE BOLETO»: fica de fora da solicitação em massa, é recusado na individual, e se for marcado DEPOIS de solicitado a emissão não sai e devolve a vaga; NFS-e não é afetada", async () => {
+    const batchId = await approvedBatch();
+    const c1 = await chargeOf(cli1), c2 = await chargeOf(cli2);
+    await db.update(schema.customers).set({ issuesBoleto: false }).where(eq(schema.customers.id, cli2));
+    await expect(requestIssuance(db, gerA, A, c2.id, "boleto")).rejects.toThrow(/não emite boleto/);
+    expect(await requestBatchIssuance(db, gerA, A, batchId, "boleto")).toEqual({ created: 1, skippedNoBoleto: 1 });
+    expect(await n(`issuance_requests where charge_id = '${c2.id}'`)).toBe(0);
+    expect(await requestBatchIssuance(db, gerA, A, batchId, "nfse")).toMatchObject({ created: 2, skippedNoBoleto: 0 }); // a nota é pedida para os dois
+    // marcado depois de solicitado: a rodada não emite e não gasta a vaga do dia
+    await db.update(schema.customers).set({ issuesBoleto: false }).where(eq(schema.customers.id, cli1));
+    await on(false, 1);
+    const { p, calls } = spy();
+    const r = await processIssuance(db, gerA, A, NOW, p);
+    expect(calls.issue).toBe(0);
+    expect(r.skipped).toBeGreaterThanOrEqual(1);
+    const req = (await db.select().from(schema.issuanceRequests).where(eq(schema.issuanceRequests.chargeId, c1.id))).find((x) => x.kind === "boleto")!;
+    expect(req).toMatchObject({ status: "cancelado", lastError: "cliente_sem_boleto", attempts: 0 });
+    expect(req.claimedAt).toBeNull();
+    // o cliente volta a emitir boleto: nova solicitação normal
+    await db.update(schema.customers).set({ issuesBoleto: true }).where(eq(schema.customers.id, cli1));
+    await requestIssuance(db, gerA, A, c1.id, "boleto");
   });
 });
 

@@ -106,6 +106,10 @@ export async function requestIssuance(db: DB, actorId: string, companyId: string
     await lock(x, companyId);
     const [ok] = (await x.execute(sql`select c.id from charges c join billing_batches b on b.company_id = c.company_id and b.id = c.batch_id where c.id = ${chargeId} and ${ELIGIBLE(companyId)}`)) as unknown as Row[];
     if (!ok) throw new Invalid("Cobrança não encontrada, não aprovada ou já quitada");
+    if (kind === "boleto") {
+      const [nb] = (await x.execute(sql`select 1 from charges c join customers cu on cu.company_id = c.company_id and cu.id = c.customer_id where c.company_id = ${companyId} and c.id = ${chargeId} and cu.issues_boleto = false`)) as unknown as Row[];
+      if (nb) throw new Invalid("Este cliente está marcado como «não emite boleto» (Clientes → Editar)");
+    }
     const [dup] = await x.select({ id: issuanceRequests.id }).from(issuanceRequests).where(and(eq(issuanceRequests.companyId, companyId), eq(issuanceRequests.chargeId, chargeId), eq(issuanceRequests.kind, kind), sql`${issuanceRequests.status} <> 'cancelado'`));
     if (dup) throw new Invalid(`Já existe uma solicitação de ${KIND_LABEL[kind]} para esta cobrança`);
     const [r] = await x.insert(issuanceRequests).values({ companyId, chargeId, kind, idempotencyKey: await keyFor(x, companyId, chargeId, kind), requestedBy: actorId }).returning({ id: issuanceRequests.id });
@@ -126,10 +130,13 @@ export async function requestBatchIssuance(db: DB, actorId: string, companyId: s
     if (!b || b.s !== "aprovado") throw new Invalid("Só lotes aprovados podem ter emissão solicitada");
     const rows = (await x.execute(sql`select c.id from charges c join billing_batches b on b.company_id = c.company_id and b.id = c.batch_id
       where c.batch_id = ${batchId} and ${ELIGIBLE(companyId)}
-        and not exists (select 1 from issuance_requests r where r.company_id = c.company_id and r.charge_id = c.id and r.kind = ${kind} and r.status <> 'cancelado')`)) as unknown as Row[];
+        and not exists (select 1 from issuance_requests r where r.company_id = c.company_id and r.charge_id = c.id and r.kind = ${kind} and r.status <> 'cancelado')
+        and (${kind} <> 'boleto' or not exists (select 1 from customers cu where cu.company_id = c.company_id and cu.id = c.customer_id and cu.issues_boleto = false))`)) as unknown as Row[]; // cliente «não emite boleto» fica de fora
+    const [{ n: noBoleto }] = (await x.execute(sql`select count(*)::int n from charges c join billing_batches b on b.company_id = c.company_id and b.id = c.batch_id join customers cu on cu.company_id = c.company_id and cu.id = c.customer_id
+      where c.batch_id = ${batchId} and ${ELIGIBLE(companyId)} and ${kind} = 'boleto' and cu.issues_boleto = false`)) as unknown as { n: number }[];
     for (const r of rows) await x.insert(issuanceRequests).values({ companyId, chargeId: String(r.id), kind, idempotencyKey: await keyFor(x, companyId, String(r.id), kind), requestedBy: actorId });
-    await audit(x, companyId, actorId, "issuance.batch_requested", { batchId, kind, created: rows.length });
-    return { created: rows.length };
+    await audit(x, companyId, actorId, "issuance.batch_requested", { batchId, kind, created: rows.length, skippedNoBoleto: Number(noBoleto) });
+    return { created: rows.length, skippedNoBoleto: Number(noBoleto) };
   });
 }
 
@@ -287,9 +294,10 @@ async function processOnce(db: DB, actorId: string, companyId: string, now: Date
         continue;
       }
       const bp = byMode.get(r.mode) ?? prov; // linhas só chegam aqui com modo disponível (filtrado na reserva)
-      const [d] = (await db.execute(sql`select c.amount::text, c.due_date::text, c.competence_month::text, c.description, c.status cs, cu.legal_name, cu.document, cu.nf_text, cu.boleto_text, cu.cep, cu.street, cu.street_number, cu.complement, cu.district, cu.city_name, cu.city_ibge, cu.uf, c.issue_date::text issue_date, (select name from companies where id = c.company_id) company_name, coalesce((select sum(p.amount) from payments p where p.company_id = c.company_id and p.charge_id = c.id and p.status = 'ativo'), 0) >= c.amount settled
+      const [d] = (await db.execute(sql`select c.amount::text, c.due_date::text, c.competence_month::text, c.description, c.status cs, cu.legal_name, cu.document, cu.issues_boleto, cu.nf_text, cu.boleto_text, cu.cep, cu.street, cu.street_number, cu.complement, cu.district, cu.city_name, cu.city_ibge, cu.uf, c.issue_date::text issue_date, (select name from companies where id = c.company_id) company_name, coalesce((select sum(p.amount) from payments p where p.company_id = c.company_id and p.charge_id = c.id and p.status = 'ativo'), 0) >= c.amount settled
         from charges c join customers cu on cu.company_id = c.company_id and cu.id = c.customer_id where c.company_id = ${companyId} and c.id = ${r.chargeId}`)) as unknown as Row[];
-      if (!d || d.cs !== "aprovada" || d.settled) { await record({ status: "cancelado", lastError: "cobranca_indisponivel" }, ["enviando"]); out.skipped++; continue; } // quitou/cancelou entre a solicitação e o envio
+      if (!d || d.cs !== "aprovada" || d.settled) { await record({ status: "cancelado", lastError: "cobranca_indisponivel" }, ["enviando"]); out.skipped++; continue; }
+      if (r.kind === "boleto" && d.issues_boleto === false) { await record({ status: "cancelado", lastError: "cliente_sem_boleto", attempts: 0, claimedAt: null }, ["enviando"]); out.skipped++; continue; } // cliente marcado «não emite boleto» depois de solicitado: não emite e devolve a vaga // quitou/cancelou entre a solicitação e o envio
       // reconsulta ANTES de reemitir (resposta anterior se perdeu)
       if (mode === "recheck") {
         const found = r.kind === "boleto" ? await bp.boleto.find(r.idempotencyKey, { customerDocument: String(d.document ?? ""), dueDate: String(d.due_date) }) : await prov.nfse.find(r.idempotencyKey);

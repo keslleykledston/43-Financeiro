@@ -132,7 +132,7 @@ export async function getBatch(db: DB, actorId: string, companyId: string, id: s
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
   const [b] = await db.select().from(billingBatches).where(and(eq(billingBatches.id, id), eq(billingBatches.companyId, companyId)));
   if (!b) return null;
-  const rows = await db.select({ c: charges, customerName: customers.displayName }).from(charges)
+  const rows = await db.select({ c: charges, customerName: customers.displayName, issuesBoleto: customers.issuesBoleto, issuesInvoice: customers.issuesInvoice }).from(charges)
     .innerJoin(customers, and(eq(customers.id, charges.customerId), eq(customers.companyId, charges.companyId)))
     .where(and(eq(charges.companyId, companyId), eq(charges.batchId, b.id))).orderBy(asc(customers.displayName));
   const cs = rows.map((r) => r.c);
@@ -140,7 +140,7 @@ export async function getBatch(db: DB, actorId: string, companyId: string, id: s
   const d = diff(cs, live.items);
   return {
     batch: b,
-    charges: rows.map((r) => ({ ...r.c, amountCents: centsFromNumeric(r.c.amount), baseCents: centsFromNumeric(r.c.baseAmount), adjustmentCents: centsFromSignedNumeric(r.c.adjustmentAmount), adjustments: (r.c.adjustmentDetail as DetailItem[]), customerName: r.customerName })),
+    charges: rows.map((r) => ({ ...r.c, amountCents: centsFromNumeric(r.c.amount), baseCents: centsFromNumeric(r.c.baseAmount), adjustmentCents: centsFromSignedNumeric(r.c.adjustmentAmount), adjustments: (r.c.adjustmentDetail as DetailItem[]), customerName: r.customerName, customerIssuesBoleto: r.issuesBoleto, customerIssuesInvoice: r.issuesInvoice })),
     totalCents: cs.reduce((s, c) => s + centsFromNumeric(c.amount), 0),
     hash: hashCharges(cs),
     stale: b.status === "cancelado" ? { added: 0, removed: 0, changed: 0, any: false } : d, // contratos mudaram desde a prévia/aprovação
