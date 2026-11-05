@@ -74,7 +74,7 @@ test("E09 — configuração de envio: padrões seguros, validação, salvar; pr
   await test.step("integrações mostra provedores em modo simulado, chaves desligadas", async () => {
     await page.goto("/integracoes");
     await expect(page.getByRole("heading", { name: "Provedores de cobrança e mensagens" })).toBeVisible();
-    await expect(page.getByText("NFS-e da Cora (beta)")).toBeVisible();
+    await expect(page.getByText("NFS-e Padrão Nacional (Receita/ADN)")).toBeVisible();
     await expect(page.getByText(/Simulado · chave desligada/).first()).toBeVisible();
     await expect(page.getByText(/LIGADA/)).toHaveCount(0);
   });

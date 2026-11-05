@@ -13,6 +13,8 @@ import { readiness } from "@/modules/providers/readiness";
 import { getCoraStatus, hasCoraCredentials } from "@/modules/providers/cora-config";
 import { CORA_SCOPE, ENV_LABEL } from "@/modules/providers/cora";
 import { CoraForm } from "./cora-form";
+import { CertificateForm, CertificateVerify } from "./certificate-form";
+import { getCertificateStatus, hasNfseCertificate } from "@/modules/nfse/certificate";
 import { EmailForm } from "./email-form";
 import { AuthorizeForm, SmtpTestForm, TestForm } from "./email-live-forms";
 import { getEmailLiveStatus } from "@/modules/providers/email-auth";
@@ -20,7 +22,7 @@ import { listSendLog } from "@/modules/providers/email-live";
 import { getEmailStatus, hasEmailAccount } from "@/modules/providers/email-config";
 import { SECURITY_LABEL } from "@/modules/providers/email";
 import { nfseProfileComplete } from "@/modules/companies/fiscal";
-import { disableWebhookAction, enableWebhookAction, removeCoraAction, removeEmailAction, revokeEmailLiveAction } from "./actions";
+import { disableWebhookAction, enableWebhookAction, removeCertificateAction, removeCoraAction, removeEmailAction, revokeEmailLiveAction } from "./actions";
 import { webhookStatus } from "@/modules/issuance/webhooks";
 
 const REASON: Record<string, string> = { duplicate_document: "Já existe um cadastro local com este documento", document_collision: "O documento colide com outro cadastro ativo", ambiguous_company: "Não foi possível saber a qual empresa pertence" };
@@ -38,6 +40,8 @@ export default async function Integracoes() {
   const coraAccess = can(role, "providers.credentials");
   const cora = coraAccess ? await getCoraStatus(db, ctx.user.id, ctx.current.id) : [];
   const hooks = coraAccess ? await webhookStatus(db, ctx.user.id, ctx.current.id) : [];
+  const cert = coraAccess ? await getCertificateStatus(db, ctx.user.id, ctx.current.id) : null;
+  const certInDb = coraAccess ? await hasNfseCertificate(db, ctx.user.id, ctx.current.id) : false;
   const coraInDb = coraAccess ? await hasCoraCredentials(db, ctx.user.id, ctx.current.id) : false;
   const email = coraAccess ? await getEmailStatus(db, ctx.user.id, ctx.current.id) : null;
   const live = coraAccess ? await getEmailLiveStatus(db, ctx.user.id, ctx.current.id) : null;
@@ -134,6 +138,25 @@ export default async function Integracoes() {
           <CoraForm />
         </>) : <p className="text-sm text-muted-foreground">As credenciais da Cora são cadastradas somente pela diretoria.</p>}
       </section>
+      <section className="rounded-lg border bg-card p-5" aria-labelledby="nfse-cert-h">
+        <h2 id="nfse-cert-h" className="mb-1 font-semibold">Certificado digital A1 — NFS-e (Padrão Nacional)</h2>
+        <p className="mb-3 text-sm text-muted-foreground">O certificado <strong>e-CNPJ A1</strong> (arquivo .pfx) da empresa assina a nota fiscal de serviço. Importar aqui <strong>não emite nota nem liga nada</strong>: a emissão real depende da homologação e da sua autorização escrita. O sistema confere senha, validade e CNPJ, mas <strong>não valida a cadeia ICP-Brasil</strong>: quem decide se o certificado vale é a Receita, no teste de homologação.</p>
+        {coraAccess && cert ? (<>
+          {cert.active ? (
+            <div className="mb-4 rounded-md border p-3 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div><p className="font-medium">{cert.active.subject}</p>
+                  <p className="text-xs text-muted-foreground">CNPJ {cert.active.holderCnpj} · emitido por {cert.active.issuer} · impressão digital {cert.active.fingerprint}… · vence em {cert.active.notAfter.split("-").reverse().join("/")}{cert.active.daysLeft < 0 ? " (VENCIDO)" : cert.active.daysLeft <= 30 ? ` (faltam ${cert.active.daysLeft} dias)` : ""}</p></div>
+                <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${cert.active.daysLeft < 0 ? "bg-negative-soft text-negative-foreground" : cert.active.daysLeft <= 30 ? "bg-warning-soft text-warning-foreground" : "bg-positive-soft text-positive-foreground"}`}>{cert.active.daysLeft < 0 ? "Vencido" : cert.active.daysLeft <= 30 ? "Vence em breve" : "Guardado"}</span>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-3"><CertificateVerify />
+                <form action={removeCertificateAction}><button className="rounded-md px-2.5 py-1 text-xs text-negative-foreground ring-1 ring-border">Remover (apaga o certificado e a chave)</button></form></div>
+            </div>
+          ) : <p className="mb-4 rounded-md bg-muted p-3 text-sm text-muted-foreground">Nenhum certificado guardado para esta empresa.</p>}
+          {cert.history.length > 0 && <p className="mb-3 text-xs text-muted-foreground">Histórico: {cert.history.map((h) => `${h.status === "substituido" ? "substituído" : "removido"} (vencia ${h.notAfter.split("-").reverse().join("/")}, ${h.fingerprint}…)`).join(" · ")}. Os segredos dos antigos foram apagados.</p>}
+          <CertificateForm replace={!!cert.active} />
+        </>) : <p className="text-sm text-muted-foreground">O certificado digital é importado somente pela diretoria.</p>}
+      </section>
       <section className="rounded-lg border bg-card p-5" aria-labelledby="email-h">
         <h2 id="email-h" className="mb-1 font-semibold">E-mail (SMTP) — envio de cobranças</h2>
         <p className="mb-3 text-sm text-muted-foreground">Conta do domínio usada para enviar lembretes e cobranças desta empresa. Cada empresa tem a sua.</p>
@@ -180,7 +203,7 @@ export default async function Integracoes() {
         <h2 className="mb-1 font-semibold">Portão da emissão real (checklist)</h2>
         <p className="mb-3 text-sm text-muted-foreground">Enquanto algum item estiver pendente, a emissão e o envio reais permanecem <strong>bloqueados</strong>. O sistema só confere se os arquivos de segredo existem; nunca lê o conteúdo. Detalhes em <code>docs/E10_GOLIVE.md</code>.</p>
         <ul className="divide-y divide-border text-sm">
-          {readiness(process.env, { coraInDb, emailInDb, fiscalComplete, emailAuthorized: !!live?.authorization }).filter((r) => (coraAccess || (r.key !== "cora-creds" && r.key !== "smtp-creds" && r.key !== "email-authorization")) && (can(role, "company.manage") || r.key !== "fiscal-profile")).map((r) => (
+          {readiness(process.env, { coraInDb, emailInDb, fiscalComplete, nfseCertInDb: certInDb, emailAuthorized: !!live?.authorization }).filter((r) => (coraAccess || (r.key !== "cora-creds" && r.key !== "smtp-creds" && r.key !== "email-authorization")) && (can(role, "company.manage") || r.key !== "fiscal-profile")).map((r) => (
             <li key={r.key} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
               <div><p className="font-medium">{r.label}</p><p className="text-xs text-muted-foreground">{r.detail}</p></div>
               <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${r.state === "ok" ? "bg-positive-soft text-positive-foreground" : r.state === "alerta" ? "bg-negative-soft text-negative-foreground" : "bg-muted"}`}>{r.state === "ok" ? "OK" : r.state === "alerta" ? "Atenção" : "Pendente"}</span>

@@ -6,6 +6,7 @@ import { Forbidden, Invalid } from "@/modules/identity/service";
 import { setCustomerMode } from "@/modules/crm/service";
 import { getCrmAdapter } from "@/modules/integrations/crm/factory";
 import { removeCoraCredentials, saveCoraCredentials } from "@/modules/providers/cora-config";
+import { MAX_PFX_BYTES, importCertificate, removeCertificate, verifyCertificate } from "@/modules/nfse/certificate";
 import { disableCoraWebhook, enableCoraWebhook } from "@/modules/issuance/webhooks";
 import { removeEmailAccount, saveEmailAccount } from "@/modules/providers/email-config";
 import { authorizeEmailLive, revokeEmailLive } from "@/modules/providers/email-auth";
@@ -179,4 +180,33 @@ export async function testSmtpAction(_: LiveState, fd: FormData): Promise<LiveSt
     console.error("email: falha inesperada no teste de conexão", e instanceof Error ? e.name : "erro");
     return { error: "Não foi possível testar agora. Tente de novo; se persistir, avise o suporte." };
   }
+}
+
+
+// N2b-0 — certificado A1 da NFS-e. O .pfx e a senha nunca são gravados em log nem devolvidos; a senha é descartada depois da conferência.
+export type CertState = { error?: string; saved?: string; ok?: boolean; message?: string } | undefined;
+export async function importCertificateAction(_: CertState, fd: FormData): Promise<CertState> {
+  try {
+    const c = await ctx();
+    const f = fd.get("pfx");
+    if (!(f instanceof File) || f.size === 0) throw new Invalid("Escolha o arquivo do certificado (.pfx ou .p12)");
+    if (f.size > MAX_PFX_BYTES) throw new Invalid("O arquivo passa de 32 KB: não parece um certificado A1 (.pfx)");
+    const password = String(fd.get("pfxPassword") ?? "");
+    if (password.length > 200) throw new Invalid("Senha longa demais");
+    const r = await importCertificate(db, c.userId, c.companyId, { pfx: new Uint8Array(await f.arrayBuffer()), password });
+    revalidatePath("/integracoes");
+    return { saved: `Certificado guardado (cifrado). Titular: ${r.subject}. Vence em ${r.notAfter.split("-").reverse().join("/")}${r.expiringSoon ? ` — ATENÇÃO: faltam só ${r.daysLeft} dia(s)` : ""}.${r.replaced ? " O anterior foi substituído e apagado." : ""} A senha não foi guardada.${r.icpBrasil ? "" : " ATENÇÃO: o emissor deste certificado não parece ser da ICP-Brasil; a Receita vai recusá-lo."}` };
+  } catch (e) {
+    if (e instanceof Invalid || e instanceof Forbidden) return { error: e.message };
+    console.error("nfse: falha inesperada ao importar certificado", e instanceof Error ? e.name : "erro"); // nunca o conteúdo
+    return { error: "Não foi possível guardar agora. Tente de novo; se persistir, avise o suporte." };
+  }
+}
+export async function verifyCertificateAction(): Promise<CertState> {
+  try { const c = await ctx(); return await verifyCertificate(db, c.userId, c.companyId); }
+  catch (e) { if (e instanceof Invalid || e instanceof Forbidden) return { ok: false, message: e.message }; throw e; }
+}
+export async function removeCertificateAction() {
+  try { const c = await ctx(); await removeCertificate(db, c.userId, c.companyId); } catch (e) { msg(e); }
+  revalidatePath("/integracoes");
 }

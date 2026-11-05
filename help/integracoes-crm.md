@@ -57,3 +57,20 @@ Credenciais e o que a integração com a Cora faz: veja `cora-boletos.md`.
 ## Outras seções desta tela
 - **Cora — boletos:** veja o artigo *Cora: boletos (credenciais e escopo)* (`cora-boletos`).
 - **E-mail (SMTP):** conta usada para enviar cobranças; veja o artigo *Conta de e-mail (SMTP)* (`conta-de-email`). Guardar a conta não liga o envio.
+
+## Certificado digital A1 (NFS-e Padrão Nacional)
+*Integrações → Certificado digital A1 — NFS-e.* Só a **diretoria** importa. Serve para assinar a nota fiscal de serviço da empresa; **importar não emite nada**.
+
+**Como importar:** escolha o arquivo **.pfx / .p12** do certificado **e-CNPJ A1** da empresa e digite a senha que a certificadora definiu. O sistema confere:
+- se a senha está certa e o arquivo está inteiro (certificado + chave privada juntos);
+- se **não está vencido**;
+- se o **CNPJ do certificado é o da empresa selecionada** (cadastre o CNPJ em *Configurações → Empresa* antes).
+
+**Segurança:** o arquivo e a senha trafegam só pela conexão segura (HTTPS), são conferidos no servidor, o certificado e a chave ficam **cifrados** e **a senha é descartada** (não fica guardada em lugar nenhum). Nada disso volta para a tela: você vê só o titular, o CNPJ, a validade e a impressão digital. Cada importação e remoção fica no registro de atividades, sem segredo.
+
+**Depois de importar:**
+- **Conferir integridade** reabre o que está guardado e confirma que a chave combina com o certificado e que não venceu (não envia nada para fora).
+- **Importar outro** substitui o atual e **apaga** o anterior; **Remover** apaga certificado e chave. Fica só um histórico público (validade e impressão digital).
+- Avisamos quando faltam **30 dias ou menos** para vencer.
+
+**Não serve:** certificado A3 (cartão/token), e-CPF (pessoa física) ou de outro CNPJ.

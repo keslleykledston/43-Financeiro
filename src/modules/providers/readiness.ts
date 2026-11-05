@@ -11,7 +11,7 @@ export type ReadinessItem = { key: string; label: string; state: CheckState; det
 const SECRET_DIR = process.env.K3G_SECRETS_DIR ?? "/run/secrets";
 const has = (f: string) => existsSync(`${SECRET_DIR}/${f}`);
 
-export function readiness(env: Record<string, string | undefined> = process.env, opts: { coraInDb?: boolean; emailInDb?: boolean; fiscalComplete?: boolean; emailAuthorized?: boolean } = {}): ReadinessItem[] {
+export function readiness(env: Record<string, string | undefined> = process.env, opts: { coraInDb?: boolean; emailInDb?: boolean; fiscalComplete?: boolean; emailAuthorized?: boolean; nfseCertInDb?: boolean } = {}): ReadinessItem[] {
   const live = unsupportedFlagsOn(env);
   const human = (key: string, label: string, detail: string): ReadinessItem => ({ key, label, state: "pendente", detail });
   return [
@@ -20,9 +20,10 @@ export function readiness(env: Record<string, string | undefined> = process.env,
     { key: "cora-creds", label: "Credenciais Cora (client-id, certificado e chave mTLS)", state: opts.coraInDb || (has("cora_client_id") && has("cora_cert.pem") && has("cora_key.pem")) ? "ok" : "pendente", detail: "Cadastradas na seção «Cora — boletos» desta tela (guardadas cifradas) ou como arquivos cora_client_id, cora_cert.pem e cora_key.pem em /run/secrets. Ter as credenciais NÃO liga a emissão real" },
     { key: "smtp-creds", label: "Credenciais SMTP do domínio", state: opts.emailInDb || (has("smtp_user") && has("smtp_password")) ? "ok" : "pendente", detail: "Conta cadastrada na seção «E-mail (SMTP)» desta tela (guardada cifrada) ou arquivos smtp_user e smtp_password em /run/secrets. Ter a conta NÃO liga o envio real" },
     { key: "waha-creds", label: "Chave do WAHA (WhatsApp)", state: env.WAHA_API_KEY || has("waha_api_key") ? "ok" : "pendente", detail: "Variável WAHA_API_KEY (arquivo .env.waha do servidor) ou arquivo waha_api_key em /run/secrets; nunca na tela" },
+    { key: "nfse-cert", label: "Certificado digital A1 da NFS-e importado", state: opts.nfseCertInDb ? "ok" : "pendente", detail: "Integrações → Certificado digital A1 — NFS-e (Padrão Nacional): .pfx do CNPJ da empresa, guardado cifrado." },
     { key: "fiscal-profile", label: "Dados fiscais da empresa para a NFS-e preenchidos", state: opts.fiscalComplete ? "ok" : "pendente", detail: "Empresa → Dados fiscais: regime, inscrição municipal, CNAE, código do serviço, alíquota do ISS e endereço (confirmar com o contador)" },
     human("homolog-cora", "Homologação Cora concluída", "Emitir e consultar boleto (e segunda via) em ambiente de testes e anexar o resultado"),
-    human("nfse-cover", "Cobertura da NFS-e da Cora confirmada", "Município, CNAEs e regime tributário dos dois CNPJs"),
+    human("nfse-cover", "Município conveniado ao Padrão Nacional e dados fiscais confirmados", "Município, CNAEs, regime e código de tributação nacional dos dois CNPJs, confirmados pelo contador"),
     human("fiscal-calendar", "Calendário fiscal aprovado", "Regras de emissão revisadas por quem responde pela contabilidade"),
     human("dns-mail", "SPF, DKIM e DMARC do domínio de e-mail", "Remetente por empresa e tratamento de devolução (bounce)"),
     human("optin", "Lista de WhatsApp com opt-in revisada", "Número dedicado, janelas e limites de envio aprovados"),

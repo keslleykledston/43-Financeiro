@@ -995,6 +995,36 @@ export const providerCredentials = pgTable("provider_credentials", {
   check("provider_credentials_sealed_chk", sql`${t.clientIdEnc} like 'v1.%' and ${t.certEnc} like 'v1.%' and ${t.keyEnc} like 'v1.%'`), // nunca texto puro
 ]);
 
+// N2b-0 — certificado digital A1 (ICP-Brasil) da EMPRESA, para a NFS-e Padrão Nacional (ADR-039). Importado de um .pfx + senha: a senha NÃO é guardada;
+// certificado, chave e cadeia ficam cifrados no cofre (AAD `empresa|nfse|…`). Um ativo por empresa; trocar/remover APAGA os segredos (fica só o histórico público).
+export const companyCertificates = pgTable("company_certificates", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  purpose: text("purpose").notNull().default("nfse"),
+  status: text("status").notNull().default("ativo"), // ativo | substituido | removido
+  subject: text("subject").notNull(),
+  holderCnpj: text("holder_cnpj").notNull(),
+  issuer: text("issuer").notNull(),
+  serial: text("serial").notNull(),
+  notBefore: date("not_before", { mode: "string" }).notNull(),
+  notAfter: date("not_after", { mode: "string" }).notNull(),
+  fingerprint: text("fingerprint").notNull(), // SHA-256 do certificado (público)
+  certEnc: text("cert_enc"),
+  keyEnc: text("key_enc"),
+  chainEnc: text("chain_enc"),
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+  closedBy: uuid("closed_by").references(() => users.id),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+}, (t) => [
+  uniqueIndex("company_certificates_active_uq").on(t.companyId, t.purpose).where(sql`${t.status} = 'ativo'`),
+  check("company_certificates_purpose_chk", sql`${t.purpose} in ('nfse')`),
+  check("company_certificates_status_chk", sql`${t.status} in ('ativo', 'substituido', 'removido')`),
+  check("company_certificates_cnpj_chk", sql`${t.holderCnpj} ~ '^[0-9]{14}$'`),
+  check("company_certificates_fp_chk", sql`${t.fingerprint} ~ '^[0-9a-f]{64}$'`),
+  // ativo = com segredo cifrado (nunca texto puro); fechado = SEM segredo nenhum
+  check("company_certificates_sealed_chk", sql`(${t.status} = 'ativo' and ${t.certEnc} is not null and ${t.keyEnc} is not null and ${t.certEnc} like 'v1.%' and ${t.keyEnc} like 'v1.%' and (${t.chainEnc} is null or ${t.chainEnc} like 'v1.%')) or (${t.status} <> 'ativo' and ${t.certEnc} is null and ${t.keyEnc} is null and ${t.chainEnc} is null)`),
+]);
+
 // E20 — cancelamento de boleto (autorizado pelo dono em 2026-10-24; ADR-017). SOMENTE diretoria. Registro IMUTÁVEL: quem, quando, por quê, qual boleto e o resultado.
 // Mesmo padrão do motor de emissão: reservar (enviando) → chamar o provedor fora de transação → registrar. Resposta perdida = `desconhecido` (reconsulta antes de repetir).
 export const boletoCancellations = pgTable("boleto_cancellations", {

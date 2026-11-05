@@ -386,6 +386,13 @@
       "when": 1793838698498,
       "tag": "0054_nfse_trib_nac_code",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1793841592270,
+      "tag": "0055_company_certificates",
+      "breakpoints": true
     }
   ]
 }
