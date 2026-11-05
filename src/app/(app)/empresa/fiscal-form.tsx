@@ -31,6 +31,7 @@ export function FiscalForm({ v }: { v: FiscalValues }) {
         {f("municipalRegistration", "Inscrição municipal", v.municipalRegistration, { max: 30 })}
         {f("cnae", "CNAE principal", v.cnae, { hint: "7 dígitos", max: 12, ph: "6190601" })}
         {f("serviceCode", "Código do serviço (LC 116)", v.serviceCode, { hint: "Ex.: 1.07", max: 10 })}
+        {f("tribNacCode", "Código de tributação nacional (NFS-e)", v.tribNacCode, { hint: "6 dígitos: item, subitem e desdobro. Ex.: 01.07.01. O contador informa.", max: 12, ph: "01.07.01" })}
         {f("issRate", "Alíquota do ISS (%)", pct(v.issRateBps), { hint: "De 0 a 5, ex.: 2 ou 2,5", max: 10 })}
         <label className="flex items-center gap-2 self-end pb-2 text-sm"><input type="checkbox" name="issWithheld" defaultChecked={v.issWithheld} /> ISS retido pelo tomador (padrão)</label>
       </fieldset>

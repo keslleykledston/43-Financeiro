@@ -16,7 +16,7 @@ import { readiness } from "@/modules/providers/readiness";
 const enabled = !!process.env.POSTGRES_USER;
 const why = (e: unknown) => String((e as { cause?: { message?: string } })?.cause?.message ?? (e as Error)?.message ?? e);
 const mail = (o: Record<string, unknown> = {}) => ({ host: "smtp.k3gsolutions.com.br", port: "587", security: "starttls", fromEmail: "financeiro@k3gsolutions.com.br", fromName: "K3G Solutions — Financeiro", replyTo: "", user: "financeiro@k3gsolutions.com.br", password: "S3nha-Super-Secreta!", ...o });
-const fiscalFull = (o: Record<string, unknown> = {}) => ({ taxRegime: "simples", municipalRegistration: "123456", cnae: "6190-601", serviceCode: "1.07", issRate: "2,5", cityName: "Manaus", cityIbge: "1302603", uf: "am", cep: "69000-000", street: "Av. Exemplo", streetNumber: "100", district: "Centro", accountantName: "Contabil Exemplo", accountantDocument: "11.222.333/0001-81", accountantEmail: "Contato@Contabil.com.br", accountantPhone: "(92) 99999-0000", ...o });
+const fiscalFull = (o: Record<string, unknown> = {}) => ({ taxRegime: "simples", municipalRegistration: "123456", cnae: "6190-601", serviceCode: "1.07", tribNacCode: "01.07.01", issRate: "2,5", cityName: "Manaus", cityIbge: "1302603", uf: "am", cep: "69000-000", street: "Av. Exemplo", streetNumber: "100", district: "Centro", accountantName: "Contabil Exemplo", accountantDocument: "11.222.333/0001-81", accountantEmail: "Contato@Contabil.com.br", accountantPhone: "(92) 99999-0000", ...o });
 
 describe("E22 — parsers de e-mail (puros)", () => {
   it("servidor: só nome público; porta e segurança coerentes", () => {
@@ -38,9 +38,9 @@ describe("E22 — parsers de e-mail (puros)", () => {
 describe("E22 — dados fiscais (puros)", () => {
   it("normaliza e valida", () => {
     const v = parseFiscal(fiscalFull());
-    expect(v).toMatchObject({ taxRegime: "simples", cnae: "6190601", cityIbge: "1302603", uf: "AM", cep: "69000000", issRateBps: 250, serviceCode: "1.07", accountantDocument: "11222333000181", accountantEmail: "contato@contabil.com.br" });
+    expect(v).toMatchObject({ taxRegime: "simples", cnae: "6190601", cityIbge: "1302603", uf: "AM", cep: "69000000", issRateBps: 250, serviceCode: "1.07", tribNacCode: "010701", accountantDocument: "11222333000181", accountantEmail: "contato@contabil.com.br" });
     const bad = (o: Record<string, unknown>, re: RegExp) => expect(() => parseFiscal(fiscalFull(o))).toThrow(re);
-    bad({ cnae: "123" }, /CNAE deve ter 7/); bad({ cnae: "61a90601" }, /só números/); bad({ cep: "6900x000" }, /só números/); bad({ cep: "123" }, /CEP deve ter 8/); bad({ cityIbge: "12" }, /IBGE/); bad({ uf: "AMA" }, /máximo 2|UF inválida/); bad({ issRate: "7" }, /Alíquota/); bad({ serviceCode: "107" }, /LC 116/);
+    bad({ cnae: "123" }, /CNAE deve ter 7/); bad({ cnae: "61a90601" }, /só números/); bad({ cep: "6900x000" }, /só números/); bad({ cep: "123" }, /CEP deve ter 8/); bad({ cityIbge: "12" }, /IBGE/); bad({ uf: "AMA" }, /máximo 2|UF inválida/); bad({ issRate: "7" }, /Alíquota/); bad({ serviceCode: "107" }, /LC 116/); bad({ tribNacCode: "1.07" }, /deve ter 6/); bad({ tribNacCode: "01.07.0a" }, /só números/);
     bad({ accountantDocument: "111.111.111-11" }, /inválido/); bad({ accountantEmail: "x" }, /E-mail do contador/); bad({ taxRegime: "outro" }, /Regime/);
     expect(parseFiscal({ issRate: "0" }).issRateBps).toBe(0);
   });

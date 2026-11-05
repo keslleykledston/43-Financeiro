@@ -24,7 +24,7 @@ export async function saveCompanyAction(_: CompanyState, fd: FormData): Promise<
   }
 }
 
-const FISCAL_FIELDS = ["accountantName", "accountantDocument", "accountantCrc", "accountantContact", "accountantEmail", "accountantPhone", "accountantNotes", "taxRegime", "municipalRegistration", "cnae", "serviceCode", "issRate", "cityName", "cityIbge", "uf", "cep", "street", "streetNumber", "complement", "district", "phone"] as const;
+const FISCAL_FIELDS = ["accountantName", "accountantDocument", "accountantCrc", "accountantContact", "accountantEmail", "accountantPhone", "accountantNotes", "taxRegime", "municipalRegistration", "cnae", "serviceCode", "tribNacCode", "issRate", "cityName", "cityIbge", "uf", "cep", "street", "streetNumber", "complement", "district", "phone"] as const;
 
 export async function saveFiscalAction(_: CompanyState, fd: FormData): Promise<CompanyState> {
   try {

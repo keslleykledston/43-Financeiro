@@ -122,3 +122,7 @@ Aba Dados reúne identificação, nome aparente+emissão, endereço e contatos; 
 
 ## 2026-11-04 — N2: emissor NFS-e = Padrão Nacional (ADR-039)
 Dono confirmou: e-mail de clientes e do sistema JÁ ligados na K3G Solutions (painel) e emissor «Padrão Nacional». Próximo: N2a (DPS em XML + adaptador simulado + prévia, sem certificado). N2b exige A1 ICP-Brasil por CNPJ + município conveniado + cTribNac do contador.
+
+
+## 2026-11-04 — N2a: prévia da DPS da NFS-e Padrão Nacional (migração 0054, ADR-039)
+`src/modules/nfse/dps.ts` (gerador puro do XML 1.01, validado em teste contra o XSD oficial copiado em fixtures/nfse-xsd/1.01 via xmllint, instalado só na imagem `tools`) + `preview.ts` + tela `/faturamento/nfse/[chargeId]` (link «Prévia da NFS-e» nas cobranças que emitem nota) + XML para baixar. SEMPRE tpAmb=2 (homologação), sem assinatura, nada emitido/enviado; lista em português o que falta. Novo campo da empresa «código de tributação nacional» (cTribNac, 6 dígitos; o contador informa). Sandbox PASS 816 unit/int + 141 e2e; Codex 0 C/H, 2 M corrigidos (agent/reviews/2026-11-04-codex-n2a-nfse-dps-previa.md). Próximo: N2b (cofre do certificado A1 + produção restrita) — depende do dono (A1 por CNPJ, município conveniado, cTribNac do contador).

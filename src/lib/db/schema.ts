@@ -1064,6 +1064,7 @@ export const companyFiscal = pgTable("company_fiscal", {
   municipalRegistration: text("municipal_registration"),
   cnae: text("cnae"), // 7 dígitos
   serviceCode: text("service_code"), // item da LC 116 (ex.: 1.07)
+  tribNacCode: text("trib_nac_code"), // código de tributação nacional da NFS-e Padrão Nacional (6 dígitos: item+subitem+desdobro, ex.: 010701)
   issRateBps: integer("iss_rate_bps"), // alíquota do ISS em pontos-base (200 = 2%)
   issWithheld: boolean("iss_withheld").notNull().default(false),
   cityName: text("city_name"),
@@ -1079,6 +1080,7 @@ export const companyFiscal = pgTable("company_fiscal", {
 }, (t) => [
   uniqueIndex("company_fiscal_company_uq").on(t.companyId),
   check("company_fiscal_regime_chk", sql`${t.taxRegime} is null or ${t.taxRegime} in ('mei', 'simples', 'presumido', 'real')`),
+  check("company_fiscal_trib_nac_chk", sql`${t.tribNacCode} is null or ${t.tribNacCode} ~ '^[0-9]{6}$'`),
   check("company_fiscal_iss_chk", sql`${t.issRateBps} is null or ${t.issRateBps} between 0 and 500`),
   check("company_fiscal_formats_chk", sql`(${t.cnae} is null or ${t.cnae} ~ '^[0-9]{7}$') and (${t.cityIbge} is null or ${t.cityIbge} ~ '^[0-9]{7}$') and (${t.cep} is null or ${t.cep} ~ '^[0-9]{8}$') and (${t.uf} is null or ${t.uf} ~ '^[A-Z]{2}$')`),
   check("company_fiscal_len_chk", sql`char_length(${t.accountantName}) <= 160 and char_length(${t.accountantDocument}) <= 20 and char_length(${t.accountantCrc}) <= 30 and char_length(${t.accountantContact}) <= 120 and char_length(${t.accountantEmail}) <= 200 and char_length(${t.accountantPhone}) <= 30 and char_length(${t.accountantNotes}) <= 500 and char_length(${t.municipalRegistration}) <= 30 and char_length(${t.serviceCode}) <= 10 and char_length(${t.cityName}) <= 80 and char_length(${t.street}) <= 160 and char_length(${t.streetNumber}) <= 20 and char_length(${t.complement}) <= 80 and char_length(${t.district}) <= 80 and char_length(${t.phone}) <= 30`),

@@ -21,7 +21,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export type FiscalValues = {
   accountantName: string | null; accountantDocument: string | null; accountantCrc: string | null; accountantContact: string | null; accountantEmail: string | null; accountantPhone: string | null; accountantNotes: string | null;
-  taxRegime: Regime | null; municipalRegistration: string | null; cnae: string | null; serviceCode: string | null; issRateBps: number | null; issWithheld: boolean;
+  taxRegime: Regime | null; municipalRegistration: string | null; cnae: string | null; serviceCode: string | null; tribNacCode: string | null; issRateBps: number | null; issWithheld: boolean;
   cityName: string | null; cityIbge: string | null; uf: string | null; cep: string | null; street: string | null; streetNumber: string | null; complement: string | null; district: string | null; phone: string | null;
 };
 
@@ -37,7 +37,7 @@ const digits = (raw: string | null, n: number, what: string): string | null => {
 const schema = z.object({
   accountantName: txt(160, "Nome do contador/escritório"), accountantDocument: txt(30, "CPF/CNPJ do contador"), accountantCrc: txt(30, "CRC"), accountantContact: txt(120, "Contato"),
   accountantEmail: txt(200, "E-mail do contador"), accountantPhone: txt(30, "Telefone do contador"), accountantNotes: txt(500, "Observações"),
-  taxRegime: txt(20, "Regime"), municipalRegistration: txt(30, "Inscrição municipal"), cnae: txt(20, "CNAE"), serviceCode: txt(10, "Código do serviço"), issRate: txt(10, "Alíquota"),
+  taxRegime: txt(20, "Regime"), municipalRegistration: txt(30, "Inscrição municipal"), cnae: txt(20, "CNAE"), serviceCode: txt(10, "Código do serviço"), tribNacCode: txt(12, "Código de tributação nacional"), issRate: txt(10, "Alíquota"),
   issWithheld: z.preprocess((v) => v === true || v === "on" || v === "true", z.boolean()),
   cityName: txt(80, "Município"), cityIbge: txt(20, "Código IBGE"), uf: txt(2, "UF"), cep: txt(12, "CEP"), street: txt(160, "Logradouro"), streetNumber: txt(20, "Número"), complement: txt(80, "Complemento"), district: txt(80, "Bairro"), phone: txt(30, "Telefone"),
 });
@@ -60,25 +60,26 @@ export function parseFiscal(input: unknown): FiscalValues {
   if (uf && !/^[A-Z]{2}$/.test(uf)) throw new Invalid("UF inválida (2 letras, ex.: AM)");
   const serviceCode = d.serviceCode ? d.serviceCode.replace(",", ".") : null;
   if (serviceCode && !/^\d{1,2}\.\d{2}$/.test(serviceCode)) throw new Invalid("Código do serviço no formato da LC 116 (ex.: 1.07 ou 01.07)");
+  const tribNacCode = d.tribNacCode ? digits(d.tribNacCode, 6, "Código de tributação nacional") : null;
   return {
     accountantName: d.accountantName, accountantDocument, accountantCrc: d.accountantCrc, accountantContact: d.accountantContact, accountantEmail: d.accountantEmail ? d.accountantEmail.toLowerCase() : null, accountantPhone: d.accountantPhone, accountantNotes: d.accountantNotes,
-    taxRegime: (d.taxRegime as Regime | null), municipalRegistration: d.municipalRegistration, cnae: digits(d.cnae, 7, "CNAE"), serviceCode, issRateBps, issWithheld: d.issWithheld,
+    taxRegime: (d.taxRegime as Regime | null), municipalRegistration: d.municipalRegistration, cnae: digits(d.cnae, 7, "CNAE"), serviceCode, tribNacCode, issRateBps, issWithheld: d.issWithheld,
     cityName: d.cityName, cityIbge: digits(d.cityIbge, 7, "Código IBGE do município"), uf, cep: digits(d.cep, 8, "CEP"), street: d.street, streetNumber: d.streetNumber, complement: d.complement, district: d.district, phone: d.phone,
   };
 }
 
-const EMPTY: FiscalValues = { accountantName: null, accountantDocument: null, accountantCrc: null, accountantContact: null, accountantEmail: null, accountantPhone: null, accountantNotes: null, taxRegime: null, municipalRegistration: null, cnae: null, serviceCode: null, issRateBps: null, issWithheld: false, cityName: null, cityIbge: null, uf: null, cep: null, street: null, streetNumber: null, complement: null, district: null, phone: null };
+const EMPTY: FiscalValues = { accountantName: null, accountantDocument: null, accountantCrc: null, accountantContact: null, accountantEmail: null, accountantPhone: null, accountantNotes: null, taxRegime: null, municipalRegistration: null, cnae: null, serviceCode: null, tribNacCode: null, issRateBps: null, issWithheld: false, cityName: null, cityIbge: null, uf: null, cep: null, street: null, streetNumber: null, complement: null, district: null, phone: null };
 
 export const FIELD_LABEL: Record<keyof FiscalValues, string> = {
   accountantName: "contador: nome", accountantDocument: "contador: CPF/CNPJ", accountantCrc: "contador: CRC", accountantContact: "contador: contato", accountantEmail: "contador: e-mail", accountantPhone: "contador: telefone", accountantNotes: "contador: observações",
-  taxRegime: "regime tributário", municipalRegistration: "inscrição municipal", cnae: "CNAE", serviceCode: "código do serviço", issRateBps: "alíquota do ISS", issWithheld: "ISS retido",
+  taxRegime: "regime tributário", municipalRegistration: "inscrição municipal", cnae: "CNAE", serviceCode: "código do serviço", tribNacCode: "código de tributação nacional (NFS-e)", issRateBps: "alíquota do ISS", issWithheld: "ISS retido",
   cityName: "município", cityIbge: "código IBGE", uf: "UF", cep: "CEP", street: "logradouro", streetNumber: "número", complement: "complemento", district: "bairro", phone: "telefone",
 };
 
 /** O que ainda falta para a NFS-e (campos obrigatórios) e para a comunicação com a contabilidade. Puro: sem banco. */
 export function fiscalPending(v: FiscalValues): { nfse: string[]; accounting: string[] } {
   const need: [keyof FiscalValues, boolean][] = [
-    ["taxRegime", v.taxRegime === null], ["municipalRegistration", !v.municipalRegistration], ["cnae", !v.cnae], ["serviceCode", !v.serviceCode], ["issRateBps", v.issRateBps === null],
+    ["taxRegime", v.taxRegime === null], ["municipalRegistration", !v.municipalRegistration], ["cnae", !v.cnae], ["serviceCode", !v.serviceCode], ["tribNacCode", !v.tribNacCode], ["issRateBps", v.issRateBps === null],
     ["cityName", !v.cityName], ["cityIbge", !v.cityIbge], ["uf", !v.uf], ["cep", !v.cep], ["street", !v.street], ["streetNumber", !v.streetNumber], ["district", !v.district],
   ];
   const acc: [keyof FiscalValues, boolean][] = [["accountantName", !v.accountantName], ["accountantEmail", !v.accountantEmail], ["accountantPhone", !v.accountantPhone]];

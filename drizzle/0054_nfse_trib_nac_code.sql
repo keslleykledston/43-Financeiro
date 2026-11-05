@@ -1,0 +1,2 @@
+ALTER TABLE "company_fiscal" ADD COLUMN "trib_nac_code" text;--> statement-breakpoint
+ALTER TABLE "company_fiscal" ADD CONSTRAINT "company_fiscal_trib_nac_chk" CHECK ("company_fiscal"."trib_nac_code" is null or "company_fiscal"."trib_nac_code" ~ '^[0-9]{6}$');

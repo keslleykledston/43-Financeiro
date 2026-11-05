@@ -11,6 +11,8 @@ RUN pnpm install --frozen-lockfile
 
 # Ferramentas (migrate/seed/test): dev deps + código-fonte completo
 FROM deps AS tools
+# xmllint: validação da DPS da NFS-e contra o XSD oficial (tests/nfse-dps.test.ts); só na imagem de testes
+RUN apt-get update && apt-get install -y --no-install-recommends libxml2-utils && rm -rf /var/lib/apt/lists/*
 COPY . .
 CMD ["pnpm", "typecheck"]
 

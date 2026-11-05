@@ -379,6 +379,13 @@
       "when": 1793806952672,
       "tag": "0053_customer_alias_and_flags",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1793838698498,
+      "tag": "0054_nfse_trib_nac_code",
+      "breakpoints": true
     }
   ]
 }

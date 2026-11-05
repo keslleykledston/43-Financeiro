@@ -79,6 +79,7 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
                 <div className="min-w-0">
                   <AppLink href={`/contratos/${c.contractId}`} className="font-medium hover:underline">{c.customerName}</AppLink>
                   <p className="text-muted-foreground">{c.description} · competência {c.competenceMonth.slice(5, 7)}/{c.competenceMonth.slice(0, 4)} · vence {br(c.dueDate)}{c.jointInvoice ? " · boleto + NF" : ""}</p>
+                  {(c.jointInvoice || c.customerIssuesInvoice) && <p className="text-xs"><AppLink href={`/faturamento/nfse/${c.id}`} className="underline">Prévia da NFS-e</AppLink> <span className="text-muted-foreground">(só visualização, nada é emitido)</span></p>}
                   {!c.customerIssuesBoleto && <p className="text-xs font-medium text-warning-foreground">Cliente marcado como «não emite boleto»: fica de fora da emissão de boletos (muda em Clientes → Editar).</p>}
                   {alertas.has(c.id) && <Callout tone="warning" role="alert"><strong>ALERTA DE DUPLICIDADE.</strong> {DUPLICATE_ALERT[alertas.get(c.id)!.code]} Este é o único boleto parado; os outros do lote seguem. <AppLink href="/faturamento/emissoes?status=falhou" className="underline">Ver em Emissões</AppLink></Callout>}
                   {(c.warnings as Warning[]).length > 0 && <p className="text-xs text-muted-foreground">{(c.warnings as Warning[]).map((w) => WARNING_LABEL[w]).join("; ")}</p>}
