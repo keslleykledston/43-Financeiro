@@ -36,3 +36,7 @@ Sem sudo/DNS/certificado → app em localhost com autenticação, documentação
 
 ## Agendador de mensagens (E09)
 Serviço `scheduler` do Compose (imagem `tools`, código embutido): `docker compose build scheduler && docker compose up -d scheduler`. Rebuild a cada deploy, junto com `web`. Log só com contagens (`docker compose logs scheduler`). Ele só age nas empresas com *Envio automático* ligado e usa provedores simulados. Parar: `docker compose stop scheduler` (a fila apenas acumula).
+
+
+## Ordem de deploy com migração (lição de 2026-11-04)
+`scripts/backup.sh` → `docker compose --profile tools build tools` (o `run` NÃO reconstrói a imagem: sem isso a migração nova não entra, mesmo dizendo «applied») → `docker compose --profile tools run --rm tools pnpm db:migrate` → conferir `select count(*) from drizzle.__drizzle_migrations` (= número de arquivos em `drizzle/*.sql`) → `docker compose build web scheduler && docker compose up -d web scheduler` → smoke.
