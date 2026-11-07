@@ -8,6 +8,8 @@ loadEnvConfig(process.cwd());
 async function main() {
   const { db } = await import("../src/lib/db");
   const { tickAll } = await import("../src/modules/messaging/service");
+  const { tickBilling } = await import("../src/modules/billing/automation");
+  const { tickCoraInvoices } = await import("../src/modules/receivables/cora-tick");
   const { applyDueAmendments } = await import("../src/modules/contracts/service");
   const { syncAllAuto } = await import("../src/modules/issuance/sync");
   const { processWebhookEvents } = await import("../src/modules/issuance/webhooks");
@@ -22,6 +24,15 @@ async function main() {
   log({ event: "scheduler.start", everySeconds: every / 1000 });
   while (!stop) {
     try { const n = await applyDueAmendments(db, null); if (n > 0) log({ event: "scheduler.amendments_applied", count: n }); } catch (e) { log({ event: "scheduler.amendments_error", kind: (e as Error).name }); }
+    try { // F1: faturamento automático (prévia no prazo, emissão no dia certo). Log só com contagens.
+      const res = await tickBilling(db);
+      const t = res.reduce((a, r) => ({ previews: a.previews + (r.run?.previews ?? 0), requested: a.requested + (r.run?.requested ?? 0), processed: a.processed + (r.run?.processed ?? 0), completed: a.completed + (r.run?.completed ?? 0), errors: a.errors + (r.error ? 1 : 0) }), { previews: 0, requested: 0, processed: 0, completed: 0, errors: 0 });
+      if (t.previews + t.requested + t.processed + t.completed + t.errors > 0) log({ event: "scheduler.billing_auto", ...t, errorKinds: res.filter((r) => r.error).map((r) => r.error) });
+    } catch (e) { log({ event: "scheduler.billing_auto_error", kind: (e as Error).name }); }
+    try { // F1b: espelho dos boletos da Cora (atualização rápida a cada 30 min; importação completa 1x ao dia, a partir das 06:00 de Manaus). Só leitura na Cora.
+      const r = await tickCoraInvoices(db);
+      if (r.refreshed + r.imported + r.errors > 0) log({ event: "scheduler.cora_invoices", ...r });
+    } catch (e) { log({ event: "scheduler.cora_invoices_error", kind: (e as Error).name }); }
     try { const w = await processWebhookEvents(db); if (w.processed + w.ignored + w.errors > 0) log({ event: "scheduler.cora_webhooks", ...w }); } catch (e) { log({ event: "scheduler.cora_webhooks_error", kind: (e as Error).name }); }
     try { const n = await processPendingInbound(db); if (n > 0) log({ event: "scheduler.whatsapp_inbound", pending: n }); } catch (e) { log({ event: "scheduler.whatsapp_inbound_error", kind: (e as Error).name }); } // respostas do WhatsApp que ficaram pendentes (ex.: WAHA fora do ar na hora)
     try { const w = await runWhatsappAutomation(db); const t = w.reduce((a, c) => ({ queued: a.queued + c.queued, sent: a.sent + c.sent, waiting: a.waiting + c.waiting, failed: a.failed + c.failed, stale: a.stale + c.stale }), { queued: 0, sent: 0, waiting: 0, failed: 0, stale: 0 }); if (t.queued + t.sent + t.failed + t.stale > 0) log({ event: "scheduler.whatsapp_regua", companies: w.length, ...t }); } catch (e) { log({ event: "scheduler.whatsapp_regua_error", kind: (e as Error).name }); } // régua automática (desligada por padrão: chave do servidor + empresa + régua)

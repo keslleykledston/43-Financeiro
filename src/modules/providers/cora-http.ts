@@ -85,7 +85,7 @@ function fail(raw: Raw): never {
 
 export type InvoiceStatus = "DRAFT" | "OPEN" | "IN_PAYMENT" | "LATE" | "PAID" | "CANCELLED";
 export type Invoice = {
-  id: string; status: InvoiceStatus | string; code: string | null; totalAmountCents: number; totalPaidCents: number; dueDate: string | null;
+  id: string; status: InvoiceStatus | string; code: string | null; /** CPF/CNPJ do cliente (tomador) como a Cora devolve; null se a resposta não traz (a listagem não traz). */ customerDocument: string | null; totalAmountCents: number; totalPaidCents: number; dueDate: string | null;
   customerName: string | null; digitable: string | null; barcode: string | null; pdfUrl: string | null;
   /** Data em que o cliente pagou no banco (AAAA-MM-DD), quando a Cora informa. */
   occurrenceDate: string | null;
@@ -108,6 +108,7 @@ export function normalizeInvoice(raw: unknown): Invoice {
   const o = asObj(raw), terms = asObj(o.payment_terms), slip = asObj(asObj(o.payment_options).bank_slip), cust = asObj(o.customer);
   return {
     id: String(o.id ?? ""), status: String(o.status ?? ""), code: str(o.code),
+    customerDocument: (() => { const d = cust.document; const v = typeof d === "string" ? d : str(asObj(d).identity) ?? str(cust.identity); return v ? docOf(v) : null; })(),
     totalAmountCents: int(o.total_amount ?? o.amount), totalPaidCents: int(o.total_paid),
     dueDate: str(terms.due_date) ?? str(o.due_date), customerName: str(cust.name),
     digitable: str(slip.digitable), barcode: str(slip.barcode), pdfUrl: str(slip.url),

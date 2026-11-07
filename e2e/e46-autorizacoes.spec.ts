@@ -5,9 +5,9 @@ test("A1 — painel único de autorizações: tudo desligado, chaves de emergên
   await expect(page.getByRole("heading", { name: "Autorizações" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Autorizações" })).toBeVisible(); // aba em Configurações
 
-  await test.step("quatro funções, todas desligadas por padrão", async () => {
-    for (const t of ["Boletos reais (Cora)", "E-mail para clientes", "E-mail do sistema (senha e convites)", "WhatsApp para clientes", "Régua automática de WhatsApp"]) await expect(page.getByRole("switch", { name: new RegExp(t.replace(/[()]/g, "\\$&")) })).toBeVisible();
-    await expect(page.getByRole("switch")).toHaveCount(5);
+  await test.step("seis funções, todas desligadas por padrão", async () => {
+    for (const t of ["Faturamento automático", "Boletos reais (Cora)", "E-mail para clientes", "E-mail do sistema (senha e convites)", "WhatsApp para clientes", "Régua automática de WhatsApp"]) await expect(page.getByRole("switch", { name: new RegExp(t.replace(/[()]/g, "\\$&")) })).toBeVisible();
+    await expect(page.getByRole("switch")).toHaveCount(6);
     for (const sw of await page.getByRole("switch").all()) await expect(sw).toHaveAttribute("aria-checked", "false");
   });
 

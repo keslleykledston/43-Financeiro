@@ -7,6 +7,8 @@ import { Invalid, requirePerm } from "@/modules/identity/service";
 import { CHANNELS, DEFAULTS, KINDS, WA_DEFAULTS, ladder, render, toEmailHtml, validateTemplate, SAMPLE_VARS, type Channel, type Kind, type QueueKind, type Vars } from "./templates";
 import { DEFAULT_SETTINGS, WINDOW_REASON, localParts, parseSettings, windowState, type MessagingSettings } from "./window";
 import { addDays } from "./dates";
+import { holidaysFor } from "@/modules/billing/calendar";
+import { runDateFor } from "@/modules/billing/run-date";
 import { resolveProviders } from "@/modules/providers/registry";
 import type { Providers, SendResult } from "@/modules/providers/types";
 import { activeAuthorization, domainsOf, finishLog, flagOn, liveEmailFor, sentToday, type LiveState } from "@/modules/providers/email-live";
@@ -155,8 +157,13 @@ export async function scheduleQueue(db: DB, actorId: string, companyId: string, 
     let created = 0, blocked = 0, semModelo = 0, passado = 0, unblocked = 0;
     const existing = (await x.select().from(messageQueue).where(and(eq(messageQueue.companyId, companyId), ne(messageQueue.status, "cancelado")))).sort((a, b) => a.generation - b.generation); // a geração mais nova vence no mapa
     const have = new Map(existing.map((q) => [`${q.chargeId}|${q.kind}|${q.channel}`, q]));
+    const ownHol = await x.select({ day: holidays.day, name: holidays.name }).from(holidays).where(eq(holidays.companyId, companyId));
+    const hol = holidaysFor(rows.map((r) => r.c.issueDate), new Map(ownHol.map((h) => [h.day, h.name])));
+    const emitted = new Set(((await x.execute(sql`select distinct charge_id from issuance_requests where company_id = ${companyId} and kind = 'boleto' and status = 'emitido'`)) as unknown as { charge_id: string }[]).map((r) => r.charge_id));
     for (const { c } of rows) {
-      for (const step of ladder(c)) {
+      for (const step0 of ladder(c)) {
+        // F1: o aviso de EMISSÃO sai no dia em que o boleto de fato foi emitido (dia útil anterior se a data cair em fim de semana/feriado) e, se a fila nasceu depois, hoje — desde que o boleto tenha sido emitido e o vencimento não tenha passado.
+        const step = step0.kind !== "emissao" ? step0 : { ...step0, date: ((d) => (d < today && c.dueDate >= today && emitted.has(c.id) ? today : d))(runDateFor(step0.date, hol)) };
         const channels: (Channel | "interno")[] = step.kind === "revisao_d15" ? ["interno"] : [...CHANNELS];
         for (const channel of channels) {
           const key = `${c.id}|${step.kind}|${channel}`; const cur = have.get(key);

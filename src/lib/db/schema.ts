@@ -136,6 +136,8 @@ export const customers = pgTable("customers", {
   // O que este cliente RECEBE: boleto e/ou nota fiscal. `issues_boleto = false` tira o cliente da emissão de boletos; `issues_invoice = true` marca que a nota fiscal é esperada (aparece no lote para anexar).
   issuesBoleto: boolean("issues_boleto").notNull().default(true),
   issuesInvoice: boolean("issues_invoice").notNull().default(false),
+  // F1b — cobrança AUTOMÁTICA dos boletos em atraso importados da Cora (régua). Nasce DESLIGADA; a diretoria liga cliente a cliente. Hoje só registra a escolha: nenhuma mensagem sai a partir de boleto importado.
+  overdueCollection: boolean("overdue_collection").notNull().default(false),
   // E26 — ajustes do cliente que NÃO vêm do CRM (a sincronização não toca nestas colunas): endereço (tomador da NFS-e) e textos da nota fiscal e do boleto.
   cep: text("cep"), street: text("street"), streetNumber: text("street_number"), complement: text("complement"), district: text("district"),
   cityName: text("city_name"), cityIbge: text("city_ibge"), uf: text("uf"),
@@ -329,8 +331,13 @@ export const billingBatches = pgTable("billing_batches", {
   approvedBy: uuid("approved_by").references(() => users.id),
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   reopenReason: text("reopen_reason"),
+  // F1 (faturamento automático): lote aprovado COM «agendar emissão» é emitido pelo agendador na data certa, em nome de quem aprovou. `autoDoneAt` = emissão concluída e fila de avisos criada.
+  autoIssue: boolean("auto_issue").notNull().default(false),
+  autoRequestedAt: timestamp("auto_requested_at", { withTimezone: true }), // as solicitações de boleto do lote foram criadas pelo agendador (uma única vez: cancelar um pedido de propósito não o recria)
+  autoDoneAt: timestamp("auto_done_at", { withTimezone: true }),
 }, (t) => [
   unique("billing_batches_company_id_uq").on(t.companyId, t.id),
+  check("billing_batches_auto_chk", sql`(${t.autoDoneAt} is null and ${t.autoRequestedAt} is null) or (${t.autoIssue} and ${t.status} = 'aprovado')`),
   uniqueIndex("billing_batches_one_per_date_uq").on(t.companyId, t.issueDate).where(sql`${t.status} <> 'cancelado'`),
   check("billing_batches_status_chk", sql`${t.status} in ('rascunho', 'aprovado', 'cancelado')`),
   check("billing_batches_approval_chk", sql`(${t.status} = 'aprovado') = (${t.approvedBy} is not null and ${t.approvedAt} is not null)`),
@@ -1623,4 +1630,46 @@ export const chargeInvoices = pgTable("charge_invoices", {
   check("charge_invoices_text_chk", sql`${t.number} ~ '^[0-9A-Za-z][0-9A-Za-z./-]{0,29}$' and (${t.verificationCode} is null or ${t.verificationCode} ~ '^[0-9A-Za-z./_-]{1,80}$')`),
   check("charge_invoices_pdf_chk", sql`encode(substring(${t.pdf} from 1 for 5), 'escape') = '%PDF-' and ${t.pdfSha256} = encode(sha256(${t.pdf}), 'hex')`), // é um PDF e o hash confere (também para inserção direta)
   check("charge_invoices_closed_chk", sql`(${t.status} = 'ativa') = (${t.closedAt} is null)`),
+]);
+
+// F1 — faturamento automático por empresa: ligado pela diretoria (quem liga e quando ficam gravados). Gera a prévia dos lotes sozinho antes da data e, nos lotes aprovados com «agendar», emite no dia certo.
+export const billingAutomation = pgTable("billing_automation", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  enabled: boolean("enabled").notNull().default(false),
+  enabledBy: uuid("enabled_by").references(() => users.id),
+  enabledAt: timestamp("enabled_at", { withTimezone: true }),
+  leadDays: integer("lead_days").notNull().default(2), // dias ÚTEIS de antecedência para gerar a prévia
+}, (t) => [
+  unique("billing_automation_company_uq").on(t.companyId),
+  check("billing_automation_on_chk", sql`not ${t.enabled} or (${t.enabledBy} is not null and ${t.enabledAt} is not null)`),
+  check("billing_automation_lead_chk", sql`${t.leadDays} between 0 and 5`),
+]);
+
+// F1b — boletos que EXISTEM NA CORA (de 01/01/2026 em diante, em qualquer situação), trazidos para a plataforma só para leitura/acompanhamento: espelho, não cobrança.
+// Não vira cobrança (`charges`), não entra em lote, não emite nada e NÃO alimenta a fila de mensagens. Os que a própria plataforma emitiu apontam para a cobrança (`chargeId`).
+export const coraInvoices = pgTable("cora_invoices", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  environment: text("environment").notNull().default("producao"),
+  coraId: text("cora_id").notNull(),
+  customerId: uuid("customer_id").notNull(),
+  code: text("code"),
+  dueDate: date("due_date", { mode: "string" }).notNull(),
+  totalCents: integer("total_cents").notNull(),
+  paidCents: integer("paid_cents").notNull().default(0),
+  status: text("status").notNull(), // OPEN | LATE | IN_PAYMENT | DRAFT | PAID | CANCELLED (como a Cora informa)
+  paidOn: date("paid_on", { mode: "string" }),
+  digitable: text("digitable"),
+  pdfUrl: text("pdf_url"),
+  chargeId: uuid("charge_id"), // preenchido quando o boleto foi emitido por esta plataforma
+  syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("cora_invoices_ref_uq").on(t.companyId, t.environment, t.coraId),
+  index("cora_invoices_customer_idx").on(t.companyId, t.customerId, t.status),
+  index("cora_invoices_due_idx").on(t.companyId, t.status, t.dueDate),
+  foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id], name: "cora_invoices_customer_fk" }),
+  check("cora_invoices_status_chk", sql`${t.status} in ('OPEN', 'LATE', 'IN_PAYMENT', 'DRAFT', 'PAID', 'CANCELLED')`),
+  check("cora_invoices_env_chk", sql`${t.environment} in ('producao', 'homologacao')`),
+  check("cora_invoices_amount_chk", sql`${t.totalCents} >= 0 and ${t.paidCents} >= 0`),
 ]);

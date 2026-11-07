@@ -1,10 +1,11 @@
 import { and, eq } from "drizzle-orm";
 import type { DB } from "@/lib/db";
-import { auditLog, emailAccounts, issuanceSettings, whatsappCompanySettings } from "@/lib/db/schema";
+import { auditLog, billingAutomation, emailAccounts, issuanceSettings, whatsappCompanySettings } from "@/lib/db/schema";
 import { Invalid, activeRole, requirePerm } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
 import { LIVE_CONFIRM_PHRASE, LiveNotAvailable, prodEmissionOn } from "@/modules/providers/registry";
 import { cancelPendingBoletos, openBoletoRequests, saveIssuanceSettings } from "@/modules/issuance/service";
+import { setAutomation } from "@/modules/billing/automation";
 import { activeAuthorization, flagOn, sentToday } from "@/modules/providers/email-live";
 import { authorizeEmailLive, revokeEmailLive } from "@/modules/providers/email-auth";
 import { ALLOW_ALL } from "@/modules/providers/smtp";
@@ -19,7 +20,7 @@ import { CAPS } from "@/modules/whatsapp/domain";
  * Cada chave delega ao serviço que já existia (mesmas validações, mesmos registros); as travas que não são «autorização» continuam: chave do servidor (parada de emergência), limites diários,
  * conferência de boleto duplicado na Cora e consentimento por contato no WhatsApp.
  */
-export type Fn = "boletos" | "email" | "sistema" | "whatsapp" | "regua";
+export type Fn = "faturamento" | "boletos" | "email" | "sistema" | "whatsapp" | "regua";
 export const REGUA_KINDS = ["d_menos_3", "d0", "d_mais_3", "d_mais_7"] as const;
 export type PanelRow = {
   fn: Fn; on: boolean; canChange: boolean;
@@ -33,7 +34,7 @@ export type PanelRow = {
 };
 export type Panel = { rows: Record<Fn, PanelRow>; role: string };
 
-const FN_PERM = { boletos: "issuance.manage", email: "providers.credentials", sistema: "providers.credentials", whatsapp: "whatsapp.authorize", regua: "whatsapp.authorize" } as const;
+const FN_PERM = { faturamento: "issuance.manage", boletos: "issuance.manage", email: "providers.credentials", sistema: "providers.credentials", whatsapp: "whatsapp.authorize", regua: "whatsapp.authorize" } as const;
 const audit = (x: DB, companyId: string, actorId: string, fn: Fn, on: boolean, extra: Record<string, unknown> = {}) => x.insert(auditLog).values({ companyId, actorId, action: "authorization.panel", detail: { function: fn, on, ...extra } });
 /** Referência da autorização: sem nome de pessoa (quem ligou fica no `authorized_by` e na auditoria). */
 const stamp = () => `Painel de autorizações — ligado em ${new Date().toLocaleDateString("pt-BR", { timeZone: "America/Manaus" })}`;
@@ -46,7 +47,13 @@ export async function getPanel(db: DB, actorId: string, companyId: string, env: 
   const mail = await activeAuthorization(db, companyId);
   const [wa] = await db.select().from(whatsappCompanySettings).where(eq(whatsappCompanySettings.companyId, companyId));
   const prod = iss?.boletoProvider === "cora_producao";
+  const [fat] = await db.select().from(billingAutomation).where(eq(billingAutomation.companyId, companyId));
   const rows: Record<Fn, PanelRow> = {
+    faturamento: {
+      fn: "faturamento", serverOff: false, on: fat?.enabled === true, canChange: can(role, FN_PERM.faturamento), at: fat?.enabled ? fat.enabledAt ?? null : null,
+      blocked: null,
+      detail: { leadDays: fat?.leadDays ?? 2 },
+    },
     boletos: {
       fn: "boletos", serverOff: !prodEmissionOn(env), on: prod && iss?.paused === false, canChange: can(role, FN_PERM.boletos), at: prod ? iss?.liveAuthorizedAt ?? null : null,
       blocked: prodEmissionOn(env) ? null : "A emissão em produção está desligada neste servidor (chave de emergência).",
@@ -78,6 +85,11 @@ export async function getPanel(db: DB, actorId: string, companyId: string, env: 
 
 const asLimit = (v: unknown, min: number, max: number, what: string) => { const n = Number(v); if (!Number.isInteger(n) || n < min || n > max) throw new Invalid(`${what}: número de ${min} a ${max}`); return n; };
 
+/** FATURAMENTO AUTOMÁTICO. Ligar = o agendador gera as prévias dos lotes sozinho e emite, no dia certo, os lotes que a gerência/diretoria aprovar com «Aprovar e agendar». Nunca aprova nada. Desligar = tudo volta ao modo manual. */
+export async function setFaturamento(db: DB, actorId: string, companyId: string, on: boolean) {
+  await setAutomation(db, actorId, companyId, on); // exige issuance.manage e audita (billing.auto.toggled)
+  await audit(db, companyId, actorId, "faturamento", on);
+}
 /** BOLETOS REAIS. Ligar = Cora de PRODUÇÃO armada (em modo cuidadoso: poucos por dia) e emissão liberada; desligar = PAUSAR a emissão (nada é emitido; o que já existe não muda). */
 export async function setBoletos(db: DB, actorId: string, companyId: string, on: boolean, o: { canary?: boolean } = {}, env: Record<string, string | undefined> = process.env) {
   await requirePerm(db, actorId, companyId, FN_PERM.boletos);

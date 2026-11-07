@@ -41,7 +41,7 @@ describe.skipIf(!enabled)("A1 — painel único de autorizações (DB de teste)"
 
   it("tudo nasce desligado; gerente VÊ mas não muda; outra empresa não mexe", async () => {
     const p = await getPanel(db, gerA, A, ALL);
-    expect(Object.values(p.rows).map((r) => r.on)).toEqual([false, false, false, false, false]);
+    expect(Object.values(p.rows).map((r) => r.on)).toEqual([false, false, false, false, false, false]);
     expect(Object.values(p.rows).every((r) => !r.canChange)).toBe(true);
     expect((await getPanel(db, dirA, A, ALL)).rows.email.canChange).toBe(true);
     await expect(setEmail(db, gerA, A, true, {}, ALL)).rejects.toThrow(Forbidden);

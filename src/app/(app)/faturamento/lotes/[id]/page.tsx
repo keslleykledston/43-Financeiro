@@ -5,6 +5,8 @@ import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
 import { getBatch } from "@/modules/billing/batches";
+import { batchProgress, getAutomation, runDateOf } from "@/modules/billing/automation";
+import { paymentSyncStatus } from "@/modules/issuance/sync-status";
 import { invoicesForCharges } from "@/modules/invoices/service";
 import { DUPLICATE_ALERT, duplicateAlerts } from "@/modules/issuance/service";
 import { getIssuanceSettings } from "@/modules/issuance/service";
@@ -15,6 +17,7 @@ import { buttonClass, inputClass } from "@/components/k3g/button";
 import { formatDateTime } from "@/lib/format";
 import { approveAction, attachInvoiceAction, cancelAction, refreshAction, removeInvoiceAction, reopenAction } from "../actions";
 import { requestBatchIssuanceAction } from "../../emissoes/actions";
+import { processAction as processQueueAction } from "../../../mensagens/actions";
 import { STATUS_LABEL, STATUS_TONE } from "../status";
 
 const br = (d: string) => d.split("-").reverse().join("/");
@@ -31,9 +34,15 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
   const pendentes = r.charges.filter((c) => c.jointInvoice && !notas.has(c.id)).length;
   const semNota = r.charges.filter((c) => !c.jointInvoice && c.customerIssuesInvoice && !notas.has(c.id)).length; // cliente «emite nota fiscal» sem exigência de NF junto: a nota é esperada, mas o e-mail não espera
   const approve = can(role, "billing.approve"), write = can(role, "billing.write");
-  const prov = can(role, "issuance.read") ? (await getIssuanceSettings(db, ctx.user.id, ctx.current.id)).boletoProvider : "simulado";
+  const iss = can(role, "issuance.read") ? await getIssuanceSettings(db, ctx.user.id, ctx.current.id) : null;
+  const prov = iss?.boletoProvider ?? "simulado";
+  const auto = can(role, "billing.read") ? await getAutomation(db, ctx.user.id, ctx.current.id) : null;
+  const progress = b.autoIssue ? await batchProgress(db, ctx.user.id, ctx.current.id, b.id) : null;
+  const sync = b.status === "aprovado" && can(role, "billing.read") ? await paymentSyncStatus(db, ctx.user.id, ctx.current.id) : null;
+  const runDay = await runDateOf(db, ctx.user.id, ctx.current.id, b.issueDate);
+  const canSchedule = approve && can(role, "issuance.request") && can(role, "issuance.run") && auto?.enabled === true;
   const stage = prov === "cora_homologacao", prod = prov === "cora_producao"; // boletos desta empresa: Cora de testes ou Cora de PRODUÇÃO (reais)
-  const OK: Record<string, string> = { aprovado: "Lote aprovado. Nada foi emitido: aprovar não emite; a emissão é solicitada à parte, em Emissões.", reaberto: "Lote reaberto: volta a ser prévia e precisa de nova aprovação.", atualizado: "Prévia atualizada.", nota: "Nota fiscal anexada. O e-mail desta cobrança passa a levar boleto e nota juntos.", nota_trocada: "Nota fiscal substituída (a anterior fica no histórico).", nota_removida: "Nota fiscal removida desta cobrança." };
+  const OK: Record<string, string> = { agendado: "Lote aprovado e emissão AGENDADA: os boletos saem sozinhos no dia e hora indicados abaixo.", aprovado: "Lote aprovado. Nada foi emitido: aprovar não emite; a emissão é solicitada à parte, em Emissões.", reaberto: "Lote reaberto: volta a ser prévia e precisa de nova aprovação.", atualizado: "Prévia atualizada.", nota: "Nota fiscal anexada. O e-mail desta cobrança passa a levar boleto e nota juntos.", nota_trocada: "Nota fiscal substituída (a anterior fica no histórico).", nota_removida: "Nota fiscal removida desta cobrança." };
 
   return (
     <div className="space-y-5">
@@ -120,13 +129,38 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
         )}
       </SectionCard>
 
+      {progress && (
+        <SectionCard title={auto?.enabled ? "Emissão agendada" : "Emissão agendada — SUSPENSA"}>
+          <ol className="space-y-1.5 text-sm">
+            <li>✔ Prévia aprovada{b.approvedAt ? ` em ${formatDateTime(b.approvedAt)}` : ""}</li>
+            <li>{progress.requests.emitido ? "✔" : "○"} Boletos: <strong>{progress.requests.emitido ?? 0} emitido(s)</strong>{progress.open > 0 ? `, ${progress.open} aguardando` : ""}{progress.requests.falhou ? `, ${progress.requests.falhou} com alerta` : ""} {progress.done ? "" : <span className="text-muted-foreground">· saem em {br(progress.runDate)} às 09:00</span>}</li>
+            <li>{progress.done ? "✔" : "○"} Fila de e-mails {progress.done ? "criada" : "nasce quando a emissão terminar"}{progress.done ? <> · <strong>{progress.pendingMail}</strong> aguardando envio, {progress.sentMail} enviado(s)</> : ""}</li>
+          </ol>
+          {progress.done && progress.pendingMail > 0 && can(role, "messages.write") && (
+            <form action={processQueueAction} className="mt-3"><button className={buttonClass("outline")}>Enviar os e-mails agora ({progress.pendingMail})</button><p className="mt-1 text-xs text-muted-foreground">Envia só o que está autorizado em Configurações → Autorizações, dentro dos limites do dia.</p></form>
+          )}
+        </SectionCard>
+      )}
+      {sync && (
+        <Callout tone={sync.active && !sync.stale ? "info" : "warning"} role="status">
+          <strong>Conferência de pagamentos na Cora:</strong>{" "}
+          {!sync.active ? sync.reason : <>{sync.lastAt ? `última às ${formatDateTime(sync.lastAt)} (${sync.checked} boleto(s) conferido(s), ${sync.paid} pago(s))` : "ainda não rodou"}. {sync.stale ? <strong>Parada há mais de 30 minutos: avise o suporte.</strong> : "Roda sozinha a cada 10 minutos."} {sync.webhook ? "Aviso instantâneo da Cora: registrado." : "Aviso instantâneo da Cora: não registrado (vale a conferência a cada 10 minutos)."}</>}
+        </Callout>
+      )}
+
       <SectionCard title="Ações">
         <div className="flex flex-wrap items-start gap-3">
           {b.status === "rascunho" && write && (
             <form action={refreshAction}><input type="hidden" name="id" value={b.id} /><input type="hidden" name="issueDate" value={b.issueDate} /><button className={buttonClass("outline")}>Atualizar prévia</button></form>
           )}
           {b.status === "rascunho" && approve && r.charges.length > 0 && (
-            <form action={approveAction}><input type="hidden" name="id" value={b.id} /><input type="hidden" name="hash" value={r.hash} /><button className={buttonClass("success")} disabled={stale.any}>Aprovar lote</button></form>
+            <span className="flex flex-wrap items-start gap-3">
+              {canSchedule && (
+                <form action={approveAction}><input type="hidden" name="id" value={b.id} /><input type="hidden" name="hash" value={r.hash} /><input type="hidden" name="schedule" value="1" />
+                  <button className={buttonClass("success")} disabled={stale.any}>Aprovar e agendar emissão</button></form>
+              )}
+              <form action={approveAction}><input type="hidden" name="id" value={b.id} /><input type="hidden" name="hash" value={r.hash} /><button className={buttonClass(canSchedule ? "outline" : "success")} disabled={stale.any}>{canSchedule ? "Só aprovar (emissão manual)" : "Aprovar lote"}</button></form>
+            </span>
           )}
           {b.status === "rascunho" && write && (
             <form action={cancelAction}><input type="hidden" name="id" value={b.id} /><button className={buttonClass("danger")}>Cancelar lote</button></form>
@@ -141,7 +175,7 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
         </div>
         {b.status === "aprovado" && can(role, "issuance.request") && (
           <div className="mt-4 border-t border-border pt-4">
-            <p className="mb-2 text-sm font-medium">{prod ? "Emissão (boleto REAL na Cora de produção; NFS-e simulada)" : stage ? "Emissão (boleto na Cora de testes; NFS-e simulada)" : "Emissão (simulada)"}</p>
+            <p className="mb-2 text-sm font-medium">{b.autoIssue ? (auto?.enabled ? "Emissão manual (o agendador já cuida deste lote; use só se precisar)" : "Emissão manual — o faturamento automático está DESLIGADO: este lote não será emitido sozinho (emita aqui ou religue em Autorizações)") : null}{b.autoIssue ? <br /> : null}{prod ? "Emissão (boleto REAL na Cora de produção; NFS-e simulada)" : stage ? "Emissão (boleto na Cora de testes; NFS-e simulada)" : "Emissão (simulada)"}</p>
             <div className="flex flex-wrap gap-2">
               {(["boleto", "nfse"] as const).map((k) => (
                 <form key={k} action={requestBatchIssuanceAction}><input type="hidden" name="batchId" value={b.id} /><input type="hidden" name="kind" value={k} /><button className={buttonClass("outline")}>{k === "boleto" ? "Solicitar boletos" : "Solicitar NFS-e"}</button></form>
@@ -156,6 +190,10 @@ export default async function Lote({ params, searchParams }: { params: Promise<{
           </div>
         )}
         {b.status === "rascunho" && !approve && <p className="mt-2 text-sm text-muted-foreground">Gerente ou diretoria aprovam o lote.</p>}
+        {b.status === "rascunho" && canSchedule && (() => { const run = runDay; return <p className="mt-2 text-sm">«Aprovar e agendar» emite os <strong>{r.charges.length} boletos</strong> (<Money cents={r.totalCents} />) {prod ? <strong>REAIS, na Cora de produção</strong> : stage ? "na Cora de testes" : "no modo simulado"} em <strong>{br(run)} às 09:00</strong> (se cair em fim de semana ou feriado, no dia útil anterior) e prepara os e-mails. O envio do e-mail continua sendo um clique seu.</p>; })()}
+        {b.status === "rascunho" && canSchedule && iss && (iss.paused || (prov === "cora_producao" && iss.liveCanary && r.charges.length > 3) || iss.dailyLimit < r.charges.length) && (
+          <Callout tone="warning" role="alert">{iss.paused ? <>A emissão desta empresa está <strong>pausada</strong>: nada sai no dia até você ligar os boletos em Autorizações.</> : <>O limite de emissões por dia ({prov === "cora_producao" && iss.liveCanary ? `modo cuidadoso: ${Math.min(3, iss.dailyLimit)}` : iss.dailyLimit}) é <strong>menor que as {r.charges.length} cobranças</strong> deste lote: o restante sai nos dias seguintes. Ajuste em Autorizações para emitir tudo no prazo.</>}</Callout>
+        )}
         {b.status === "rascunho" && approve && <p className="mt-2 text-xs text-muted-foreground">Quem gerou a prévia não a aprova (exige outro gerente ou a diretoria). Você aprova exatamente o conteúdo exibido acima.</p>}
       </SectionCard>
     </div>

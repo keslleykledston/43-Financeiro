@@ -27,7 +27,7 @@ export default async function ContasAReceber({ searchParams }: { searchParams: P
   return (
     <div className="space-y-5">
       <PageHeader title="Contas a receber" description={`${ctx.current.name} · cobranças aprovadas, saldo e baixa manual.`}
-        actions={can(role, "receivables.export") ? <a href={`/contas-a-receber/exportar?${qs}`} className={buttonClass("outline")}>Exportar CSV</a> : undefined} />
+        actions={<span className="flex gap-2"><AppLink href="/contas-a-receber/cora" className={buttonClass("outline")}>Boletos da Cora</AppLink>{can(role, "receivables.export") ? <a href={`/contas-a-receber/exportar?${qs}`} className={buttonClass("outline")}>Exportar CSV</a> : null}</span>} />
       <Callout tone="info">Baixa manual: registrar pagamento aqui <strong>não movimenta dinheiro</strong> nem emite nada. A conciliação automática com o extrato é uma fase futura.</Callout>
 
       <section aria-label="Resumo" className="grid grid-cols-2 gap-3 lg:grid-cols-4">

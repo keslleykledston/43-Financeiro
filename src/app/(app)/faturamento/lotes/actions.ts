@@ -24,8 +24,8 @@ function back(id: string, err = "", ok = "") { redirect(`/faturamento/lotes/${id
 
 export async function approveAction(fd: FormData) {
   const id = uuid(fd.get("id")); let err = "";
-  try { const c = await ctx(); await approveBatch(db, c.userId, c.companyId, id, String(fd.get("hash") ?? "")); } catch (e) { err = known(e); }
-  revalidatePath("/faturamento/lotes"); back(id, err, "aprovado");
+  try { const c = await ctx(); await approveBatch(db, c.userId, c.companyId, id, String(fd.get("hash") ?? ""), { schedule: fd.get("schedule") === "1" }); } catch (e) { err = known(e); }
+  revalidatePath("/faturamento/lotes"); back(id, err, fd.get("schedule") === "1" ? "agendado" : "aprovado");
 }
 export async function reopenAction(fd: FormData) {
   const id = uuid(fd.get("id")); let err = "";

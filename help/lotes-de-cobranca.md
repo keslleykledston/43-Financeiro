@@ -16,6 +16,14 @@ Todas as cobranças previstas para **uma data de emissão** (25, 1, 8 ou 15, con
 5. Depois de aprovado, o lote não muda. Se um contrato mudar, o lote avisa; use **Reabrir para revalidar** (com motivo), atualize a prévia e aprove de novo.
 6. **Cancelar lote** só vale para prévia; libera a data para uma nova prévia.
 
+## Aprovar e agendar (faturamento automático)
+Com o **Faturamento automático** ligado (Configurações → Autorizações), a prévia aparece **sozinha** poucos dias antes da data. Em vez de «Aprovar lote» + solicitar + processar + confirmar, use **Aprovar e agendar emissão**: é a sua autorização.
+- No dia da emissão, **às 09:00** (dia útil anterior se cair em fim de semana ou feriado), o sistema emite os boletos em seu nome, respeitando pausa, limite diário e modo cuidadoso.
+- Quando a emissão termina, a **fila de e-mails** é criada. O botão **Enviar os e-mails agora** aparece na própria página do lote (o envio continua sendo um clique seu).
+- A página mostra o andamento: aprovado → boletos emitidos → fila de e-mails, e a **conferência de pagamentos na Cora**.
+- Se o boleto for **real**, só vale lote aprovado **depois** de a empresa ser armada. Aprovou antes? Aprove de novo.
+- Quer parar? **Reabrir para revalidar** desfaz o agendamento (só antes de haver boletos emitidos).
+
 ## Dúvidas comuns
 - *"Nenhuma cobrança prevista para esta data"*: não há contrato ativo de cliente ativo com emissão nesse dia.
 - *"Todas as cobranças desta data já estão em lotes aprovados"*: o contrato mudou de data de emissão, mas a cobrança daquela competência já foi aprovada em outro lote. Reabra o lote antigo se precisar refazer.

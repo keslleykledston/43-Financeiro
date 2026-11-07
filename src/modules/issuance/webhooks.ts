@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { refreshOneCoraInvoice } from "@/modules/receivables/cora-invoices";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
 import { auditLog, coraWebhookEvents, coraWebhooks, issuanceRequests, issuanceSettings } from "@/lib/db/schema";
@@ -121,7 +122,10 @@ export async function processWebhookEvents(db: DB, now = new Date(), limit = 50)
     try {
       const [req] = await db.select({ id: issuanceRequests.id }).from(issuanceRequests)
         .where(and(eq(issuanceRequests.companyId, ev.companyId), eq(issuanceRequests.externalRef, ev.resourceId), eq(issuanceRequests.kind, "boleto"), eq(issuanceRequests.mode, MODE_OF[ev.environment as CoraEnvironment])));
-      if (!req) { await finish(ev.id, "ignorado", "boleto_desconhecido"); sum.ignored++; continue; }
+      if (!req) { // não é boleto emitido por nós: se estiver no espelho dos boletos da Cora (produção), atualiza só esse
+        if (ev.environment === "producao" && (await refreshOneCoraInvoice(db, ev.companyId, ev.resourceId))) { await finish(ev.id, "processado", "espelho_atualizado"); sum.processed++; continue; }
+        await finish(ev.id, "ignorado", "boleto_desconhecido"); sum.ignored++; continue;
+      }
       const o = await syncCore(db, ev.companyId, sys, now, { requestId: req.id });
       if (o.skipped || o.failed > 0) throw new Error("consulta_indisponivel"); // Cora limitou/credencial/erro: tenta de novo
       await finish(ev.id, "processado", o.settled ? "baixado" : o.paid ? "pago" : o.cancelled ? "cancelado" : "sem_mudanca"); sum.processed++;

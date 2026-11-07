@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { applyDueAmendments } from "@/modules/contracts/service";
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
-import { auditLog, billingBatches, charges, customers } from "@/lib/db/schema";
+import { auditLog, billingAutomation, billingBatches, charges, customers } from "@/lib/db/schema";
+import { can } from "@/modules/identity/permissions";
 import { isIsoDate } from "@/lib/iso-date";
 import { centsFromNumeric, centsFromSignedNumeric, numericFromCents, numericFromSignedCents } from "@/lib/money";
 import { Forbidden, Invalid, activeRole, requirePerm } from "@/modules/identity/service";
@@ -65,11 +66,15 @@ async function lockSources(x: DB, companyId: string) {
   await x.execute(sql`lock table holidays in share mode`);
 }
 const lockCompany = (x: DB, companyId: string) => x.execute(sql`select pg_advisory_xact_lock(hashtext(${"billing-batch:" + companyId}))`);
-const audit = (x: DB, companyId: string, actorId: string, action: string, detail: Record<string, unknown>) => x.insert(auditLog).values({ companyId, actorId, action, detail });
+const audit = (x: DB, companyId: string, actorId: string | null, action: string, detail: Record<string, unknown>) => x.insert(auditLog).values({ companyId, actorId, action, detail });
 
 /** Gera ou atualiza a PRÉVIA do lote de uma data de emissão. Idempotente: reexecutar não duplica cobranças. */
 export async function generateBatch(db: DB, actorId: string, companyId: string, issueDate: string) {
   await requirePerm(db, actorId, companyId, "billing.write");
+  return generateBatchCore(db, actorId, companyId, issueDate);
+}
+/** Mesmo trabalho, SEM checagem de papel: só o agendador do faturamento automático chama (ator nulo = «gerada pelo sistema»; então qualquer gerente/diretoria pode aprová-la). */
+export async function generateBatchCore(db: DB, actorId: string | null, companyId: string, issueDate: string) {
   if (!isoDate(issueDate)) throw new Invalid("Data inválida");
   await applyDueAmendments(db, companyId); // aditivos agendados que já chegaram na data valem antes de calcular a prévia (o agendador também faz isso)
   return db.transaction(async (tx) => {
@@ -149,9 +154,11 @@ export async function getBatch(db: DB, actorId: string, companyId: string, id: s
 }
 
 /** Aprova o lote que o usuário viu (`expectedHash`). Quem gerou a prévia não aprova (exceto diretoria). */
-export async function approveBatch(db: DB, actorId: string, companyId: string, batchId: string, expectedHash: string) {
+export async function approveBatch(db: DB, actorId: string, companyId: string, batchId: string, expectedHash: string, opts: { schedule?: boolean } = {}) {
   await requirePerm(db, actorId, companyId, "billing.approve");
   const role = await activeRole(db, actorId, companyId);
+  // «Aprovar e agendar»: a emissão roda depois, em nome de QUEM APROVOU, então ele precisa poder solicitar e processar emissões.
+  if (opts.schedule && !(role && can(role, "issuance.request") && can(role, "issuance.run"))) throw new Forbidden("Seu papel não pode agendar a emissão (exige gerente ou diretoria)");
   await db.transaction(async (tx) => {
     const x = tx as unknown as DB;
     await lockCompany(x, companyId);
@@ -166,9 +173,13 @@ export async function approveBatch(db: DB, actorId: string, companyId: string, b
     const live = await eligible(x, companyId, b.issueDate);
     if (diff(cs, live.items).any) throw new Invalid("Os contratos mudaram desde a prévia. Atualize a prévia antes de aprovar.");
     const now = new Date();
-    await x.update(billingBatches).set({ status: "aprovado", approvedBy: actorId, approvedAt: now, updatedAt: now }).where(and(eq(billingBatches.id, b.id), eq(billingBatches.companyId, companyId)));
+    if (opts.schedule) {
+      const [au] = await x.select({ on: billingAutomation.enabled }).from(billingAutomation).where(eq(billingAutomation.companyId, companyId));
+      if (!au?.on) throw new Invalid("O faturamento automático não está ligado nesta empresa (Configurações → Autorizações)");
+    }
+    await x.update(billingBatches).set({ status: "aprovado", approvedBy: actorId, approvedAt: now, autoIssue: opts.schedule === true, updatedAt: now }).where(and(eq(billingBatches.id, b.id), eq(billingBatches.companyId, companyId)));
     await x.update(charges).set({ status: "aprovada", updatedAt: now }).where(and(eq(charges.companyId, companyId), eq(charges.batchId, b.id)));
-    await audit(x, companyId, actorId, "billing.batch.approved", { batchId: b.id, issueDate: b.issueDate, count: cs.length });
+    await audit(x, companyId, actorId, "billing.batch.approved", { batchId: b.id, issueDate: b.issueDate, count: cs.length, ...(opts.schedule ? { scheduled: true } : {}) });
   });
 }
 
@@ -190,7 +201,7 @@ export async function reopenBatch(db: DB, actorId: string, companyId: string, ba
     if (iss.n > 0) throw new Invalid("Este lote tem emissões em andamento ou concluídas (boleto/NFS-e) e não pode ser reaberto");
     await x.execute(sql`update issuance_requests r set status = 'cancelado', updated_at = now() from charges c where c.company_id = r.company_id and c.id = r.charge_id and c.company_id = ${companyId} and c.batch_id = ${b.id} and r.status in ('pendente', 'falhou')`); // solicitações ainda não enviadas deixam de valer
     const now = new Date();
-    await x.update(billingBatches).set({ status: "rascunho", approvedBy: null, approvedAt: null, reopenReason: why, generatedBy: actorId, updatedAt: now }).where(and(eq(billingBatches.id, b.id), eq(billingBatches.companyId, companyId)));
+    await x.update(billingBatches).set({ status: "rascunho", approvedBy: null, approvedAt: null, autoIssue: false, autoRequestedAt: null, autoDoneAt: null, reopenReason: why, generatedBy: actorId, updatedAt: now }).where(and(eq(billingBatches.id, b.id), eq(billingBatches.companyId, companyId)));
     const ids = (await x.update(charges).set({ status: "previa", updatedAt: now }).where(and(eq(charges.companyId, companyId), eq(charges.batchId, b.id))).returning({ id: charges.id })).map((r) => r.id);
     const queueCancelled = await cancelQueueForCharges(x, companyId, ids); // mensagens ainda não processadas deixam de valer
     await audit(x, companyId, actorId, "billing.batch.reopened", { batchId: b.id, issueDate: b.issueDate, queueCancelled });

@@ -2,6 +2,8 @@ import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { activeRole } from "@/modules/identity/service";
 import { can } from "@/modules/identity/permissions";
+import { paymentSyncStatus } from "@/modules/issuance/sync-status";
+import { formatDateTime } from "@/lib/format";
 import { getPanel, REGUA_KINDS, type Fn, type PanelRow } from "@/modules/authorizations/panel";
 import { Callout, PageHeader, StatusPill } from "@/components/k3g/primitives";
 import { SettingsTabs } from "@/components/k3g/settings-tabs";
@@ -14,7 +16,7 @@ import { cancelPendingAction, canaryAction, saveLimitAction, toggleAction } from
 const when = (d: Date | null) => (d ? d.toLocaleString("pt-BR", { timeZone: "America/Manaus", dateStyle: "short", timeStyle: "short" }) : null);
 const KIND_LABEL: Record<string, string> = { d_menos_3: "3 dias antes", d0: "No vencimento", d_mais_3: "3 dias depois", d_mais_7: "7 dias depois" };
 const OK: Record<string, string> = {
-  "boletos:ligado": "Boletos reais LIGADOS. Os boletos só nascem quando um lote aprovado tem a emissão solicitada e processada, e começam em modo cuidadoso.", "boletos:desligado": "Emissão de boletos PAUSADA: nada novo será emitido.", "boletos:salvo": "Modo dos boletos atualizado.", "boletos:pendentes": "Solicitações pendentes canceladas. Nada foi emitido. Agora ligue os boletos reais e solicite de novo no lote.",
+  "faturamento:ligado": "Faturamento automático LIGADO. O sistema gera as prévias sozinho; você aprova com «Aprovar e agendar» e a emissão sai no dia certo.", "faturamento:desligado": "Faturamento automático DESLIGADO: voltou ao modo manual (lotes já agendados deixam de ser emitidos sozinhos).", "boletos:ligado": "Boletos reais LIGADOS. Os boletos só nascem quando um lote aprovado tem a emissão solicitada e processada, e começam em modo cuidadoso.", "boletos:desligado": "Emissão de boletos PAUSADA: nada novo será emitido.", "boletos:salvo": "Modo dos boletos atualizado.", "boletos:pendentes": "Solicitações pendentes canceladas. Nada foi emitido. Agora ligue os boletos reais e solicite de novo no lote.",
   "email:ligado": "E-mail a clientes LIGADO.", "email:desligado": "E-mail a clientes DESLIGADO: nada mais sai.", "email:salvo": "Limite de e-mails salvo.",
   "sistema:ligado": "E-mail do sistema LIGADO (senha e convites).", "sistema:desligado": "E-mail do sistema DESLIGADO: senha e convites só por link manual.",
   "whatsapp:ligado": "WhatsApp LIGADO.", "whatsapp:desligado": "WhatsApp DESLIGADO (a régua também).", "whatsapp:salvo": "Limite de WhatsApp salvo.",
@@ -22,6 +24,7 @@ const OK: Record<string, string> = {
 };
 
 const COPY: Record<Fn, { title: string; what: string; on: string; off: string }> = {
+  faturamento: { title: "Faturamento automático", what: "O sistema prepara a prévia de cada lote sozinho e, quando você usar «Aprovar e agendar», emite os boletos no dia certo (09:00, dia útil). Nunca aprova nada por você.", on: "Ligado — prévias e emissão no prazo", off: "Desligado — tudo é manual" },
   boletos: { title: "Boletos reais (Cora)", what: "Emitir boletos de verdade na Cora, que cobram o cliente.", on: "Ligado — emissão liberada", off: "Desligado — nada é emitido" },
   email: { title: "E-mail para clientes", what: "Enviar cobranças e lembretes (com o boleto e a nota fiscal) aos contatos financeiros dos clientes.", on: "Ligado — envia aos contatos financeiros", off: "Desligado — nenhum e-mail sai" },
   sistema: { title: "E-mail do sistema (senha e convites)", what: "Enviar a redefinição de senha («Esqueci minha senha») e os convites de acesso. Não envia cobrança e escreve a uma pessoa por vez. Independe do e-mail para clientes.", on: "Ligado — senha e convites por e-mail", off: "Desligado — só link manual" },
@@ -34,7 +37,8 @@ export default async function Autorizacoes({ searchParams }: { searchParams: Pro
   const role = ctx.current ? await activeRole(db, ctx.user.id, ctx.current.id) : null;
   if (!ctx.current || !role || !can(role, "billing.read")) return <Callout tone="warning">Seu papel não tem acesso ao painel de autorizações.</Callout>;
   const p = await getPanel(db, ctx.user.id, ctx.current.id);
-  const order: Fn[] = ["boletos", "email", "sistema", "whatsapp", "regua"];
+  const sync = await paymentSyncStatus(db, ctx.user.id, ctx.current.id);
+  const order: Fn[] = ["faturamento", "boletos", "email", "sistema", "whatsapp", "regua"];
 
   return (
     <div className="space-y-5">
@@ -73,6 +77,12 @@ export default async function Autorizacoes({ searchParams }: { searchParams: Pro
                 </ConfirmForm>
               )}
               {fn === "boletos" && !r.on && Number(r.detail.inFlightRequests) > 0 && <p className="mt-3 border-t border-border pt-3 text-sm text-muted-foreground">Há {Number(r.detail.inFlightRequests)} boleto(s) em envio ou reconsulta. Conclua a rodada em Emissões antes de ligar os boletos reais.</p>}
+              {fn === "boletos" && sync.provider !== "simulado" && (
+                <p className="mt-3 border-t border-border pt-3 text-sm" role="status">
+                  <strong>Conferência de pagamentos na Cora:</strong>{" "}
+                  {!sync.active ? sync.reason : <>{sync.lastAt ? `última às ${formatDateTime(sync.lastAt)} — ${sync.checked} boleto(s) conferido(s), ${sync.paid} pago(s)` : "ainda não rodou"}. {sync.stale ? <strong className="text-warning-foreground">Parada há mais de 30 minutos: avise o suporte.</strong> : "Roda sozinha a cada 10 minutos."} {sync.webhook ? "Aviso instantâneo da Cora: registrado." : "Aviso instantâneo da Cora: não registrado (vale a conferência a cada 10 minutos)."}</>}
+                </p>
+              )}
               {fn === "boletos" && r.detail.provider === "cora_producao" && (
                 <ConfirmForm action={canaryAction} className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3 text-sm" message={r.detail.canary ? "Sair do modo cuidadoso? Deixa de valer o teto de 3 boletos por dia; vale só o limite diário da emissão." : undefined}>
                   <span>Modo cuidadoso: <strong>{r.detail.canary ? `no máximo ${LIVE_CANARY_DAILY_MAX} boletos por dia` : "sem esse teto (vale o limite diário da emissão)"}</strong></span>
