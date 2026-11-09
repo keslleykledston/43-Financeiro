@@ -84,6 +84,19 @@ test("E03b — CRM: ativar, prévia sem gravar, aplicar, idempotência, somente 
     await expect(page.getByRole("button", { name: "Salvar" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Arquivar cadastro" })).toHaveCount(0);
     await expect(page.locator("li", { hasText: "Cadastro no CRM" })).toContainText("ana@alfa.test");
+    // a situação (ativo/suspenso/cancelado) pode ser definida aqui, mesmo com o cadastro vindo do CRM, e passa a valer sobre o CRM
+    await page.getByRole("link", { name: "Editar", exact: true }).click();
+    await page.getByLabel("Situação neste sistema").selectOption("suspenso");
+    await page.getByRole("button", { name: "Salvar situação" }).click();
+    await expect(page.getByText("Situação salva.")).toBeVisible();
+    await page.getByRole("link", { name: "Concluir edição" }).click();
+    await expect(page.getByText("(definida aqui)")).toBeVisible();
+    await expect(page.getByText("Cliente suspenso: continua cadastrado")).toBeVisible();
+    // volta a ativo (os passos seguintes contam com este cliente ativo; a situação fica definida aqui)
+    await page.getByRole("link", { name: "Editar", exact: true }).click();
+    await page.getByLabel("Situação neste sistema").selectOption("ativo");
+    await page.getByRole("button", { name: "Salvar situação" }).click();
+    await expect(page.getByText("Situação salva.")).toBeVisible();
   });
 
   await test.step("idempotência: repetir não cria nada", async () => {

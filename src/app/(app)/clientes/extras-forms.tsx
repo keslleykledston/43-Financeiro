@@ -1,6 +1,6 @@
 "use client";
 import { useActionState } from "react";
-import { saveAddressAction, savePrefsAction, saveTextsAction, type ExtrasState } from "./extras-actions";
+import { saveAddressAction, savePrefsAction, saveStatusAction, saveTextsAction, type ExtrasState } from "./extras-actions";
 import { buttonClass, inputClass } from "@/components/k3g/button";
 
 type A = { cep: string | null; street: string | null; streetNumber: string | null; complement: string | null; district: string | null; cityName: string | null; cityIbge: string | null; uf: string | null };
@@ -57,6 +57,23 @@ export function PrefsForm({ id, alias, issuesBoleto, issuesInvoice, shownByRule 
       </fieldset>
       <Msg s={s} />
       <button disabled={pending} className={buttonClass("primary")}>{pending ? "Salvando…" : "Salvar nome e emissão"}</button>
+    </form>
+  );
+}
+
+/** Situação do cliente em cadastro vindo do CRM: a escolha daqui trava a situação (a sincronização não a troca) até «Seguir o CRM». */
+export function StatusForm({ id, status, locked }: { id: string; status: string; locked: boolean }) {
+  const [s, act, pending] = useActionState(saveStatusAction.bind(null, id), undefined);
+  return (
+    <form action={act} className="space-y-3">
+      <div><L id="st-status" hint="Suspenso e cancelado continuam clientes (podem ter dívidas antigas), mas não geram nova cobrança. A escolha vale aqui: o CRM deixa de trocar a situação deste cliente.">Situação neste sistema</L>
+        <select id="st-status" name="status" defaultValue={status} className={inputClass}>
+          <option value="ativo">Ativo (faturável)</option><option value="suspenso">Suspenso</option><option value="cancelado">Cancelado</option>
+          {locked && <option value="crm">Seguir o CRM (a próxima sincronização decide)</option>}
+        </select></div>
+      <p className="text-xs text-muted-foreground">{locked ? "Situação definida aqui: a sincronização com o CRM não a altera." : "Hoje a situação vem do CRM; ao salvar uma escolha, ela passa a valer aqui."}</p>
+      <Msg s={s} />
+      <button disabled={pending} className={buttonClass("primary")}>{pending ? "Salvando…" : "Salvar situação"}</button>
     </form>
   );
 }

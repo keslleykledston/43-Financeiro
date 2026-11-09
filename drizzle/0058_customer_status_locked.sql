@@ -1,0 +1,1 @@
+ALTER TABLE "customers" ADD COLUMN "status_locked" boolean DEFAULT false NOT NULL;

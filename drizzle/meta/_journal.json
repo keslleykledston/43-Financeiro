@@ -407,6 +407,13 @@
       "when": 1794087896715,
       "tag": "0057_cora_invoices",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1794235936875,
+      "tag": "0058_customer_status_locked",
+      "breakpoints": true
     }
   ]
 }

@@ -7,7 +7,7 @@ import { can } from "@/modules/identity/permissions";
 import { getCustomerMode, getParty, history, STATUS_LABEL, type Status } from "@/modules/crm/service";
 import { PartyForm } from "../party-form";
 import { Tabs } from "@/components/k3g/tabs";
-import { AddressForm, PrefsForm, TextsForm } from "../extras-forms";
+import { AddressForm, PrefsForm, StatusForm, TextsForm } from "../extras-forms";
 import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass } from "@/components/k3g/button";
 import { AddressView, TextsView, type Extras } from "../extras-view";
@@ -18,7 +18,7 @@ import { NotesBlock } from "@/components/k3g/notes-block";
 
 const LABEL: Record<string, string> = {
   "party.created": "Cadastro criado", "party.updated": "Dados alterados", "party.archived": "Arquivado", "party.restored": "Restaurado",
-  "party.contact_added": "Contato adicionado", "party.contact_removed": "Contato removido",
+  "party.status_changed": "Situação alterada", "party.contact_added": "Contato adicionado", "party.contact_removed": "Contato removido",
 };
 
 export default async function Detalhe({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ salvo?: string; erro?: string; aba?: string; editar?: string }> }) {
@@ -47,8 +47,8 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
       {isCustomer && <div><dt className="text-muted-foreground">Nome aparente</dt><dd>{x.alias ?? <span className="text-muted-foreground">— (vale {shown})</span>}</dd></div>}
       <div><dt className="text-muted-foreground">Nome fantasia</dt><dd>{p.tradeName ?? "—"}</dd></div>
       <div><dt className="text-muted-foreground">{p.docType.toUpperCase()}</dt><dd>{p.documentFormatted}</dd></div>
-      <div><dt className="text-muted-foreground">Situação</dt><dd>{isCustomer ? STATUS_LABEL[p.status as Status] : "—"}</dd></div>
-      {crmOwned && <p className="text-xs text-muted-foreground sm:col-span-2">Estes dados vêm do CRM e não mudam aqui (a sincronização os sobrescreveria). Para corrigir razão social, CNPJ ou situação, edite no CRM. Nome aparente, emissão, endereço, textos, anotações e contatos são só daqui e podem ser editados.</p>}
+      <div><dt className="text-muted-foreground">Situação</dt><dd>{isCustomer ? STATUS_LABEL[p.status as Status] : "—"}{isCustomer && crmOwned && <span className="ml-2 text-xs text-muted-foreground">{x.statusLocked ? "(definida aqui)" : "(vem do CRM)"}</span>}</dd></div>
+      {crmOwned && <p className="text-xs text-muted-foreground sm:col-span-2">Estes dados vêm do CRM e não mudam aqui (a sincronização os sobrescreveria). Para corrigir razão social ou CNPJ, edite no CRM. A situação (ativo, suspenso, cancelado) pode ser definida aqui, na edição. Nome aparente, emissão, endereço, textos, anotações e contatos são só daqui e podem ser editados.</p>}
     </dl>
   );
   const contactList = (
@@ -73,6 +73,7 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
         </div>
       )}
       <section aria-labelledby="sec-ident"><H id="sec-ident">Identificação</H>{ident}</section>
+      {isCustomer && crmOwned && editar && <section aria-labelledby="sec-situacao"><H id="sec-situacao">Situação</H><StatusForm id={id} status={p.status} locked={x.statusLocked === true} /></section>}
       {isCustomer && (
         <section aria-labelledby="sec-emissao"><H id="sec-emissao">Nome aparente e emissão</H>
           {editar ? <PrefsForm id={id} alias={x.alias} issuesBoleto={x.issuesBoleto} issuesInvoice={x.issuesInvoice} shownByRule={(p as { displayName?: string | null }).displayName && !x.alias ? shown : p.legalName} /> : (
@@ -99,7 +100,7 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
       {p.kind === "cliente" && p.status !== "ativo" && <p role="note" className="rounded-md bg-warning-soft p-3 text-sm text-warning-foreground">Cliente <strong>{p.status}</strong>: continua cadastrado (pode ter dívidas antigas a receber), mas <strong>não gera nova cobrança</strong>.</p>}
       {sp.erro && <p role="alert" className="rounded-md bg-negative-soft p-3 text-sm text-negative-foreground">{sp.erro}</p>}
       {sp.salvo && <p role="status" className="rounded-md bg-positive-soft p-3 text-sm text-positive-foreground">Alterações salvas.</p>}
-      {crmOwned && <p role="note" className="rounded-md bg-info-soft p-3 text-sm text-info-foreground">Cadastro sincronizado do CRM (somente leitura). Para alterar dados ou arquivar, edite no CRM. Contatos adicionais locais são permitidos.</p>}
+      {crmOwned && <p role="note" className="rounded-md bg-info-soft p-3 text-sm text-info-foreground">Cadastro sincronizado do CRM (somente leitura). Para alterar razão social, CNPJ ou arquivar, edite no CRM. A situação (ativo, suspenso, cancelado), contatos adicionais e os demais ajustes locais podem ser editados aqui.</p>}
       {p.source === "crm" && !crmMode && <p role="note" className="rounded-md bg-warning-soft p-3 text-sm text-warning-foreground">Este cadastro veio do CRM, mas a empresa está no modo Local, então ele é editável. Se voltar ao modo CRM, os dados do CRM sobrescrevem suas edições.</p>}
       <section className="rounded-lg border bg-card p-5" aria-labelledby="editar-h">
         <h2 id="editar-h" className="mb-3 text-lg font-semibold">Cadastro</h2>

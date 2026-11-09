@@ -7,7 +7,7 @@ import { databaseUrl } from "@/lib/db/url";
 import * as schema from "@/lib/db/schema";
 import type { DB } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
-import { addContact, createParty, getParty, isBillable, listParties, removeContact, setArchived, setCustomerMode, updateParty } from "@/modules/crm/service";
+import { addContact, createParty, getParty, isBillable, listParties, removeContact, setArchived, setCustomerMode, setCustomerStatus, updateParty } from "@/modules/crm/service";
 import { applySync, listConflicts, listRuns, previewSync, resolveConflict, saveConnection } from "@/modules/integrations/crm/sync";
 import type { CrmAdapter } from "@/modules/integrations/crm/types";
 import { MockCrmAdapter } from "@/modules/integrations/crm/mock";
@@ -280,6 +280,37 @@ describe.skipIf(!enabled)("CRM sync: prévia, aplicação idempotente, conflitos
     expect(bySt["Cliente Cancelado"].status).toBe("cancelado");
     expect(all.filter((c) => isBillable(c)).map((c) => c.legalName)).toEqual(["Cliente Um"]); // só o ativo fatura
     expect((await listParties(db, dirA, A, { status: "cancelado" })).items.map((c) => c.legalName)).toEqual(["Cliente Cancelado"]);
+  });
+
+  it("situação definida AQUI em cliente do CRM trava: a sincronização não a troca; «seguir o CRM» destrava; reativar exige gerente/diretoria", async () => {
+    const m = new MockCrmAdapter([item()]);
+    await applyNow(db, m, dirA, A, ON);
+    const id = (await listParties(db, dirA, A, {})).items[0].id;
+    // sem a trava, o CRM manda
+    await setCustomerStatus(db, dirA, A, id, "suspenso");
+    expect(await getParty(db, dirA, A, id)).toMatchObject({ status: "suspenso", statusLocked: true });
+    m.items = [item({ status: "ativo" })]; // o CRM diz ativo
+    expect(await applyNow(db, m, dirA, A, ON)).toMatchObject({ update: 0, unchanged: 1 }); // nada a mudar: vale a local
+    expect((await getParty(db, dirA, A, id))!.status).toBe("suspenso");
+    m.items = [item({ status: "cancelado", legalName: "Cliente Um SA" })]; // mudança de nome vem do CRM, situação continua a local
+    expect(await applyNow(db, m, dirA, A, ON)).toMatchObject({ update: 1 });
+    expect(await getParty(db, dirA, A, id)).toMatchObject({ legalName: "Cliente Um SA", status: "suspenso", statusLocked: true });
+    // reativar: gerente pode; contabilidade não grava cliente
+    await expect(setCustomerStatus(db, contA, A, id, "ativo")).rejects.toThrow(Forbidden);
+    await setCustomerStatus(db, gerA, A, id, "ativo");
+    expect((await getParty(db, dirA, A, id))!.status).toBe("ativo");
+    await expect(setCustomerStatus(db, techA, A, id, "suspenso")).rejects.toThrow(Forbidden); // admin técnico não grava cliente
+    // seguir o CRM: destrava; a próxima sincronização volta a mandar
+    await setCustomerStatus(db, dirA, A, id, "crm");
+    expect(await getParty(db, dirA, A, id)).toMatchObject({ statusLocked: false, status: "ativo" });
+    await applyNow(db, m, dirA, A, ON);
+    expect((await getParty(db, dirA, A, id))!.status).toBe("cancelado");
+    // outra empresa não alcança o cliente; valor inválido e id inválido são recusados
+    await expect(setCustomerStatus(db, dirB, B, id, "suspenso")).rejects.toThrow(Invalid);
+    await expect(setCustomerStatus(db, dirA, A, id, "pausado" as never)).rejects.toThrow(Invalid);
+    await expect(setCustomerStatus(db, dirA, A, "x", "ativo")).rejects.toThrow(Invalid);
+    const audits = (await db.select().from(schema.auditLog)).filter((a) => a.action === "party.status_changed");
+    expect(audits.length).toBe(3); // suspenso, reativado, seguir o CRM
   });
 
   it("mudança de situação no CRM atualiza (sem arquivar); prospect (não é cliente) é ignorado e, se já existia, arquiva", async () => {

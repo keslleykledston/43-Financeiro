@@ -160,6 +160,39 @@ export async function updateParty(db: DB, actorId: string, companyId: string, id
   } catch (e) { if (pgCode(e) === "23505") throw new Invalid(DUP); throw e; }
 }
 
+/**
+ * Situação do CLIENTE (ativo/suspenso/cancelado) definida neste sistema. Vale também para cliente vindo do CRM (modo CRM): a escolha TRAVA a situação
+ * (`status_locked`) e a sincronização deixa de trocá-la. `"crm"` destrava: volta a seguir o CRM (o valor atual fica até a próxima sincronização).
+ * Reativar (voltar a faturar) exige gerente ou diretoria, como na edição normal.
+ */
+export async function setCustomerStatus(db: DB, actorId: string, companyId: string, id: string, choice: Status | "crm") {
+  await requirePerm(db, actorId, companyId, "crm.write");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw new Invalid("Cliente não encontrado");
+  if (choice !== "crm" && !["ativo", "suspenso", "cancelado"].includes(choice)) throw new Invalid("Situação inválida");
+  return db.transaction(async (tx) => {
+    const t = tx as unknown as DB;
+    await lockModeShared(t, companyId);
+    const [cur] = await t.select({ status: customers.status, source: customers.source, locked: customers.statusLocked, archivedAt: customers.archivedAt }).from(customers)
+      .where(and(eq(customers.id, id), eq(customers.companyId, companyId))).for("update");
+    if (!cur) throw new Invalid("Cliente não encontrado");
+    if (cur.archivedAt) throw new Invalid("Cliente arquivado: restaure antes de editar");
+    if (choice === "crm") {
+      if (cur.source !== "crm") throw new Invalid("Só cliente vindo do CRM pode voltar a seguir o CRM");
+      if (cur.locked) { await t.update(customers).set({ statusLocked: false, updatedAt: new Date() }).where(and(eq(customers.id, id), eq(customers.companyId, companyId))); await audit(t, companyId, actorId, "party.status_changed", { partyId: id, followCrm: true }); }
+      return { status: cur.status, locked: false };
+    }
+    if (choice === "ativo" && cur.status !== "ativo") {
+      try { await requirePerm(t, actorId, companyId, "crm.reactivate"); }
+      catch (e) { if (e instanceof Forbidden) throw new Forbidden("Reativar um cliente (voltar a faturar) exige gerente ou diretoria"); throw e; }
+    }
+    const lock = cur.source === "crm";
+    if (cur.status === choice && cur.locked === lock) return { status: choice, locked: lock };
+    await t.update(customers).set({ status: choice, statusLocked: lock, updatedAt: new Date() }).where(and(eq(customers.id, id), eq(customers.companyId, companyId)));
+    await audit(t, companyId, actorId, "party.status_changed", { partyId: id, from: cur.status, to: choice, locked: lock });
+    return { status: choice, locked: lock };
+  });
+}
+
 /** Exclusão lógica: preserva histórico e vínculos futuros (contratos/cobranças). */
 export async function setArchived(db: DB, actorId: string, companyId: string, id: string, archived: boolean) {
   await requirePerm(db, actorId, companyId, "crm.write");

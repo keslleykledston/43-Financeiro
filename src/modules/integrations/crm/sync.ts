@@ -96,8 +96,9 @@ export function buildPlan(rows: Row[], ignored: Set<string>, raw: unknown[], com
       if (c.companyRef === undefined) { conflict(c, "ambiguous_company", doc.digits); continue; }
       if (c.companyRef !== companyRef) { plan.stats.skipped++; continue; } // pertence a outra empresa
     }
-    const planned: Planned = { externalId: c.externalId, legalName: c.legalName, tradeName: c.tradeName, document: doc.digits, docType: doc.type, status: c.status, contacts: c.contacts };
     const existing = byExt.get(c.externalId);
+    // Situação definida neste sistema (`status_locked`): o CRM não a troca; vale a local.
+    const planned: Planned = { externalId: c.externalId, legalName: c.legalName, tradeName: c.tradeName, document: doc.digits, docType: doc.type, status: existing?.statusLocked ? (existing.status as Planned["status"]) : c.status, contacts: c.contacts };
 
     if (existing) {
       if (!c.active) { if (!existing.archivedAt) plan.archive.push({ externalId: c.externalId, localId: existing.id, legalName: existing.legalName }); else plan.stats.unchanged++; continue; }
@@ -106,7 +107,7 @@ export function buildPlan(rows: Row[], ignored: Set<string>, raw: unknown[], com
       if (claimedDocs.has(doc.digits)) { conflict(c, "document_collision", doc.digits); continue; }
       claimedDocs.add(doc.digits);
       if (existing.archivedAt) { plan.restore.push({ ...planned, localId: existing.id }); continue; }
-      const changed = existing.legalName !== c.legalName || (existing.tradeName ?? undefined) !== (c.tradeName || undefined) || existing.document !== doc.digits || existing.status !== c.status
+      const changed = existing.legalName !== c.legalName || (existing.tradeName ?? undefined) !== (c.tradeName || undefined) || existing.document !== doc.digits || existing.status !== planned.status
         || canonContacts(c.contacts) !== (crmContacts.get(existing.id) ?? "[]"); // mudança só nos contatos também conta
       if (changed) plan.update.push({ ...planned, localId: existing.id }); else plan.stats.unchanged++;
       continue;
@@ -205,7 +206,7 @@ export async function applySync(db: DB, adapter: CrmAdapter, actorId: string, co
       await syncContacts(row.id, p.contacts);
     }
     for (const p of [...plan.update, ...plan.restore]) {
-      await t.update(customers).set({ legalName: p.legalName, tradeName: p.tradeName ?? null, docType: p.docType, document: p.document, status: p.status, archivedAt: null, externalSyncedAt: now, updatedAt: now })
+      await t.update(customers).set({ legalName: p.legalName, tradeName: p.tradeName ?? null, docType: p.docType, document: p.document, status: sql`CASE WHEN ${customers.statusLocked} THEN ${customers.status} ELSE ${p.status} END`, archivedAt: null, externalSyncedAt: now, updatedAt: now })
         .where(and(eq(customers.id, p.localId), eq(customers.companyId, companyId)));
       await syncContacts(p.localId, p.contacts);
     }

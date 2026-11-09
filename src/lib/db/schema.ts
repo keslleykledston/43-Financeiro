@@ -138,6 +138,8 @@ export const customers = pgTable("customers", {
   issuesInvoice: boolean("issues_invoice").notNull().default(false),
   // F1b — cobrança AUTOMÁTICA dos boletos em atraso importados da Cora (régua). Nasce DESLIGADA; a diretoria liga cliente a cliente. Hoje só registra a escolha: nenhuma mensagem sai a partir de boleto importado.
   overdueCollection: boolean("overdue_collection").notNull().default(false),
+  // Situação definida AQUI (ativo/suspenso/cancelado) em cliente vindo do CRM: enquanto true, a sincronização com o CRM não troca a situação. false = segue o CRM.
+  statusLocked: boolean("status_locked").notNull().default(false),
   // E26 — ajustes do cliente que NÃO vêm do CRM (a sincronização não toca nestas colunas): endereço (tomador da NFS-e) e textos da nota fiscal e do boleto.
   cep: text("cep"), street: text("street"), streetNumber: text("street_number"), complement: text("complement"), district: text("district"),
   cityName: text("city_name"), cityIbge: text("city_ibge"), uf: text("uf"),

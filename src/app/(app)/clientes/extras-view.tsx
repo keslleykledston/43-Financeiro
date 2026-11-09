@@ -1,4 +1,4 @@
-export type Extras = { cep: string | null; street: string | null; streetNumber: string | null; complement: string | null; district: string | null; cityName: string | null; cityIbge: string | null; uf: string | null; nfText: string | null; boletoText: string | null; alias: string | null; issuesBoleto: boolean; issuesInvoice: boolean };
+export type Extras = { cep: string | null; street: string | null; streetNumber: string | null; complement: string | null; district: string | null; cityName: string | null; cityIbge: string | null; uf: string | null; nfText: string | null; boletoText: string | null; alias: string | null; issuesBoleto: boolean; issuesInvoice: boolean; statusLocked?: boolean };
 
 const cep = (c: string | null) => (c && c.length === 8 ? `${c.slice(0, 5)}-${c.slice(5)}` : c);
 

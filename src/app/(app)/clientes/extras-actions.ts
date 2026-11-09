@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
+import { setCustomerStatus, type Status } from "@/modules/crm/service";
 import { ADDRESS_KEYS, TEXT_KEYS, updateCustomerExtras } from "@/modules/crm/extras";
 
 export type ExtrasState = { error?: string; saved?: string } | undefined;
@@ -28,5 +29,18 @@ export async function savePrefsAction(id: string, _: ExtrasState, fd: FormData):
     const r = await updateCustomerExtras(db, c.user.id, c.current.id, id, { alias: String(fd.get("alias") ?? "").slice(0, 200), issuesBoleto: fd.get("issuesBoleto") === "on", issuesInvoice: fd.get("issuesInvoice") === "on" });
     revalidatePath(`/clientes/${id}`); revalidatePath("/clientes");
     return { saved: r.changed.length ? `Salvo: ${r.changed.join(", ")}.` : "Nada mudou." };
+  } catch (e) { if (e instanceof Invalid || e instanceof Forbidden) return { error: e.message }; throw e; }
+}
+
+/** Situação do cliente (ativo/suspenso/cancelado ou «seguir o CRM») definida aqui. Vale também para cliente vindo do CRM. */
+export async function saveStatusAction(id: string, _: ExtrasState, fd: FormData): Promise<ExtrasState> {
+  try {
+    const c = await requireContext();
+    if (!c.current) throw new Forbidden();
+    const choice = String(fd.get("status") ?? "");
+    if (!["ativo", "suspenso", "cancelado", "crm"].includes(choice)) throw new Invalid("Situação inválida");
+    await setCustomerStatus(db, c.user.id, c.current.id, id, choice as Status | "crm");
+    revalidatePath(`/clientes/${id}`); revalidatePath("/clientes");
+    return { saved: choice === "crm" ? "Situação volta a seguir o CRM." : "Situação salva." };
   } catch (e) { if (e instanceof Invalid || e instanceof Forbidden) return { error: e.message }; throw e; }
 }

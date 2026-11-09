@@ -33,7 +33,7 @@ Busque por nome, nome fantasia ou documento (com ou sem pontuação). Por padrã
 | Admin técnico | — | — | — |
 
 ## Validador de CPF/CNPJ
-Ao digitar o documento no cadastro, o sistema confere os **dígitos verificadores** na hora: verde = válido (mostra o formato certo); vermelho = não confere. Quando o erro parece digitação (por exemplo, dois dígitos finais trocados), aparece a **sugestão** com um clique. O servidor confere de novo ao salvar. CNPJ alfanumérico também é aceito. Clientes que vêm do CRM continuam somente leitura aqui (a correção é no CRM); para o histórico da planilha use *Histórico → Corrigir CNPJ/CPF*.
+Ao digitar o documento no cadastro, o sistema confere os **dígitos verificadores** na hora: verde = válido (mostra o formato certo); vermelho = não confere. Quando o erro parece digitação (por exemplo, dois dígitos finais trocados), aparece a **sugestão** com um clique. O servidor confere de novo ao salvar. CNPJ alfanumérico também é aceito. Clientes que vêm do CRM continuam somente leitura aqui para razão social e documento (a correção é no CRM); para o histórico da planilha use *Histórico → Corrigir CNPJ/CPF*.
 
 ## Editar o cliente
 Abra **Clientes → o cliente**. A caixa **Cadastro** tem três abas: **Dados**, **Nota fiscal e boleto** (os textos) e **Anotações**.
@@ -54,4 +54,4 @@ Como o cliente é conhecido no dia a dia, quando isso é diferente do nome fanta
 - **Emite nota fiscal:** marcado, a nota fiscal é **esperada** para esse cliente: o lote mostra onde anexar o PDF e avisa quando falta. Quando o contrato exige «boleto + NF», o e-mail continua esperando pela nota; o simples «emite nota fiscal» **não** segura o e-mail.
 Quem tem contrato com «NF junto do boleto» já vem marcado como «emite nota fiscal».
 
-**Cliente vindo do CRM:** a identificação (razão social, CNPJ e situação) fica só para leitura: a sincronização a sobrescreveria, corrija no CRM. Nome aparente, emissão, endereço, textos, anotações e contatos são só daqui e podem ser editados.
+**Cliente vindo do CRM:** razão social e CNPJ ficam só para leitura: a sincronização os sobrescreveria, corrija no CRM. A **situação** (Ativo, Suspenso, Cancelado) você define aqui: em *Editar → Situação → «Situação neste sistema»*. Ao salvar, a escolha **trava** a situação deste cliente e o CRM deixa de trocá-la (a tela mostra «definida aqui»). Para voltar a seguir o CRM, escolha «Seguir o CRM» na mesma caixa: a próxima sincronização decide. Voltar a **Ativo** (voltar a faturar) exige gerente ou diretoria, e toda troca fica no histórico. Suspenso e cancelado não geram nova cobrança. Nome aparente, emissão, endereço, textos, anotações e contatos são só daqui e podem ser editados.
