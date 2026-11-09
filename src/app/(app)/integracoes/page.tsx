@@ -6,6 +6,8 @@ import { getCustomerMode } from "@/modules/crm/service";
 import { getConnection, listConflicts, listRuns } from "@/modules/integrations/crm/sync";
 import { ConnectionForm } from "./connection-form";
 import { ModeForm } from "./mode-form";
+import { CutoverForm, QueueUnlinkedForm, RetryPushesForm } from "./cutover-panel";
+import { cutoverView, FRESH_SYNC_MS } from "@/modules/integrations/crm/cutover";
 import { SyncPanel } from "./sync-panel";
 import { resolveAction } from "./actions";
 import { PROVIDER_CATALOG, unsupportedFlagsOn } from "@/modules/providers/registry";
@@ -48,6 +50,8 @@ export default async function Integracoes() {
   const sendLog = coraAccess ? await listSendLog(db, ctx.user.id, ctx.current.id, 8) : [];
   const emailInDb = coraAccess ? await hasEmailAccount(db, ctx.user.id, ctx.current.id) : false;
   const fiscalComplete = can(role, "company.manage") ? await nfseProfileComplete(db, ctx.user.id, ctx.current.id) : false;
+  const cut = await cutoverView(db, ctx.user.id, ctx.current.id);
+  const staleSync = !cut.lastSyncAt || Date.now() - cut.lastSyncAt.getTime() > FRESH_SYNC_MS;
   const master = process.env.CRM_SYNC_ENABLED === "true";
   const configured = !!process.env.CRM_BASE_URL && !!process.env.CRM_API_TOKEN;
   return (
@@ -56,9 +60,39 @@ export default async function Integracoes() {
       <section className="rounded-lg border bg-card p-5">
         <h2 className="mb-1 font-semibold">Origem dos clientes</h2>
         <p className="mb-3 text-sm text-muted-foreground">Escolha, para esta empresa, onde os clientes são mantidos. Atual: <strong>{mode === "crm" ? "CRM" : "Local"}</strong>.</p>
-        <ModeForm mode={mode} canChange={manage} />
+        {cut.done ? <p className="text-sm text-muted-foreground">Corte do CRM feito em <strong>{fmt(cut.at!)}</strong>: o K3G Finance é a fonte dos clientes e não lê mais o CRM. Esta escolha não volta ao CRM.</p> : <ModeForm mode={mode} canChange={manage} />}
       </section>
-      {mode === "local" ? (
+      {cut.done && (
+        <section className="rounded-lg border bg-card p-5" aria-labelledby="envio-h">
+          <h2 id="envio-h" className="mb-1 font-semibold">Envio ao CRM</h2>
+          <p className="mb-3 text-sm text-muted-foreground">O K3G Finance decide a situação dos clientes (ativo, suspenso, cancelado) e cria o cliente novo; isso é enviado ao CRM por esta fila. Se o CRM estiver fora do ar, nada se perde: o envio tenta de novo.</p>
+          <ul className="mb-3 space-y-1 text-sm">
+            <li>Envio ligado neste servidor: <strong>{cut.writeback.enabled ? "sim" : "não"}</strong> · token de escrita: <strong>{cut.writeback.hasWriteToken ? "configurado" : "falta"}</strong> · rota de criação de cliente: <strong>{cut.writeback.createPath ? "informada" : "falta (a criação espera a equipe do CRM)"}</strong></li>
+            <li>Na fila: <strong>{cut.outbox.pendente}</strong> · falharam: <strong>{cut.outbox.falhou}</strong> · enviados: <strong>{cut.outbox.enviado}</strong></li>
+            <li>Clientes com cadastro no CRM: <strong>{cut.linked}</strong> · sem cadastro lá: <strong>{cut.unlinked}</strong></li>
+          </ul>
+          {!(cut.writeback.enabled && cut.writeback.hasWriteToken) && <p role="note" className="mb-3 rounded-md bg-warning-soft p-3 text-sm text-warning-foreground">O envio ainda não está ligado neste servidor: as mudanças ficam <strong>aguardando na fila</strong> e saem quando a equipe do CRM liberar o acesso de escrita (ver docs/CORTE_CRM.md).</p>}
+          {cut.open.length > 0 && (
+            <ul className="mb-3 divide-y divide-border text-sm">
+              {cut.open.map((o) => <li key={o.id} className="flex flex-wrap justify-between gap-2 py-2"><span className="min-w-0 truncate">{o.name} — {o.kind === "create" ? "criar no CRM" : `situação → ${o.desiredStatus}`}</span><span className={o.state === "falhou" ? "text-negative-foreground" : "text-muted-foreground"}>{o.state === "falhou" ? "falhou" : "na fila"}{o.lastError ? ` · ${o.lastError}` : ""}</span></li>)}
+            </ul>
+          )}
+          {manage && <div className="flex flex-wrap gap-3"><RetryPushesForm failed={cut.outbox.falhou} /><QueueUnlinkedForm count={cut.unlinked} /></div>}
+        </section>
+      )}
+      {!cut.done && mode === "crm" && manage && (
+        <section className="rounded-lg border bg-card p-5" aria-labelledby="corte-h">
+          <h2 id="corte-h" className="mb-1 font-semibold">Corte do CRM</h2>
+          <p className="mb-3 text-sm text-muted-foreground">Hoje o CRM é a fonte dos clientes e o K3G Finance só lê. O <strong>corte</strong> inverte isso: o K3G Finance passa a ser a fonte da verdade (cadastro, contratos e situação), <strong>para de ler o CRM</strong> e passa a enviar ao CRM a situação do cliente e os clientes novos. É feito uma vez e não volta.</p>
+          <ul className="mb-3 space-y-1 text-sm">
+            <li>{cut.openConflicts === 0 ? "✔" : "✖"} Conflitos de sincronização em aberto: <strong>{cut.openConflicts}</strong></li>
+            <li>{staleSync ? "⚠" : "✔"} Última sincronização: <strong>{cut.lastSyncAt ? fmt(cut.lastSyncAt) : "nunca"}</strong>{staleSync && " — sincronize de novo antes, para trazer o que mudou no CRM"}</li>
+            <li>Clientes já vindos do CRM: <strong>{cut.linked}</strong></li>
+          </ul>
+          <CutoverForm stale={staleSync} blocked={cut.openConflicts > 0 ? "Resolva os conflitos abaixo antes do corte." : null} />
+        </section>
+      )}
+      {mode === "local" ? (cut.done ? null :
         <p role="note" className="rounded-lg border bg-card p-5 text-sm text-muted-foreground">No modo <strong>Local</strong> a integração com o CRM está desligada. Para importar clientes do CRM, mude a origem para <strong>CRM</strong>.</p>
       ) : (<>
       <section className="rounded-lg border bg-card p-5">

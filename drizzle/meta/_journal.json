@@ -414,6 +414,13 @@
       "when": 1794235936875,
       "tag": "0058_customer_status_locked",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1794236723685,
+      "tag": "0059_crm_cutover",
+      "breakpoints": true
     }
   ]
 }

@@ -12,7 +12,10 @@ import { AppLink } from "@/components/k3g/app-link";
 import { buttonClass } from "@/components/k3g/button";
 import { AddressView, TextsView, type Extras } from "../extras-view";
 import { ContactForm } from "../contact-form";
-import { archiveAction, noteAction, removeContactAction, updateAction } from "../actions";
+import { applySuggestionAction, archiveAction, noteAction, removeContactAction, updateAction } from "../actions";
+import { customerStatusSuggestion } from "@/modules/contracts/customer-status";
+import { customerPushState } from "@/modules/integrations/crm/cutover";
+import { isCutover } from "@/modules/integrations/crm/outbox";
 import { listNotes } from "@/modules/notes/service";
 import { NotesBlock } from "@/components/k3g/notes-block";
 
@@ -34,6 +37,9 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
   const crmOwned = p.source === "crm" && crmMode; // somente leitura só no modo CRM
   const notes = p.kind === "cliente" ? await listNotes(db, ctx.user.id, ctx.current.id, { customerId: id }) : [];
   const log = await history(db, ctx.user.id, ctx.current.id, id);
+  const cutover = p.kind === "cliente" ? await isCutover(db, ctx.current.id) : false;
+  const suggestion = p.kind === "cliente" && write ? await customerStatusSuggestion(db, ctx.current.id, id) : null;
+  const push = cutover ? await customerPushState(db, ctx.current.id, id) : null;
   const x = p as unknown as Extras;
   const isCustomer = p.kind === "cliente";
   const editar = sp.editar === "1" && write && !p.archivedAt; // modo edição (botão Editar): sem JavaScript, só muda a URL
@@ -98,6 +104,14 @@ export default async function Detalhe({ params, searchParams }: { params: Promis
         <p className="text-sm text-muted-foreground">{p.kind === "cliente" ? "Cliente" : "Fornecedor"} · {p.docType.toUpperCase()} {p.documentFormatted}{shown !== p.legalName && <span> · razão social: {p.legalName}</span>}{p.archivedAt && <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs">Arquivado</span>}{p.kind === "cliente" && <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${p.status === "ativo" ? "bg-positive-soft text-positive-foreground" : p.status === "cancelado" ? "bg-negative-soft text-negative-foreground" : "bg-warning-soft text-warning-foreground"}`}>{STATUS_LABEL[p.status as Status]}</span>}</p>
       </div>
       {p.kind === "cliente" && p.status !== "ativo" && <p role="note" className="rounded-md bg-warning-soft p-3 text-sm text-warning-foreground">Cliente <strong>{p.status}</strong>: continua cadastrado (pode ter dívidas antigas a receber), mas <strong>não gera nova cobrança</strong>.</p>}
+      {suggestion && (
+        <form action={applySuggestionAction} className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-info-soft p-3 text-sm text-info-foreground">
+          <input type="hidden" name="id" value={id} /><input type="hidden" name="status" value={suggestion.suggested} />
+          <span>Pelos contratos, este cliente deveria estar <strong>{STATUS_LABEL[suggestion.suggested]}</strong> (hoje: {STATUS_LABEL[suggestion.current as Status]}).{cutover && " A mudança também é enviada ao CRM."}</span>
+          <button className={buttonClass("primary", "sm")}>Aplicar: {STATUS_LABEL[suggestion.suggested]}</button>
+        </form>
+      )}
+      {push && <p role="note" className="text-xs text-muted-foreground">CRM: {push.state === "enviado" ? "atualizado" : push.state === "falhou" ? `falhou o envio${push.lastError ? ` (${push.lastError})` : ""}` : `aguardando envio${push.lastError ? ` (${push.lastError})` : ""}`}.</p>}
       {sp.erro && <p role="alert" className="rounded-md bg-negative-soft p-3 text-sm text-negative-foreground">{sp.erro}</p>}
       {sp.salvo && <p role="status" className="rounded-md bg-positive-soft p-3 text-sm text-positive-foreground">Alterações salvas.</p>}
       {crmOwned && <p role="note" className="rounded-md bg-info-soft p-3 text-sm text-info-foreground">Cadastro sincronizado do CRM (somente leitura). Para alterar razão social, CNPJ ou arquivar, edite no CRM. A situação (ativo, suspenso, cancelado), contatos adicionais e os demais ajustes locais podem ser editados aqui.</p>}

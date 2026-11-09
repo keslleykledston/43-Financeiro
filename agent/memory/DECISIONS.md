@@ -247,3 +247,11 @@ Calendário (`src/modules/billing/calendar.ts`, funções puras testadas contra 
 - Descobertas na Cora REAL: a listagem não traz o cliente/documento (só o detalhe `customer.document.identity`); a busca `search` por CPF/CNPJ só responde com início E fim. Por isso a importação é por cliente cadastrado (busca pelo documento) e confere o documento no DETALHE de todo boleto novo; divergência/ausência derruba o cliente inteiro; documento duplicado (formatos diferentes) fica de fora; um cliente por transação; upsert atômico (o cliente nunca muda). Boletos de quem não está no cadastro não entram. Aceito: boleto já espelhado não é revalidado (na Cora o cliente de um boleto não muda; as linhas só entram após a conferência).
 - Atualização: rápida a cada 30 min (janela de vencimentos dos abertos) + webhook (boleto do espelho) + importação completa diária após 06:00 (reserva atômica no banco, vale 3 h). Pagos antigos recebem a data do pagamento pelo detalhe na importação.
 
+## ADR-043 — Corte do CRM: o K3G Finance vira a fonte dos clientes e escreve no CRM (2026-11-09, pedido do dono)
+Inverte ADR-012/ADR-0xx (CRM fonte, Finance só lê). Detalhe e pedidos à equipe do CRM em `docs/CORTE_CRM.md`.
+- **Corte** por empresa (`companies.crm_cutover_at`), só diretoria, frase CORTE, sem conflito aberto, sincronização ≤ 24 h ou aceite: empresa vai para modo `local`, leitura do CRM desligada e recusada, volta ao modo CRM bloqueada. Irreversível por desenho.
+- **Caixa de saída transacional** (`crm_outbox`, migração 0059): situação do cliente e cliente novo/CSV viram pedidos na mesma transação; um pedido aberto por cliente+tipo; envio por agendador, atrás de `CRM_WRITEBACK_ENABLED` + `CRM_WRITE_TOKEN` (token de escrita SEPARADO do de leitura). Sem as chaves a fila só acumula (o corte pode ser feito antes de a equipe do CRM liberar a escrita).
+- Criar cliente: busca por CNPJ antes (idempotência sem depender do CRM); rota de criação por `CRM_CREATE_PATH` (a OpenAPI do CRM não tem `POST /crm/companies` e não documenta corpos) — sem ela a criação espera (`CrmPending`, não é falha).
+- Situação do cliente a partir dos contratos é SUGESTÃO de um clique (suspender/cancelar para de cobrar), não automática; reativar exige `crm.reactivate`.
+- `status_locked` (0058) só vale até o corte (zerado nele).
+

@@ -44,6 +44,9 @@ export const companies = pgTable("companies", {
   cnpj: text("cnpj"), // sem CNPJ real pré-preenchido
   // de onde vêm os CLIENTES desta empresa: "local" (cadastro/CSV aqui) ou "crm" (importados do CRM, somente leitura)
   customerMode: text("customer_mode").notNull().default("local"),
+  // Corte do CRM (ADR-043): a partir daqui o K3G Finance é a fonte da verdade dos clientes (não lê mais o CRM; empurra situação e clientes novos). Nulo = corte não feito.
+  crmCutoverAt: timestamp("crm_cutover_at", { withTimezone: true }),
+  crmCutoverBy: uuid("crm_cutover_by").references(() => users.id),
   // E21 — dados cadastrais da própria empresa (edição pela diretoria; `name` é o nome de exibição)
   legalName: text("legal_name"),
   financeEmail: text("finance_email"),
@@ -1674,4 +1677,27 @@ export const coraInvoices = pgTable("cora_invoices", {
   check("cora_invoices_status_chk", sql`${t.status} in ('OPEN', 'LATE', 'IN_PAYMENT', 'DRAFT', 'PAID', 'CANCELLED')`),
   check("cora_invoices_env_chk", sql`${t.environment} in ('producao', 'homologacao')`),
   check("cora_invoices_amount_chk", sql`${t.totalCents} >= 0 and ${t.paidCents} >= 0`),
+]);
+
+/** Caixa de saída para o CRM (ADR-043): mudança de situação e criação de cliente a enviar. Nasce na mesma transação da mudança; o agendador envia. Um pedido ABERTO por cliente e tipo. */
+export const crmOutbox = pgTable("crm_outbox", {
+  ...base,
+  companyId: uuid("company_id").notNull().references(() => companies.id),
+  customerId: uuid("customer_id").notNull(),
+  kind: text("kind").notNull(), // status | create
+  desiredStatus: text("desired_status").notNull(), // situação pedida (informativo; no envio vale a situação atual do cliente)
+  state: text("state").notNull().default("pendente"), // pendente | enviado | falhou
+  attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+  lastError: text("last_error"),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+}, (t) => [
+  uniqueIndex("crm_outbox_open_uq").on(t.companyId, t.customerId, t.kind).where(sql`${t.state} = 'pendente'`),
+  index("crm_outbox_due_idx").on(t.state, t.nextAttemptAt),
+  index("crm_outbox_customer_idx").on(t.companyId, t.customerId, t.createdAt),
+  foreignKey({ columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id], name: "crm_outbox_customer_fk" }),
+  check("crm_outbox_kind_chk", sql`${t.kind} in ('status', 'create')`),
+  check("crm_outbox_state_chk", sql`${t.state} in ('pendente', 'enviado', 'falhou')`),
+  check("crm_outbox_status_chk", sql`${t.desiredStatus} in ('ativo', 'suspenso', 'cancelado')`),
+  check("crm_outbox_attempts_chk", sql`${t.attempts} >= 0 and (${t.lastError} is null or char_length(${t.lastError}) <= 300)`),
 ]);

@@ -11,6 +11,7 @@ import { disableCoraWebhook, enableCoraWebhook } from "@/modules/issuance/webhoo
 import { removeEmailAccount, saveEmailAccount } from "@/modules/providers/email-config";
 import { authorizeEmailLive, revokeEmailLive } from "@/modules/providers/email-auth";
 import { sendTestEmail, testEmailAccount } from "@/modules/providers/email-live";
+import { CUTOVER_PHRASE, performCutover, queueUnlinkedCustomers, retryFailedPushes } from "@/modules/integrations/crm/cutover";
 import { applySync, previewSync, resolveConflict, saveConnection } from "@/modules/integrations/crm/sync";
 
 type Sample = Awaited<ReturnType<typeof previewSync>>;
@@ -63,6 +64,23 @@ export async function setModeAction(_: ModeState, fd: FormData): Promise<ModeSta
   catch (e) { return { error: msg(e) }; }
   revalidatePath("/integracoes"); revalidatePath("/clientes");
   return { saved: true };
+}
+
+export type CutoverState = { error?: string; saved?: string } | undefined;
+/** Corte do CRM: o K3G Finance passa a ser a fonte dos clientes (ADR-043). Só diretoria; exige a frase «CORTE». */
+export async function cutoverAction(_: CutoverState, fd: FormData): Promise<CutoverState> {
+  try { const c = await ctx(); await performCutover(db, c.userId, c.companyId, { phrase: String(fd.get("phrase") ?? ""), acceptStale: fd.get("acceptStale") === "on" }); }
+  catch (e) { return { error: msg(e) }; }
+  revalidatePath("/integracoes"); revalidatePath("/clientes");
+  return { saved: `Corte feito. A partir de agora o K3G Finance é a fonte dos clientes (digite ${CUTOVER_PHRASE} só uma vez).` };
+}
+export async function queueUnlinkedAction(_: CutoverState): Promise<CutoverState> {
+  try { const c = await ctx(); const r = await queueUnlinkedCustomers(db, c.userId, c.companyId); revalidatePath("/integracoes"); return { saved: `${r.queued} cliente(s) na fila de envio ao CRM.` }; }
+  catch (e) { return { error: msg(e) }; }
+}
+export async function retryPushesAction(_: CutoverState): Promise<CutoverState> {
+  try { const c = await ctx(); const r = await retryFailedPushes(db, c.userId, c.companyId); revalidatePath("/integracoes"); return { saved: `${r.retried} pedido(s) voltaram para a fila.` }; }
+  catch (e) { return { error: msg(e) }; }
 }
 
 export type CoraState = { error?: string; saved?: string } | undefined;

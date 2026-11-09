@@ -6,6 +6,7 @@ import { auditLog, companies, customerContacts, customers, vendorContacts, vendo
 import { parseCsv, toCsv } from "@/lib/csv";
 import { formatDocument, parseDocument } from "@/lib/validators/document";
 import { Forbidden, Invalid, requirePerm } from "@/modules/identity/service";
+import { enqueueCrmPush, isCutover } from "@/modules/integrations/crm/outbox";
 
 export type Kind = "cliente" | "fornecedor";
 export type Status = "ativo" | "suspenso" | "cancelado";
@@ -72,7 +73,7 @@ const modeLockKey = (companyId: string) => `cust-mode:${companyId}`;
 /** Escritas de cliente tomam a trava COMPARTILHADA; a troca de modo, a EXCLUSIVA. Assim, modo e gravação nunca se cruzam (sem TOCTOU).
  *  Ordem de travas no sistema: `crm-sync:` → `cust-mode:` (nunca o inverso). */
 export const lockModeShared = (db: DB, companyId: string) => db.execute(sql`select pg_advisory_xact_lock_shared(hashtext(${modeLockKey(companyId)}))`);
-const lockModeExclusive = (db: DB, companyId: string) => db.execute(sql`select pg_advisory_xact_lock(hashtext(${modeLockKey(companyId)}))`);
+export const lockModeExclusive = (db: DB, companyId: string) => db.execute(sql`select pg_advisory_xact_lock(hashtext(${modeLockKey(companyId)}))`);
 
 /** USO INTERNO, sem autorização: quem chama já validou empresa e permissão (ou está dentro de uma transação travada). */
 export async function readCustomerMode(db: DB, companyId: string): Promise<CustomerMode> {
@@ -96,6 +97,7 @@ export async function setCustomerMode(db: DB, actorId: string, companyId: string
     await lockModeExclusive(t, companyId); // espera as escritas em curso; novas escritas esperam esta troca
     const from = await readCustomerMode(t, companyId);
     if (from === mode) return;
+    if (mode === "crm" && (await isCutover(t, companyId))) throw new Invalid("O corte do CRM já foi feito: o K3G Finance é a fonte dos clientes e não volta a ser lido do CRM.");
     await t.update(companies).set({ customerMode: mode, updatedAt: new Date() }).where(eq(companies.id, companyId));
     await audit(t, companyId, actorId, "company.customer_mode_changed", { from, to: mode });
   });
@@ -118,6 +120,7 @@ export async function createParty(db: DB, actorId: string, companyId: string, in
       if (v.kind === "cliente" && (await readCustomerMode(tx as unknown as DB, companyId)) === "crm") throw new Invalid(CRM_MODE_MSG); // relido DENTRO da transação travada
       const [p] = await tx.insert(main).values({ companyId, createdBy: actorId, legalName: v.legalName, tradeName: v.tradeName, docType: v.docType, document: v.document, status: v.status ?? "ativo" }).returning();
       await audit(tx as unknown as DB, companyId, actorId, "party.created", { partyId: p.id, kind: v.kind });
+      if (v.kind === "cliente") await enqueueCrmPush(tx as unknown as DB, companyId, p.id, "create", p.status); // cliente novo → CRM (só depois do corte)
       return { ...p, kind: v.kind };
     });
   } catch (e) { if (pgCode(e) === "23505") throw new Invalid(DUP); throw e; }
@@ -144,8 +147,8 @@ export async function updateParty(db: DB, actorId: string, companyId: string, id
     return await db.transaction(async (tx) => {
       await lockModeShared(tx as unknown as DB, companyId);
       await assertNotCrmOwned(tx as unknown as DB, main, companyId, id);
+      const [cur] = await tx.select({ st: main.status }).from(main).where(and(eq(main.id, id), eq(main.companyId, companyId)));
       if (v.status === "ativo") { // voltar a ser faturável muda a cobrança futura: exige gerente ou diretoria
-        const [cur] = await tx.select({ st: main.status }).from(main).where(and(eq(main.id, id), eq(main.companyId, companyId)));
         if (cur && cur.st !== "ativo") {
           try { await requirePerm(tx as unknown as DB, actorId, companyId, "crm.reactivate"); }
           catch (e) { if (e instanceof Forbidden) throw new Forbidden("Reativar um cliente (voltar a faturar) exige gerente ou diretoria"); throw e; }
@@ -155,6 +158,7 @@ export async function updateParty(db: DB, actorId: string, companyId: string, id
         .set({ legalName: v.legalName, tradeName: v.tradeName ?? null, docType: v.docType, document: v.document, ...(v.status ? { status: v.status } : {}), updatedAt: new Date() })
         .where(and(eq(main.id, id), eq(main.companyId, companyId))).returning();
       await audit(tx as unknown as DB, companyId, actorId, "party.updated", { partyId: id, ...(v.status ? { status: v.status } : {}) });
+      if (kind === "cliente" && v.status && cur && cur.st !== v.status) await enqueueCrmPush(tx as unknown as DB, companyId, id, "status", v.status); // situação mudou → CRM (só depois do corte)
       return { ...p, kind };
     });
   } catch (e) { if (pgCode(e) === "23505") throw new Invalid(DUP); throw e; }
@@ -185,10 +189,11 @@ export async function setCustomerStatus(db: DB, actorId: string, companyId: stri
       try { await requirePerm(t, actorId, companyId, "crm.reactivate"); }
       catch (e) { if (e instanceof Forbidden) throw new Forbidden("Reativar um cliente (voltar a faturar) exige gerente ou diretoria"); throw e; }
     }
-    const lock = cur.source === "crm";
+    const lock = cur.source === "crm" && (await readCustomerMode(t, companyId)) === "crm"; // trava só enquanto o CRM ainda é lido; depois do corte a situação é só daqui
     if (cur.status === choice && cur.locked === lock) return { status: choice, locked: lock };
     await t.update(customers).set({ status: choice, statusLocked: lock, updatedAt: new Date() }).where(and(eq(customers.id, id), eq(customers.companyId, companyId)));
     await audit(t, companyId, actorId, "party.status_changed", { partyId: id, from: cur.status, to: choice, locked: lock });
+    if (cur.status !== choice) await enqueueCrmPush(t, companyId, id, "status", choice);
     return { status: choice, locked: lock };
   });
 }
@@ -345,6 +350,7 @@ export async function importParties(db: DB, actorId: string, companyId: string, 
         companyId, createdBy: actorId, legalName: r.legalName!, tradeName: r.tradeName,
         docType: parseDocument(r.document!)!.type, document: r.document!, status: r.situacao ?? "ativo", source: "csv",
       }).returning({ id: main.id });
+      if (r.kind === "cliente") await enqueueCrmPush(tx as unknown as DB, companyId, p.id, "create", r.situacao ?? "ativo");
       if (r.email || r.phone) await tx.insert(contacts).values({ companyId, partyId: p.id, name: "Financeiro", email: r.email, phone: r.phone, isFinancial: true });
     }
     await audit(tx as unknown as DB, companyId, actorId, "party.imported", { imported: ok.length, skipped: rows.length - ok.length, source: "csv" });

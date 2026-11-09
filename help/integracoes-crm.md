@@ -74,3 +74,14 @@ Credenciais e o que a integração com a Cora faz: veja `cora-boletos.md`.
 - Avisamos quando faltam **30 dias ou menos** para vencer.
 
 **Não serve:** certificado A3 (cartão/token), e-CPF (pessoa física) ou de outro CNPJ.
+
+---
+## Corte do CRM: o K3G Finance passa a ser a fonte dos clientes
+Quando a diretoria decide, o K3G Finance deixa de **ler** o CRM e passa a ser a **fonte da verdade** (cadastro, contratos e situação do cliente). Daí em diante o K3G Finance **escreve no CRM**: ajusta a situação (ativo, suspenso, cancelado) e cria o cliente novo.
+
+**Fazer o corte** (*Integrações → Corte do CRM*, só diretoria): confira a lista (conflitos em aberto = 0; última sincronização recente), digite **CORTE** e confirme. Se a última sincronização tem mais de 24 horas, sincronize de novo antes (ou marque que aceita perder o que mudou no CRM). **Não tem volta.** Depois do corte: todos os cadastros ficam editáveis aqui, a sincronização com o CRM deixa de existir e a origem não volta a «CRM».
+
+**Envio ao CRM** (*Integrações → Envio ao CRM*): toda troca de situação e todo cliente novo (cadastro ou CSV) entram numa **fila**; um robô envia ao CRM a cada minuto. Se o CRM estiver fora do ar, ou o acesso de escrita ainda não tiver sido liberado pela equipe do CRM, **nada se perde**: fica «na fila» e sai depois, sozinho. O que falhar aparece com o motivo e tem o botão **Tentar de novo**. «Enviar ao CRM os N clientes sem cadastro lá» coloca na fila quem ainda não existe no CRM. Na ficha do cliente aparece o estado do último envio.
+
+**Situação pelos contratos:** na ficha do cliente, quando a situação dos contratos pede outra situação (ex.: todos os contratos encerrados → «Cancelado»), aparece a sugestão com o botão **Aplicar**. A mudança também vai ao CRM. Suspenso e cancelado param de gerar cobrança; voltar a **Ativo** exige gerente ou diretoria.
+

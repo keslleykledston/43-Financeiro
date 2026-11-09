@@ -1,3 +1,4 @@
+import { isCutover } from "./outbox";
 import { createHash } from "node:crypto";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db";
@@ -44,6 +45,7 @@ export async function saveConnection(db: DB, actorId: string, companyId: string,
 
 /** Chave geral (env) + conexão habilitada da empresa. Padrão: desligado. */
 async function assertEnabled(db: DB, companyId: string, env: NodeJS.ProcessEnv = process.env) {
+  if (await isCutover(db, companyId)) throw new Invalid("O corte do CRM já foi feito: o K3G Finance não lê mais clientes do CRM.");
   if (env.CRM_SYNC_ENABLED !== "true") throw new Invalid("Sincronização com o CRM está desativada (chave geral)");
   if ((await readCustomerMode(db, companyId)) !== "crm") throw new Invalid(LOCAL_MODE_MSG);
   const c = await getConnection(db, companyId);

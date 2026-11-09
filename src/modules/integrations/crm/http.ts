@@ -7,7 +7,7 @@ export type HttpOpts = {
   fetchImpl?: typeof fetch; sleep?: (ms: number) => Promise<void>;
 };
 
-/** Cliente HTTP seguro e somente leitura (GET): HTTPS, token Bearer, timeout, retry com backoff, 429/Retry-After, teto de bytes, sem redirects. */
+/** Cliente HTTP seguro (GET para leitura; POST/PATCH só pelo envio ao CRM): HTTPS, token Bearer, timeout, retry com backoff, 429/Retry-After, teto de bytes, sem redirects. */
 export class CrmHttp {
   private f: typeof fetch; private sleep: (ms: number) => Promise<void>;
   constructor(private o: HttpOpts) {
@@ -23,15 +23,34 @@ export class CrmHttp {
   }
 
   async getJson(path: string, params: Record<string, string | undefined> = {}): Promise<Record<string, unknown>> {
-    const url = new URL(`${this.o.baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`);
+    const url = this.urlFor(path);
     for (const [k, v] of Object.entries(params)) if (v) url.searchParams.set(k, v);
-    const max = this.o.maxRetries ?? 3;
+    return this.call("GET", url, undefined, this.o.maxRetries ?? 3);
+  }
+
+  /** Monta a URL a partir da base + caminho RELATIVO e confere que o destino continua sendo o host/caminho base (o token nunca vai para outro lugar, nem por «//host», «..», «\\» ou «://»). */
+  private urlFor(path: string): URL {
+    const base = new URL(this.o.baseUrl.replace(/\/+$/, "") + "/");
+    const clean = path.replace(/^\/+/, "");
+    const segments = clean.split("/").map((x) => { try { return decodeURIComponent(x); } catch { return x; } });
+    if (path.startsWith("//") || /[\\\s]|:\/\/|[?#]/.test(path) || segments.some((x) => x === "." || x === "..")) throw new CrmError("Caminho do CRM inválido");
+    const url = new URL(clean, base);
+    if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname)) throw new CrmError("Caminho do CRM fora do endereço permitido");
+    return url;
+  }
+
+  /** Escrita (só usada pelo envio ao CRM, com token de ESCRITA próprio). `retry: false` = uma tentativa só (criar não pode se repetir sozinho). */
+  async sendJson(method: "POST" | "PATCH" | "PUT", path: string, body: unknown, o: { retry: boolean }): Promise<Record<string, unknown>> {
+    return this.call(method, this.urlFor(path), body, o.retry ? (this.o.maxRetries ?? 3) : 0);
+  }
+
+  private async call(method: string, url: URL, body: unknown, max: number): Promise<Record<string, unknown>> {
     let last = "falha desconhecida";
     for (let attempt = 0; attempt <= max; attempt++) {
       const ctl = new AbortController();
       const timer = setTimeout(() => ctl.abort(), this.o.timeoutMs ?? 10_000);
       try {
-        const r = await this.f(url, { headers: { authorization: `Bearer ${this.o.token}`, accept: "application/json" }, signal: ctl.signal, redirect: "error" }); // nunca segue redirect (evita SSRF/vazamento do token)
+        const r = await this.f(url, { method, headers: { authorization: `Bearer ${this.o.token}`, accept: "application/json", ...(body !== undefined ? { "content-type": "application/json" } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}), signal: ctl.signal, redirect: "error" }); // nunca segue redirect (evita SSRF/vazamento do token)
         if (r.status === 429 || r.status >= 500) {
           const ra = Number(r.headers.get("retry-after"));
           last = `CRM respondeu ${r.status}`;
@@ -40,10 +59,10 @@ export class CrmHttp {
         }
         if (r.status === 401 || r.status === 403) throw new CrmError(`CRM recusou o acesso (${r.status}). Verifique o token, as seções liberadas ao usuário e se o IP deste servidor está permitido.`);
         if (!r.ok) throw new CrmError(`CRM respondeu ${r.status}`); // outros 4xx: não adianta repetir
-        let body: unknown;
-        try { body = JSON.parse(await readLimited(r, MAX_BODY_BYTES)); } catch (e) { if (e instanceof CrmError) throw e; throw new CrmError("Resposta do CRM não é um JSON válido"); }
-        if (!body || typeof body !== "object" || Array.isArray(body)) throw new CrmError("Resposta do CRM fora do formato esperado");
-        return body as Record<string, unknown>;
+        let parsed: unknown;
+        try { const text = await readLimited(r, MAX_BODY_BYTES); parsed = text.trim() === "" && method !== "GET" ? {} : JSON.parse(text); } catch (e) { if (e instanceof CrmError) throw e; throw new CrmError("Resposta do CRM não é um JSON válido"); } // escrita pode responder 204/vazio
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new CrmError("Resposta do CRM fora do formato esperado");
+        return parsed as Record<string, unknown>;
       } catch (e) {
         if (e instanceof CrmError) throw e;
         last = (e as Error).name === "AbortError" ? "tempo esgotado ao consultar o CRM" : "erro de rede ao consultar o CRM"; // sem detalhes que possam conter segredos

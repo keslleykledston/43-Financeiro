@@ -55,3 +55,5 @@ Como o cliente é conhecido no dia a dia, quando isso é diferente do nome fanta
 Quem tem contrato com «NF junto do boleto» já vem marcado como «emite nota fiscal».
 
 **Cliente vindo do CRM:** razão social e CNPJ ficam só para leitura: a sincronização os sobrescreveria, corrija no CRM. A **situação** (Ativo, Suspenso, Cancelado) você define aqui: em *Editar → Situação → «Situação neste sistema»*. Ao salvar, a escolha **trava** a situação deste cliente e o CRM deixa de trocá-la (a tela mostra «definida aqui»). Para voltar a seguir o CRM, escolha «Seguir o CRM» na mesma caixa: a próxima sincronização decide. Voltar a **Ativo** (voltar a faturar) exige gerente ou diretoria, e toda troca fica no histórico. Suspenso e cancelado não geram nova cobrança. Nome aparente, emissão, endereço, textos, anotações e contatos são só daqui e podem ser editados.
+
+**Depois do corte do CRM:** o K3G Finance é a fonte: todos os clientes (inclusive os que vieram do CRM) são editáveis aqui, e a troca de situação e o cliente novo são enviados ao CRM (ver *Integração com o CRM*).

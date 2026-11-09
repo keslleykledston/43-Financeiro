@@ -120,6 +120,16 @@ test("E03b — CRM: ativar, prévia sem gravar, aplicar, idempotência, somente 
     await expect(page.getByRole("link", { name: /Nome do CRM Conflito/ })).toContainText("CRM");
   });
 
+  await test.step("corte do CRM: painel com a lista de conferência; sem a frase CORTE nada acontece (o corte em si é coberto nos testes de integração: não tem volta)", async () => {
+    await page.goto("/integracoes");
+    await expect(page.getByRole("heading", { name: "Corte do CRM" })).toBeVisible();
+    await expect(page.getByText("Conflitos de sincronização em aberto:")).toContainText("0");
+    await page.getByLabel("Para confirmar, digite CORTE").fill("nao");
+    await page.getByRole("button", { name: "Fazer o corte do CRM" }).click();
+    await expect(alerta(page)).toContainText("Digite CORTE");
+    await expect(page.getByText("Atual:")).toContainText("CRM"); // continua lendo do CRM
+  });
+
   await test.step("cancelado no CRM continua cliente (com situação, sem arquivar); renomear atualiza", async () => {
     await setCrm(page, { items: [
       crmItem("x1", "Rede Alfa Renomeada", A, { email: "ana@alfa.test" }), crmItem("x2", "Rede Beta CRM", B, { crmStatus: "CHURNED" }), crmItem("x3", "Nome do CRM Conflito", C),

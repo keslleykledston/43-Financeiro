@@ -5,7 +5,7 @@ import { requireContext } from "@/lib/security/context";
 import { db } from "@/lib/db";
 import { Forbidden, Invalid } from "@/modules/identity/service";
 import { addNote } from "@/modules/notes/service";
-import { addContact, createParty, importParties, previewImport, removeContact, setArchived, updateParty, type ImportRow } from "@/modules/crm/service";
+import { addContact, createParty, importParties, previewImport, removeContact, setArchived, setCustomerStatus, updateParty, type ImportRow, type Status } from "@/modules/crm/service";
 
 export type FormState = { error?: string; values?: Record<string, string> } | undefined;
 
@@ -43,6 +43,15 @@ export async function archiveAction(fd: FormData) {
   try { const c = await ctx(); await setArchived(db, c.userId, c.companyId, id, archived); } catch (e) { msg(e); }
   revalidatePath("/clientes");
   redirect(archived ? "/clientes" : `/clientes/${id}`);
+}
+
+/** Aplica a situação sugerida pelos contratos (botão da ficha do cliente). Quem pode reativar continua sendo gerente/diretoria. */
+export async function applySuggestionAction(fd: FormData) {
+  const id = String(fd.get("id") ?? ""), status = String(fd.get("status") ?? "") as Status;
+  let erro = "";
+  try { const c = await ctx(); await setCustomerStatus(db, c.userId, c.companyId, id, status); } catch (e) { erro = msg(e); }
+  revalidatePath(`/clientes/${id}`); revalidatePath("/clientes");
+  redirect(erro ? `/clientes/${id}?erro=${encodeURIComponent(erro)}` : `/clientes/${id}?salvo=1`);
 }
 
 export async function addContactAction(partyId: string, _: FormState, fd: FormData): Promise<FormState> {

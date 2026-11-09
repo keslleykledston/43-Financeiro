@@ -10,6 +10,7 @@ async function main() {
   const { tickAll } = await import("../src/modules/messaging/service");
   const { tickBilling } = await import("../src/modules/billing/automation");
   const { tickCoraInvoices } = await import("../src/modules/receivables/cora-tick");
+  const { processOutbox } = await import("../src/modules/integrations/crm/writeback");
   const { applyDueAmendments } = await import("../src/modules/contracts/service");
   const { syncAllAuto } = await import("../src/modules/issuance/sync");
   const { processWebhookEvents } = await import("../src/modules/issuance/webhooks");
@@ -33,6 +34,10 @@ async function main() {
       const r = await tickCoraInvoices(db);
       if (r.refreshed + r.imported + r.errors > 0) log({ event: "scheduler.cora_invoices", ...r });
     } catch (e) { log({ event: "scheduler.cora_invoices_error", kind: (e as Error).name }); }
+    try { // corte do CRM (ADR-043): envia ao CRM as mudanças de situação e clientes novos (desligado sem CRM_WRITEBACK_ENABLED + CRM_WRITE_TOKEN; a fila só acumula)
+      const o = await processOutbox(db);
+      if (o.sent + o.failed + o.retry + o.waiting > 0) log({ event: "scheduler.crm_writeback", sent: o.sent, failed: o.failed, retry: o.retry, waiting: o.waiting });
+    } catch (e) { log({ event: "scheduler.crm_writeback_error", kind: (e as Error).name }); }
     try { const w = await processWebhookEvents(db); if (w.processed + w.ignored + w.errors > 0) log({ event: "scheduler.cora_webhooks", ...w }); } catch (e) { log({ event: "scheduler.cora_webhooks_error", kind: (e as Error).name }); }
     try { const n = await processPendingInbound(db); if (n > 0) log({ event: "scheduler.whatsapp_inbound", pending: n }); } catch (e) { log({ event: "scheduler.whatsapp_inbound_error", kind: (e as Error).name }); } // respostas do WhatsApp que ficaram pendentes (ex.: WAHA fora do ar na hora)
     try { const w = await runWhatsappAutomation(db); const t = w.reduce((a, c) => ({ queued: a.queued + c.queued, sent: a.sent + c.sent, waiting: a.waiting + c.waiting, failed: a.failed + c.failed, stale: a.stale + c.stale }), { queued: 0, sent: 0, waiting: 0, failed: 0, stale: 0 }); if (t.queued + t.sent + t.failed + t.stale > 0) log({ event: "scheduler.whatsapp_regua", companies: w.length, ...t }); } catch (e) { log({ event: "scheduler.whatsapp_regua_error", kind: (e as Error).name }); } // régua automática (desligada por padrão: chave do servidor + empresa + régua)
